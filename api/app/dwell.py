@@ -47,8 +47,10 @@ def parse_report(raw: bytes) -> list[dict]:
             m = re.match(r"^\s*([\d.]+)\s*,\s*([\d.]+)", coords)
             full = str(r.get("Назва клієнта") or "")
             name, _, addr_in_name = full.partition(" / ")
-            addr_col = r.get("Адрес клієнта")
-            address = (str(addr_col).strip() if addr_col is not None and str(addr_col) != "nan" and str(addr_col).strip()
+            # приоритет: колонка "Адреса" (заполнена), иначе адрес из имени после "/"
+            addr_col = r.get("Адреса")
+            address = (str(addr_col).strip()
+                       if addr_col is not None and str(addr_col) not in ("nan", "") and str(addr_col).strip()
                        else addr_in_name.strip())
             start = str(r.get("Початок стоянки") or "")
             hm = re.search(r"(\d{2}):\d{2}:\d{2}$", start.strip())

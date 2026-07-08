@@ -307,6 +307,8 @@ async def plan(
     depot_depart: str = Query("09:00"),      # выезд со склада (п.7)
     depot_return: str = Query("16:00"),      # возврат (п.7)
     use_zones: bool = Query(False),          # учитывать геозоны водителей
+    zone_penalty: int = Query(20),           # мягкость зон: штраф хв за чужую точку; >=240 = жестко
+    balance: str = Query("soft"),            # off | soft | hard — выравнивание машин
     time_limit: int = 15,
 ):
     depart_m = parse_hhmm(depot_depart, 9 * 60)
@@ -390,7 +392,10 @@ async def plan(
                 zname = next(z["name"] for z in zrows if z["id"] == zid)
                 zone_stats[zname] = zone_stats.get(zname, 0) + 1
 
-    routes_idx = solver.solve(stops, trucks, durations, time_limit, allowed)
+    span = {"off": 0, "soft": 10, "hard": 100}.get(balance, 10)
+    zpen = None if (not use_zones or zone_penalty >= 240) else max(1, zone_penalty)
+    routes_idx = solver.solve(stops, trucks, durations, time_limit, allowed,
+                              zone_penalty_min=zpen, span_cost=span)
     if routes_idx is None:
         raise HTTPException(422, "Рішення не знайдено — перевір вікна/ліміти")
 

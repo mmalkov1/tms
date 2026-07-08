@@ -30,6 +30,8 @@ def solve(
     durations: list[list[int]],   # секунды, узел 0 = склад, далее stops по порядку
     time_limit_s: int = 15,
     allowed_vehicles: list[list[int]] | None = None,  # per stop: индексы машин (геозоны)
+    zone_penalty_min: int | None = None,  # None = жесткие зоны; N = мягкие, штраф N мин за чужую
+    span_cost: int = 0,                   # баланс: штраф за разброс длительности машин
 ) -> list[list[int]] | None:
     """Возвращает по каждой машине список индексов stops (0-based) в порядке объезда."""
     n = len(stops) + 1  # + депо
@@ -45,11 +47,34 @@ def solve(
         return travel + service
 
     tcb = routing.RegisterTransitCallback(time_cb)
-    routing.SetArcCostEvaluatorOfAllVehicles(tcb)
+
+    # Мягкие зоны: штраф уходит в СТОИМОСТЬ per-vehicle, но НЕ в размерность времени,
+    # чтобы ETA оставались физическим временем без виртуальных минут.
+    if allowed_vehicles and zone_penalty_min is not None:
+        pen = int(zone_penalty_min)
+
+        def make_cost(v):
+            def cb(fi, ti):
+                base = time_cb(fi, ti)
+                f = mgr.IndexToNode(fi)
+                if f > 0:
+                    allowed = allowed_vehicles[f - 1]
+                    if allowed is not None and v not in allowed:
+                        return base + pen
+                return base
+            return cb
+
+        for v in range(k):
+            routing.SetArcCostEvaluatorOfVehicle(routing.RegisterTransitCallback(make_cost(v)), v)
+    else:
+        routing.SetArcCostEvaluatorOfAllVehicles(tcb)
 
     horizon = 24 * 60
     routing.AddDimension(tcb, horizon, horizon, False, "Time")
     time_dim = routing.GetDimensionOrDie("Time")
+    if span_cost:
+        # выравнивание машин: штраф за (макс. длительность - мин. длительность)
+        time_dim.SetGlobalSpanCostCoefficient(int(span_cost))
 
     for i, s in enumerate(stops):
         idx = mgr.NodeToIndex(i + 1)
@@ -98,7 +123,7 @@ def solve(
     # геозоны: точку могут обслуживать только машины разрешенных зон.
     # Домен VehicleVar: разрешенные машины + (-1) = "точка не обслужена" (уйдет в буфер
     # через дисжанкцию, а не сделает задачу неразрешимой).
-    if allowed_vehicles:
+    if allowed_vehicles and zone_penalty_min is None:
         for i, allowed in enumerate(allowed_vehicles):
             if allowed is not None and len(allowed) < k:
                 routing.VehicleVar(mgr.NodeToIndex(i + 1)).SetValues([-1] + [int(a) for a in allowed])

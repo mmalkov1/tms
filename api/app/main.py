@@ -7,7 +7,7 @@ from fastapi import FastAPI, File, HTTPException, Query, UploadFile
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import geo, geocoder, importer, osrm, solver
+from . import dwell, geo, geocoder, importer, osrm, solver
 
 DB_DSN = os.getenv("DATABASE_URL", "postgresql://tms:tms@db:5432/tms")
 ROUTE_COLORS = ["#E82A2C", "#00356B", "#2E8B57", "#B8860B", "#8B008B", "#FF6347",
@@ -174,6 +174,29 @@ async def deactivate_vehicle(vehicle_id: int):
     return {"ok": True}
 
 
+# ---------- нормативы простоя ----------
+
+@app.get("/api/service-stats")
+async def service_stats():
+    rows = await pool.fetch("SELECT * FROM client_service_stats ORDER BY visits DESC")
+    return [dict(r) for r in rows]
+
+
+@app.post("/api/service-stats/import")
+async def import_service_stats(file: UploadFile = File(...)):
+    """Обновление нормативов свежим Cars_report.csv (полный пересчет по файлу)."""
+    stats = dwell.aggregate(dwell.parse_report(await file.read()))
+    for st_ in stats:
+        await pool.execute("""
+            INSERT INTO client_service_stats VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,now())
+            ON CONFLICT (client_key, addr_key) DO UPDATE SET visits=EXCLUDED.visits,
+                address=EXCLUDED.address, lat=EXCLUDED.lat, lon=EXCLUDED.lon,
+                median_min=EXCLUDED.median_min, p80_min=EXCLUDED.p80_min, updated_at=now()""",
+            st_["client_key"], st_["addr_key"], st_["client_name"], st_["address"],
+            st_["lat"], st_["lon"], st_["visits"], st_["median_min"], st_["p80_min"])
+    return {"rows": len(stats)}
+
+
 # ---------- геозоны ----------
 
 @app.post("/api/geozones/import")
@@ -279,7 +302,8 @@ async def plan(
     project_id: int = Query(...),
     plan_date: date = Query(...),
     vehicle_ids: str = Query(None),          # "1,2,5" — выбор машин (п.1)
-    service_min: int = Query(None),          # простой на точке, перекрывает всем (п.2)
+    service_min: int = Query(None),          # простой на точке (ручной / fallback)
+    service_source: str = Query("manual"),   # manual | hist_med | hist_p80
     depot_depart: str = Query("09:00"),      # выезд со склада (п.7)
     depot_return: str = Query("16:00"),      # возврат (п.7)
     use_zones: bool = Query(False),          # учитывать геозоны водителей
@@ -300,7 +324,19 @@ async def plan(
     if not vrows:
         raise HTTPException(400, "Не обрано жодної машини")
 
-    if service_min:  # п.2: фиксируем в заявках, чтобы ручной пересчет был консистентен
+    # простой: ручной для всех ИЛИ персональный из истории по клиент+адресу
+    fallback = service_min or 15
+    if service_source in ("hist_med", "hist_p80"):
+        srows = await pool.fetch("SELECT * FROM client_service_stats")
+        by_client = {}
+        for r in srows:
+            by_client.setdefault(r["client_key"], []).append(dict(r))
+        ords = await pool.fetch("SELECT id, client, lat, lon FROM orders WHERE project_id=$1", project_id)
+        for o in ords:
+            val = dwell.pick_service_min(by_client, o["client"], o["lat"], o["lon"],
+                                         service_source, fallback)
+            await pool.execute("UPDATE orders SET service_min=$1 WHERE id=$2", val, o["id"])
+    elif service_min:
         await pool.execute("UPDATE orders SET service_min=$1 WHERE project_id=$2", service_min, project_id)
 
     orows = await pool.fetch(
@@ -316,7 +352,7 @@ async def plan(
         order_id=i + 1,
         tw_from=t2m(o["tw_from"], 8 * 60),
         tw_to=t2m(o["tw_to"], 20 * 60),
-        service_min=service_min or o["service_min"],
+        service_min=o["service_min"],
         weight=float(o["weight_kg"] or 0),
         volume=float(o["volume_m3"] or 0),
         kind=o["kind"],

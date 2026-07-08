@@ -84,7 +84,11 @@
   <button class="sec" onclick="doGeocode()">Геокодинг</button>
   <label>Виїзд <input type="time" id="depDepart" value="09:00" style="width:80px"></label>
   <label>Повернення <input type="time" id="depReturn" value="16:00" style="width:80px"></label>
-  <label>Простій, хв <input type="number" id="svcMin" value="15" min="1" max="120" style="width:52px"></label>
+  <label>Простій <select id="svcSrc" style="width:150px">
+    <option value="hist_med" selected>Історія · медіана</option>
+    <option value="hist_p80">Історія · p80 (запас)</option>
+    <option value="manual">Вручну для всіх</option>
+  </select> <input type="number" id="svcMin" value="15" min="1" max="120" style="width:52px" title="Вручну / для клієнтів без історії"></label>
   <button class="sec" id="zonesBtn" onclick="toggleZonesLayer()">Зони на карті</button>
   <button class="sec" id="vehBtn" onclick="openVehDlg()">Авто: 0</button>
   <button onclick="doPlan(false)">Розрахувати</button>
@@ -352,7 +356,7 @@ async function doPlan(useZones) {
   const p = new URLSearchParams({
     project_id: curProject(),
     plan_date: $('planDate').value, vehicle_ids: ids.join(','),
-    service_min: $('svcMin').value, use_zones: !!useZones,
+    service_min: $('svcMin').value, service_source: $('svcSrc').value, use_zones: !!useZones,
     depot_depart: $('depDepart').value, depot_return: $('depReturn').value });
   const r = await fetch(`/api/plan?${p}`, {method:'POST'});
   if (!r.ok) { st('Помилка: ' + ((await r.json()).detail || r.status)); return; }

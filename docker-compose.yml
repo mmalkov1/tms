@@ -1,0 +1,37 @@
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: tms
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-tms}
+      POSTGRES_DB: tms
+    volumes:
+      - tms_pgdata:/var/lib/postgresql/data
+      - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql
+    restart: unless-stopped
+
+  osrm:
+    image: ghcr.io/project-osrm/osrm-backend:latest
+    command: osrm-routed --algorithm mld /data/ukraine-latest.osrm
+    volumes:
+      - ./osrm:/data
+    restart: unless-stopped
+
+  api:
+    build: ./api
+    environment:
+      DATABASE_URL: postgresql://tms:${DB_PASSWORD:-tms}@db:5432/tms
+      OSRM_URL: http://osrm:5000
+      VISICOM_API_KEY: ${VISICOM_API_KEY:-}
+    depends_on: [db, osrm]
+    restart: unless-stopped
+    networks:
+      - default
+      - n8n_default
+
+volumes:
+  tms_pgdata:
+
+networks:
+  n8n_default:
+    external: true

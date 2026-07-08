@@ -1,0 +1,602 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+<meta charset="utf-8">
+<title>TMS · Культтовари Глобал</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<style>
+  :root { --navy:#00356B; --red:#E82A2C; --cream:#EFEEEC; }
+  * { box-sizing:border-box; margin:0; }
+  body { font-family:Manrope,system-ui,sans-serif; background:var(--cream); height:100vh; display:flex; flex-direction:column; }
+  header { background:var(--navy); color:#fff; padding:8px 16px; display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
+  header h1 { font-size:15px; margin-right:6px; }
+  header input, header select, header button { padding:5px 9px; border:none; border-radius:4px; font:inherit; font-size:13px; }
+  header button { background:var(--red); color:#fff; cursor:pointer; font-weight:600; }
+  header button.sec { background:#fff; color:var(--navy); }
+  header label { font-size:12px; display:flex; align-items:center; gap:4px; }
+  dialog { border:none; border-radius:8px; padding:0; max-width:760px; width:92%; box-shadow:0 8px 40px rgba(0,0,0,.3); }
+  dialog::backdrop { background:rgba(0,20,50,.45); }
+  .dlg-head { background:var(--navy); color:#fff; padding:10px 16px; font-weight:700; display:flex; justify-content:space-between; }
+  .dlg-head span:last-child { cursor:pointer; }
+  .dlg-body { padding:12px 16px; max-height:70vh; overflow:auto; }
+  .vtable { width:100%; border-collapse:collapse; font-size:12.5px; }
+  .vtable th, .vtable td { border:1px solid #ddd; padding:5px 7px; }
+  .vtable th { background:var(--cream); color:var(--navy); }
+  .vtable input[type=text], .vtable input[type=number] { width:100%; border:1px solid #ccc; border-radius:3px; padding:3px 5px; font:inherit; }
+  .vtable input[type=number] { width:76px; }
+  .vtable .act { cursor:pointer; text-align:center; }
+  .dlg-foot { padding:10px 16px; border-top:1px solid #eee; display:flex; justify-content:flex-end; gap:8px; }
+  .dlg-foot button { padding:6px 14px; border:none; border-radius:4px; cursor:pointer; font-weight:600; }
+  .dlg-foot .pri { background:var(--red); color:#fff; }
+  #layout { flex:1; display:grid; grid-template-columns: 1fr 6px 560px; min-height:0; }
+  #map { height:100%; }
+  #panel { overflow:auto; padding:10px; background:#fff; }
+  .route-card { border:1px solid #ddd; border-radius:6px; margin-bottom:10px; overflow:hidden; }
+  .route-head { color:#fff; padding:6px 10px; font-size:12.5px; font-weight:700; display:flex; justify-content:space-between; gap:6px; flex-wrap:wrap; }
+  .route-head .over { background:#fff; color:var(--red); border-radius:3px; padding:0 5px; }
+  .route-head .del { cursor:pointer; opacity:.8; }
+  .stops { min-height:26px; padding:4px; }
+  .stop { background:#f7f7f7; border:1px solid #e2e2e2; border-radius:4px; padding:3px 6px; margin:3px 0;
+          font-size:11.5px; cursor:grab; display:grid; grid-template-columns: 20px 16px 1fr 70px 76px 120px 78px 14px; gap:5px; align-items:center; }
+  .stop.depot { background:#e8edf5; cursor:default; grid-template-columns: 20px 16px 1fr 76px 120px 78px; font-weight:600; }
+  .stop .cli { min-width:0; }
+  .stop .cli .addr { color:#888; font-size:10px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .stop .eta small { color:#888; font-weight:400; }
+  .route-head { cursor:pointer; user-select:none; }
+  .route-card.folded .stops { display:none; }
+  #dragbar { cursor:col-resize; background:#c9d3e0; width:6px; }
+  #dragbar:hover { background:var(--red); }
+  .stop.nogeo { border-color:var(--red); background:#fdf0f0; }
+  .stop.nogeo .cli::before { content:'⚠ без гео · '; color:var(--red); font-weight:700; }
+  .stop .edit { cursor:pointer; color:#888; } .stop .edit:hover { color:var(--navy); }
+  #editDlg .dlg-body label { display:block; margin:8px 0 2px; font-size:12px; color:var(--navy); font-weight:600; }
+  #editDlg input { width:100%; padding:6px; border:1px solid #ccc; border-radius:4px; font:inherit; }
+  .pulse { animation: pulse 0.8s ease-out 3; }
+  @keyframes pulse { 0%{transform:scale(1);opacity:1} 100%{transform:scale(3);opacity:0} }
+  .stop .cum { color:var(--navy); font-weight:700; white-space:nowrap; text-align:right; }
+  .stop:active { cursor:grabbing; }
+  .stop .seq { font-weight:700; color:var(--navy); }
+  .stop .kind { font-size:10px; padding:0 4px; border-radius:3px; color:#fff; text-align:center; }
+  .kind.pickup { background:#B8860B; } .kind.delivery { background:#2E8B57; } .kind.depot { background:var(--navy); }
+  .stop .wv { color:#555; white-space:nowrap; text-align:right; }
+  .stop .eta { color:#333; white-space:nowrap; font-weight:600; }
+  .stop .rm { cursor:pointer; color:#bbb; font-weight:700; } .stop .rm:hover { color:var(--red); }
+  /* п.6: шкала 08:00-18:00 */
+  .tl { position:relative; height:14px; background:#eee; border-radius:2px; overflow:hidden; }
+  .tl .win { position:absolute; top:0; bottom:0; background:#d9c9ee; }
+  .tl .visit { position:absolute; top:0; bottom:0; background:var(--red); min-width:2px; }
+  .sortable-ghost { opacity:.4; background:#dbe6f5; }
+  #unassigned .route-head { background:#777; }
+  #status { font-size:13px; color:#fff; opacity:.9; }
+  #addRouteBar { display:flex; gap:6px; margin-bottom:10px; }
+  #addRouteBar select { flex:1; padding:5px; }
+  #addRouteBar button { background:var(--navy); color:#fff; border:none; border-radius:4px; padding:5px 12px; cursor:pointer; }
+</style>
+</head>
+<body>
+<header>
+  <h1>TMS · Планування</h1>
+  <input type="date" id="planDate">
+  <select id="projSel" onchange="loadAll()" style="max-width:150px"></select>
+  <input type="file" id="file" accept=".xlsx" style="background:#fff;max-width:190px">
+  <button class="sec" onclick="doImport()">Імпорт</button>
+  <button class="sec" onclick="doGeocode()">Геокодинг</button>
+  <label>Виїзд <input type="time" id="depDepart" value="09:00" style="width:80px"></label>
+  <label>Повернення <input type="time" id="depReturn" value="16:00" style="width:80px"></label>
+  <label>Простій, хв <input type="number" id="svcMin" value="15" min="1" max="120" style="width:52px"></label>
+  <button class="sec" id="zonesBtn" onclick="toggleZonesLayer()">Зони на карті</button>
+  <button class="sec" id="vehBtn" onclick="openVehDlg()">Авто: 0</button>
+  <button onclick="doPlan(false)">Розрахувати</button>
+  <button onclick="doPlan(true)" style="background:#7b3fa0">Розрахувати по геозонах</button>
+  <span id="status"></span>
+</header>
+<div id="layout">
+  <div id="map"></div>
+  <div id="dragbar"></div>
+  <div id="panel">
+    <div id="addRouteBar">
+      <select id="addVehSel"></select>
+      <button onclick="addRoute()">+ Додати авто в день</button>
+    </div>
+    <div id="routesPanel"></div>
+    <div class="route-card" id="unassigned">
+      <div class="route-head">Нерозподілені заявки (буфер)</div>
+      <div class="stops" id="stops-un" data-route="0"></div>
+    </div>
+  </div>
+</div>
+<dialog id="impDlg" style="max-width:520px">
+  <div class="dlg-head"><span>Імпорт · на цю дату вже є проекти</span><span onclick="impDlg.close()">✕</span></div>
+  <div class="dlg-body" id="impOptions" style="font-size:13px"></div>
+  <div class="dlg-foot">
+    <button onclick="impDlg.close()">Скасувати</button>
+    <button class="pri" onclick="impConfirm()">Імпортувати</button>
+  </div>
+</dialog>
+<dialog id="editDlg" style="max-width:520px">
+  <div class="dlg-head"><span>Заявка · адреса і координати</span><span onclick="editDlg.close()">✕</span></div>
+  <div class="dlg-body">
+    <div id="edClient" style="font-weight:700"></div>
+    <label>Адреса</label><input id="edAddr">
+    <label>Широта (lat)</label><input id="edLat" type="number" step="0.000001">
+    <label>Довгота (lon)</label><input id="edLon" type="number" step="0.000001">
+    <div style="font-size:11px;color:#888;margin-top:6px">Координати можна взяти з Google Maps: ПКМ по точці → перший рядок</div>
+    <div id="edMsg" style="margin-top:8px;font-size:12px;font-weight:600"></div>
+  </div>
+  <div class="dlg-foot">
+    <button onclick="edGeocode()" style="background:var(--navy);color:#fff">Геокодувати адресу</button>
+    <button class="pri" onclick="edSave()">Зберегти</button>
+  </div>
+</dialog>
+<dialog id="vehDlg">
+  <div class="dlg-head"><span>Автопарк · вибір машин для розрахунку</span><span onclick="vehDlg.close()">✕</span></div>
+  <div class="dlg-body">
+    <table class="vtable">
+      <thead><tr><th>Розрах.</th><th>Назва</th><th>Водій</th><th>Вантаж., кг</th><th>Об'єм, м³</th><th>Геозони</th><th>Найм</th><th></th></tr></thead>
+      <tbody id="vehRows"></tbody>
+      <tfoot><tr>
+        <td></td>
+        <td><input type="text" id="nvName" placeholder="Газель АА1234ВВ"></td>
+        <td><input type="text" id="nvDriver" placeholder="ПІБ водія"></td>
+        <td><input type="number" id="nvW" value="1000"></td>
+        <td><input type="number" id="nvV" value="9" step="0.1"></td>
+        <td></td>
+        <td style="text-align:center"><input type="checkbox" id="nvHired"></td>
+        <td class="act" onclick="addVehicle()" title="Додати">➕</td>
+      </tr></tfoot>
+    </table>
+  </div>
+  <div class="dlg-foot">
+    <button onclick="vehDlg.close()">Закрити</button>
+    <button class="pri" onclick="saveVehSelection()">Застосувати вибір</button>
+  </div>
+</dialog>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://unpkg.com/@mapbox/polyline@1.2.1/src/polyline.js"></script>
+<script src="https://unpkg.com/sortablejs@1.15.2/Sortable.min.js"></script>
+<script>
+const map = L.map('map').setView([50.45, 30.52], 11);
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {attribution:'© OSM'}).addTo(map);
+let layers = L.layerGroup().addTo(map);
+const $ = id => document.getElementById(id);
+$('planDate').value = new Date(Date.now()+86400000).toISOString().slice(0,10);
+document.addEventListener('DOMContentLoaded', () =>
+  $('planDate').addEventListener('change', async () => { await loadProjects(); loadAll(); }));
+const st = m => $('status').textContent = m;
+const hm = t => t ? String(t).slice(0,5) : '';
+let vehicles = [];
+let projects = [];
+let pendingFile = null;
+
+function curProject() { return +$('projSel').value || null; }
+
+async function loadProjects(selectId) {
+  projects = await (await fetch(`/api/projects?plan_date=${$('planDate').value}`)).json();
+  $('projSel').innerHTML = projects.length
+    ? projects.map(p=>`<option value="${p.id}">${p.name} (${p.orders_count} заяв.)</option>`).join('')
+    : '<option value="">— немає проектів —</option>';
+  if (selectId) $('projSel').value = selectId;
+  else if (projects.length) $('projSel').value = projects[projects.length-1].id;
+}
+let foldState = {};   // route_id -> свернут ли список
+let geozones = [];
+let zonesLayer = null;
+let zonesVisible = false;
+const ZONE_COLORS = ['#7b3fa0','#1E90FF','#2E8B57','#B8860B'];
+
+async function loadZones() {
+  geozones = await (await fetch('/api/geozones')).json();
+  if (zonesLayer) { map.removeLayer(zonesLayer); zonesLayer = null; }
+  zonesLayer = L.layerGroup(geozones.map((z,i) =>
+    L.polygon(z.points, {color:ZONE_COLORS[i%ZONE_COLORS.length], weight:2, fillOpacity:.07})
+     .bindTooltip(z.name, {sticky:true})));
+  if (zonesVisible) zonesLayer.addTo(map);
+}
+
+function toggleZonesLayer() {
+  zonesVisible = !zonesVisible;
+  if (!zonesLayer) return;
+  zonesVisible ? zonesLayer.addTo(map) : map.removeLayer(zonesLayer);
+  $('zonesBtn').style.opacity = zonesVisible ? 1 : .7;
+}
+
+async function saveDriverZones(driverId, el) {
+  const ids = [...el.closest('td').querySelectorAll('input:checked')].map(c=>+c.value);
+  await fetch(`/api/drivers/${driverId}/zones`, {method:'PUT',
+    headers:{'Content-Type':'application/json'}, body: JSON.stringify({zone_ids: ids})});
+  st('Зони водія збережено');
+}
+
+// --- шкала 08:00–18:00 (п.6) ---
+function collapseStops(stops) {   // подряд идущие с одним клиент+адрес = одна точка
+  const g = [];
+  for (const s of stops) {
+    const last = g[g.length-1];
+    if (last && last.client===s.client && last.address===s.address) last.items.push(s);
+    else g.push({client:s.client, address:s.address, lat:s.lat, lon:s.lon, items:[s]});
+  }
+  return g;
+}
+function tipHtml(client, address, w, v, extra='') {
+  return `<b>${client}</b><br>${address||''}<br>${w.toFixed(1)} кг · ${v.toFixed(3)} м³${extra}`;
+}
+const TL0 = 8*60, TL1 = 18*60;
+const toMin = t => { if(!t) return null; const [h,m]=String(t).split(':'); return +h*60 + +m; };
+const pct = m => Math.max(0, Math.min(100, (m - TL0) / (TL1 - TL0) * 100));
+function tlHtml(twF, twT, eta, etd) {
+  const wF = toMin(twF), wT = toMin(twT), a = toMin(eta), d = toMin(etd);
+  let h = '<div class="tl">';
+  if (wF != null && wT != null)
+    h += `<div class="win" style="left:${pct(wF)}%;width:${pct(wT)-pct(wF)}%"></div>`;
+  if (a != null)
+    h += `<div class="visit" style="left:${pct(a)}%;width:${Math.max(1.5, pct(d??a+15)-pct(a))}%"></div>`;
+  return h + '</div>';
+}
+
+let selectedVeh = new Set();
+
+async function loadVehicles(keepSel = false) {
+  vehicles = await (await fetch('/api/vehicles')).json();
+  if (!keepSel) selectedVeh = new Set(vehicles.filter(v=>!v.is_hired).map(v=>v.id));
+  selectedVeh = new Set([...selectedVeh].filter(id => vehicles.some(v=>v.id===id)));
+  $('vehBtn').textContent = `Авто: ${selectedVeh.size}`;
+  $('addVehSel').innerHTML = vehicles.map(v =>
+    `<option value="${v.id}">${v.name} · ${v.driver_name||'без водія'} · ${v.max_weight_kg} кг / ${v.max_volume_m3} м³</option>`).join('');
+}
+
+async function openVehDlg() {
+  const dz = {};
+  await Promise.all(vehicles.filter(v=>v.driver_id).map(async v => {
+    try { dz[v.driver_id] = await (await fetch(`/api/drivers/${v.driver_id}/zones`)).json(); }
+    catch(e) { dz[v.driver_id] = []; }
+  }));
+  $('vehRows').innerHTML = vehicles.map(v => `<tr data-vid="${v.id}">
+    <td style="text-align:center"><input type="checkbox" class="vsel" value="${v.id}" ${selectedVeh.has(v.id)?'checked':''}></td>
+    <td><input type="text" class="vname" value="${v.name}"></td>
+    <td>${v.driver_name||'—'}</td>
+    <td><input type="number" class="vw" value="${v.max_weight_kg}"></td>
+    <td><input type="number" class="vv" value="${v.max_volume_m3}" step="0.1"></td>
+    <td style="font-size:11px">${v.driver_id ? geozones.map(z =>
+      `<label style="display:block;white-space:nowrap"><input type="checkbox" value="${z.id}"
+        ${ (dz[v.driver_id]||[]).includes(z.id)?'checked':'' }
+        onchange="saveDriverZones(${v.driver_id}, this)"> ${z.name}</label>`).join('') : '—'}
+      ${v.driver_id && geozones.length ? '<i style="color:#888">пусто = всі зони</i>' : ''}</td>
+    <td style="text-align:center"><input type="checkbox" class="vhired" ${v.is_hired?'checked':''}></td>
+    <td class="act" onclick="rowActions(this, ${v.id})" title="Зберегти зміни / 2й клік — деактивувати">💾</td>
+  </tr>`).join('');
+  $('vehDlg').showModal();
+}
+
+async function rowActions(el, vid) {
+  const tr = el.closest('tr');
+  if (el.dataset.armed) {   // второй клик = деактивация
+    await fetch(`/api/vehicles/${vid}`, {method:'DELETE'});
+    st('Машину деактивовано'); await loadVehicles(true); openVehDlg(); return;
+  }
+  const body = { name: tr.querySelector('.vname').value,
+    max_weight_kg: +tr.querySelector('.vw').value,
+    max_volume_m3: +tr.querySelector('.vv').value,
+    is_hired: tr.querySelector('.vhired').checked };
+  await fetch(`/api/vehicles/${vid}`, {method:'PATCH',
+    headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
+  el.textContent='🗑'; el.dataset.armed='1'; st('Збережено. Ще клік по 🗑 — деактивувати');
+  setTimeout(()=>{el.textContent='💾'; delete el.dataset.armed;}, 3000);
+}
+
+async function addVehicle() {
+  if (!$('nvName').value.trim()) return st('Вкажи назву авто');
+  const r = await fetch('/api/vehicles', {method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({ name: $('nvName').value.trim(),
+      driver_name: $('nvDriver').value.trim() || null,
+      max_weight_kg: +$('nvW').value, max_volume_m3: +$('nvV').value,
+      is_hired: $('nvHired').checked })});
+  const j = await r.json();
+  selectedVeh.add(j.vehicle_id);
+  $('nvName').value=''; $('nvDriver').value='';
+  await loadVehicles(true); openVehDlg();
+}
+
+function saveVehSelection() {
+  selectedVeh = new Set([...document.querySelectorAll('.vsel:checked')].map(c=>+c.value));
+  $('vehBtn').textContent = `Авто: ${selectedVeh.size}`;
+  $('vehDlg').close();
+}
+
+async function doImport() {
+  const f = $('file').files[0];
+  if (!f) return st('Обери файл');
+  pendingFile = f;
+  await loadProjects();
+  if (!projects.length) return runImport(null);   // первый проект дня
+  $('impOptions').innerHTML =
+    projects.map(p=>`<label style="display:block;margin:6px 0">
+      <input type="radio" name="impMode" value="${p.id}">
+      Оновити <b>${p.name}</b> (${p.orders_count} заяв., ${p.routes_count} маршр.) — додати нові заявки</label>`).join('') +
+    `<label style="display:block;margin:6px 0">
+      <input type="radio" name="impMode" value="new" checked>
+      Створити <b>новий проект</b> планування</label>`;
+  $('impDlg').showModal();
+}
+
+async function impConfirm() {
+  const v = document.querySelector('input[name="impMode"]:checked').value;
+  $('impDlg').close();
+  runImport(v === 'new' ? null : +v);
+}
+
+async function runImport(projectId) {
+  const fd = new FormData(); fd.append('file', pendingFile);
+  st('Імпорт…');
+  const url = `/api/import?plan_date=${$('planDate').value}` + (projectId ? `&project_id=${projectId}` : '');
+  const j = await (await fetch(url, {method:'POST', body:fd})).json();
+  st(`Заявок: ${j.parsed} (нових ${j.inserted}), без координат: ${j.without_coords}`);
+  await loadProjects(j.project_id);
+  loadAll();
+}
+
+async function doGeocode() {
+  st('Геокодинг…');
+  if (!curProject()) return st('Немає проекту');
+  const j = await (await fetch(`/api/geocode?project_id=${curProject()}`, {method:'POST'})).json();
+  st(`Геокодовано: ${j.geocoded}, не знайдено: ${j.failed.length}`);
+  if (j.failed.length) console.warn('Не знайдено:', j.failed);
+  loadAll();
+}
+
+async function doPlan(useZones) {
+  const ids = [...selectedVeh];
+  if (!ids.length) return st('Обери машини (кнопка «Авто»)');
+  st('Розрахунок…');
+  if (!curProject()) return st('Немає проекту — імпортуй заявки');
+  const p = new URLSearchParams({
+    project_id: curProject(),
+    plan_date: $('planDate').value, vehicle_ids: ids.join(','),
+    service_min: $('svcMin').value, use_zones: !!useZones,
+    depot_depart: $('depDepart').value, depot_return: $('depReturn').value });
+  const r = await fetch(`/api/plan?${p}`, {method:'POST'});
+  if (!r.ok) { st('Помилка: ' + ((await r.json()).detail || r.status)); return; }
+  const j = await r.json();
+  const zs = j.zone_stats && Object.keys(j.zone_stats).length
+    ? ' · ' + Object.entries(j.zone_stats).map(([k,v])=>`${k}: ${v}`).join(', ') : '';
+  st(`Маршрутів: ${j.routes.length}, у буфері: ${j.dropped_orders.length}${zs}`);
+  loadAll();
+}
+
+async function addRoute() {   // п.4
+  if (!curProject()) return st('Немає проекту');
+  const r = await fetch('/api/routes', {method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({plan_date: $('planDate').value, project_id: curProject(),
+                          vehicle_id: +$('addVehSel').value,
+                          depot_depart: $('depDepart').value})});
+  if (!r.ok) { st('Помилка: '+(await r.json()).detail); return; }
+  loadAll();
+}
+
+async function delRoute(id) {
+  const r = await fetch(`/api/routes/${id}`, {method:'DELETE'});
+  if (!r.ok) st('⚠ ' + (await r.json()).detail); else loadAll();
+}
+
+async function removeStop(rid, oid) {   // п.3
+  st('Знімаю точку…');
+  await fetch(`/api/routes/${rid}/stops/${oid}`, {method:'DELETE'});
+  st('Точка в буфері'); loadAll();
+}
+
+async function onDrop(evt) {
+  const ids = new Set([+evt.to.dataset.route, +evt.from.dataset.route]);
+  const calls = [];
+  for (const rid of ids) {
+    if (!rid) continue;
+    const list = [...document.querySelector(`[data-route="${rid}"]`).children]
+                 .filter(el => el.dataset.order).map(el => +el.dataset.order);
+    calls.push(fetch(`/api/routes/${rid}/stops`, {method:'PUT',
+      headers:{'Content-Type':'application/json'}, body: JSON.stringify({order_ids: list})
+    }).then(r=>r.json()));
+  }
+  st('Перерахунок…');
+  const res = await Promise.all(calls);
+  const warns = res.flatMap(r => r.warnings || []);
+  st(warns.length ? '⚠ ' + warns.join('; ') : 'Оновлено');
+  loadAll();
+}
+
+function stopEl(o, seq, eta, etd, routeId) {
+  const sign = o.kind==='pickup' ? '+' : '−';
+  const d = document.createElement('div');
+  d.className = 'stop'; d.dataset.order = o.order_id ?? o.id;
+  if (o.lat) { d.dataset.lat = o.lat; d.dataset.lon = o.lon; }
+  d.innerHTML = `<span class="seq">${seq ?? ''}</span>
+    <span class="kind ${o.kind}">${o.kind==='pickup'?'З':'Д'}</span>
+    <span class="cli">${o.client}<div class="addr" title="${o.address||''}">${o.address||''}</div></span>
+    <span class="wv">${sign}${(+o.weight_kg||0).toFixed(1)} кг<br>${sign}${(+o.volume_m3||0).toFixed(3)} м³</span>
+    <span class="cum">${o.cum_weight!=null ? o.cum_weight.toFixed(1)+' кг<br>'+o.cum_volume.toFixed(2)+' м³' : ''}</span>
+    ${tlHtml(o.tw_from, o.tw_to, eta, etd)}
+    <span class="eta">${eta ? hm(eta)+'&rarr;'+hm(etd)+'<br><small>простій '+dwellMin(eta,etd)+' хв</small>' : ''}</span>
+    ${routeId ? `<span class="rm" onclick="removeStop(${routeId},${o.order_id})" title="У буфер">✕</span>`
+              : `<span class="edit" title="Редагувати адресу/координати">✎</span>`}`;
+  d.addEventListener('dblclick', () => highlightPoint(d.dataset.lat, d.dataset.lon, o.client));
+  const ed = d.querySelector('.edit');
+  if (ed) ed.addEventListener('click', () => openEdit(o));
+  return d;
+}
+
+function dwellMin(a, b) {
+  const x = toMin(a), y = toMin(b);
+  return (x!=null && y!=null) ? Math.max(0, y-x) : '';
+}
+
+let edOrder = null;
+function openEdit(o) {
+  edOrder = o;
+  $('edClient').textContent = o.client;
+  $('edAddr').value = o.address || '';
+  $('edLat').value = o.lat ?? ''; $('edLon').value = o.lon ?? '';
+  $('edMsg').textContent = '';
+  $('editDlg').showModal();
+}
+async function edSave() {
+  const body = { address: $('edAddr').value || null,
+    lat: $('edLat').value ? +$('edLat').value : null,
+    lon: $('edLon').value ? +$('edLon').value : null };
+  await fetch(`/api/orders/${edOrder.id}`, {method:'PATCH',
+    headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
+  $('editDlg').close(); st('Збережено'); loadAll();
+}
+async function edGeocode() {
+  const msg = $('edMsg');
+  msg.style.color = '#00356B'; msg.textContent = 'Геокодинг… (до 10 сек — перебираю варіанти адреси)';
+  await fetch(`/api/orders/${edOrder.id}`, {method:'PATCH',
+    headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({address: $('edAddr').value || null})});
+  const r = await fetch(`/api/orders/${edOrder.id}/geocode`, {method:'POST'});
+  if (!r.ok) {
+    msg.style.color = '#E82A2C';
+    msg.textContent = '⚠ ' + ((await r.json()).detail || 'Помилка');
+    return;
+  }
+  const j = await r.json();
+  $('edLat').value = j.lat; $('edLon').value = j.lon;
+  msg.style.color = '#2E8B57';
+  msg.textContent = 'Знайдено — перевір точку і натисни «Зберегти»';
+}
+let hlMarker = null;
+function highlightPoint(lat, lon, name) {
+  if (!lat) return;
+  map.flyTo([+lat, +lon], Math.max(map.getZoom(), 14), {duration:.5});
+  if (hlMarker) layers.removeLayer(hlMarker);
+  hlMarker = L.circleMarker([+lat, +lon], {radius:18, color:'#E82A2C', weight:3, fill:false, className:'pulse'});
+  hlMarker.addTo(layers);
+  setTimeout(() => { if (hlMarker) { layers.removeLayer(hlMarker); hlMarker=null; } }, 2600);
+}
+
+function depotEl(name, kind, t, w, v) {
+  const d = document.createElement('div');
+  d.className = 'stop depot';
+  d.innerHTML = `<span class="seq">${kind==='out'?'▶':'◀'}</span>
+    <span class="kind depot">С</span>
+    <span>${name} · ${kind==='out'?'виїзд':'повернення'}</span>
+    <span class="cum">${w!=null ? (+w).toFixed(1)+' кг<br>'+(+v).toFixed(2)+' м³' : ''}</span>
+    ${tlHtml(null, null, t, t)}
+    <span class="eta">${hm(t)}</span>`;
+  return d;
+}
+
+async function loadAll() {
+  layers.clearLayers();
+  const pid = curProject();
+  if (!pid) { $('routesPanel').innerHTML=''; $('stops-un').innerHTML=''; return; }
+  const [orders, routes] = await Promise.all([
+    fetch(`/api/orders?project_id=${pid}`).then(r=>r.json()),
+    fetch(`/api/routes?project_id=${pid}`).then(r=>r.json()),
+  ]);
+
+  const routed = new Set(routes.flatMap(r => r.stops.map(s => s.order_id)));
+  orders.forEach(o => {
+    if (!o.lat || routed.has(o.id)) return;
+    L.circleMarker([o.lat, o.lon], {radius:6, color:'#E82A2C', fillOpacity:.8})
+      .bindTooltip(tipHtml(o.client, o.address, +o.weight_kg||0, +o.volume_m3||0,
+        `<br>${hm(o.tw_from)}–${hm(o.tw_to)}`), {sticky:true}).addTo(layers);
+  });
+  // (шаг 1) собираем все групповые маркеры всех маршрутов
+  const pins = [];
+  routes.forEach(r => {
+    if (r.geometry) L.polyline(polyline.decode(r.geometry), {color:r.color, weight:4, opacity:.8}).addTo(layers);
+    collapseStops(r.stops).forEach(g => {
+      const s0 = g.items[0], sN = g.items[g.items.length-1];
+      pins.push({
+        lat: g.lat, lon: g.lon, color: r.color,
+        label: g.items.length>1 ? `${s0.seq}-${sN.seq}` : `${s0.seq}`,
+        rounded: g.items.length>1,
+        tip: tipHtml(g.client, g.address,
+          g.items.reduce((a,s)=>a+(+s.weight_kg||0),0),
+          g.items.reduce((a,s)=>a+(+s.volume_m3||0),0),
+          `<br>ETA ${hm(s0.eta)} · ${r.vehicle_name}` +
+          (g.items.length>1 ? `<br>${g.items.length} завдань` : ''))
+      });
+    });
+  });
+  // (шаг 2) совпадающие координаты (один адрес у разных водителей / разорванные визиты)
+  //    разносим по окружности ~18 м, чтобы были видны оба номера
+  const byLL = {};
+  pins.forEach(p => {const k=p.lat.toFixed(6)+","+p.lon.toFixed(6); (byLL[k]=byLL[k]||[]).push(p);});
+  Object.values(byLL).forEach(group => {
+    if (group.length > 1) {
+      const R = 0.00016;
+      group.forEach((p, i) => {
+        const a = 2 * Math.PI * i / group.length;
+        p.lat += R * Math.cos(a); p.lon += R * Math.sin(a) * 1.6;
+      });
+    }
+    group.forEach(p => {
+      L.marker([p.lat, p.lon], {icon: L.divIcon({
+          html:`<div style="background:${p.color};color:#fff;border-radius:${p.rounded?'6px':'50%'};min-width:22px;height:22px;padding:0 3px;display:flex;align-items:center;justify-content:center;font-size:10.5px;font-weight:700;box-shadow:0 0 0 1.5px #fff">${p.label}</div>`,
+          iconSize:null})})
+        .bindTooltip(p.tip, {sticky:true}).addTo(layers);
+    });
+  });
+
+  const rp = $('routesPanel'); rp.innerHTML = '';
+  routes.forEach(r => {
+    // п.5: точка = уникальный клиент+адрес
+    const uniq = collapseStops(r.stops).length;
+    const wPct = r.max_weight_kg ? (r.peak_weight / r.max_weight_kg * 100) : 0;
+    const vPct = r.max_volume_m3 ? (r.peak_volume / r.max_volume_m3 * 100) : 0;
+    const over = wPct > 100 || vPct > 100;
+    const card = document.createElement('div'); card.className = 'route-card';
+    card.innerHTML = `<div class="route-head" style="background:${r.color}">
+      <span>${r.vehicle_name} · ${r.driver_name||'—'} ${r.stops.length?'':'<span class="del" onclick="delRoute('+r.id+')">🗑</span>'}</span>
+      <span>${uniq} точок (${r.stops.length} завд.) · ${r.total_km||0} км ·
+      пік ${(+r.peak_weight||0).toFixed(0)}/${(+r.max_weight_kg||0).toFixed(0)} кг (${wPct.toFixed(0)}%) ·
+      ${(+r.peak_volume||0).toFixed(2)}/${(+r.max_volume_m3||0).toFixed(1)} м³ (${vPct.toFixed(0)}%)
+      ${over?'<span class="over">ПЕРЕВАНТАЖЕННЯ</span>':''}</span></div>`;
+    const list = document.createElement('div');
+    list.className = 'stops'; list.dataset.route = r.id;
+    if (r.depart_time) list.appendChild(depotEl(r.depot_name, 'out', r.depart_time, r.start_weight, r.start_volume));
+    r.stops.forEach(s => list.appendChild(stopEl(s, s.seq, s.eta, s.etd, r.id)));
+    if (r.return_time && r.stops.length) {
+      const last = r.stops[r.stops.length-1];
+      list.appendChild(depotEl(r.depot_name, 'in', r.return_time, last.cum_weight, last.cum_volume));
+    }
+    card.querySelector('.route-head').addEventListener('click', e => {
+      if (e.target.closest('.del')) return;
+      card.classList.toggle('folded');
+      foldState[r.id] = card.classList.contains('folded');
+    });
+    if (foldState[r.id]) card.classList.add('folded');
+    card.appendChild(list); rp.appendChild(card);
+    new Sortable(list, {group:'stops', animation:120, onEnd: onDrop, filter:'.depot',
+                        onMove: e => !e.related.classList.contains('depot') || e.willInsertAfter===false});
+  });
+
+  const un = $('stops-un'); un.innerHTML = '';
+  orders.filter(o => !routed.has(o.id)).forEach(o => {
+    const el = stopEl(o);
+    if (!o.lat) el.classList.add('nogeo');
+    un.appendChild(el);
+  });
+  new Sortable(un, {group:'stops', animation:120, onEnd: onDrop, filter:'.nogeo'});
+}
+// перетаскивание границы панели
+(() => {
+  const bar = $('dragbar'), layout = $('layout');
+  let drag = false;
+  bar.addEventListener('mousedown', () => { drag = true; document.body.style.userSelect='none'; });
+  window.addEventListener('mouseup', () => { drag = false; document.body.style.userSelect=''; map.invalidateSize(); });
+  window.addEventListener('mousemove', e => {
+    if (!drag) return;
+    const w = Math.min(Math.max(window.innerWidth - e.clientX, 340), window.innerWidth - 300);
+    layout.style.gridTemplateColumns = `1fr 6px ${w}px`;
+  });
+})();
+
+(async () => {
+  try { await loadZones(); } catch(e) { console.warn('zones:', e); geozones = []; }
+  try { await loadVehicles(); } catch(e) { console.warn('vehicles:', e); }
+  try { await loadProjects(); } catch(e) { console.warn('projects:', e); }
+  loadAll();
+})();
+</script>
+</body>
+</html>

@@ -72,36 +72,40 @@
   #addRouteBar { display:flex; gap:6px; margin-bottom:10px; }
   #addRouteBar select { flex:1; padding:5px; }
   #addRouteBar button { background:var(--navy); color:#fff; border:none; border-radius:4px; padding:5px 12px; cursor:pointer; }
+  /* верхнє меню → модалка «Планування» */
+  #planDlg { max-width:640px; }
+  #planDlg .dlg-body { display:flex; flex-direction:column; gap:14px; }
+  .tool-block { border:1px solid #e3e3e3; border-radius:8px; padding:12px 14px; background:#fafbfc; }
+  .tool-block h3 { font-size:12px; text-transform:uppercase; letter-spacing:.04em; color:var(--navy); margin-bottom:10px; font-weight:800; }
+  .tool-row { display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
+  .tool-row label { font-size:12px; display:flex; align-items:center; gap:5px; color:#333; }
+  .tool-row input[type=time], .tool-row input[type=number], .tool-row select { padding:5px 8px; border:1px solid #ccc; border-radius:5px; font:inherit; font-size:13px; }
+  #planDlg button { padding:7px 13px; border:none; border-radius:6px; font:inherit; font-size:13px; font-weight:600; cursor:pointer; }
+  #planDlg button.sec { background:#fff; color:var(--navy); border:1px solid var(--navy); }
+  #planDlg button.pri { background:var(--red); color:#fff; }
+  #planDlg button.zones { background:#7b3fa0; color:#fff; }
+  /* сучасна зона завантаження файлу */
+  .dropzone { border:2px dashed #b7c2d4; border-radius:10px; padding:22px 16px; text-align:center; cursor:pointer;
+              background:#fff; transition:border-color .15s, background .15s; color:#5b6b82; }
+  .dropzone:hover, .dropzone.drag { border-color:var(--red); background:#fef6f6; color:var(--navy); }
+  .dropzone .dz-icon { font-size:26px; line-height:1; margin-bottom:6px; }
+  .dropzone .dz-main { font-size:13.5px; font-weight:700; color:var(--navy); }
+  .dropzone .dz-sub { font-size:11.5px; margin-top:3px; }
+  .dropzone.has-file { border-style:solid; border-color:#2E8B57; background:#f2fbf5; color:#2E8B57; }
+  /* маркери на карті — м'які краплі/кружечки з тінню, без білого квадрата */
+  .pin-wrap { width:28px; height:28px; }
+  .pin { width:28px; height:28px; background:var(--pc); color:#fff; display:flex; align-items:center; justify-content:center;
+         font:700 11px/1 Manrope,system-ui,sans-serif; box-shadow:0 2px 5px rgba(0,0,0,.35); border:1.5px solid rgba(255,255,255,.9); }
+  .pin span { display:block; }
+  .buf-dot { filter:drop-shadow(0 1px 2px rgba(0,0,0,.35)); }
 </style>
 </head>
 <body>
 <header>
   <h1>TMS · Планування</h1>
+  <button onclick="openPlanDlg()">Планування</button>
   <input type="date" id="planDate">
   <select id="projSel" onchange="loadAll()" style="max-width:150px"></select>
-  <input type="file" id="file" accept=".xlsx" style="background:#fff;max-width:190px">
-  <button class="sec" onclick="doImport()">Імпорт</button>
-  <button class="sec" onclick="doGeocode()">Геокодинг</button>
-  <label>Виїзд <input type="time" id="depDepart" value="09:00" style="width:80px"></label>
-  <label>Повернення <input type="time" id="depReturn" value="16:00" style="width:80px"></label>
-  <label>Простій <select id="svcSrc" style="width:150px">
-    <option value="hist_med" selected>Історія · медіана</option>
-    <option value="hist_p80">Історія · p80 (запас)</option>
-    <option value="manual">Вручну для всіх</option>
-  </select> <input type="number" id="svcMin" value="15" min="1" max="120" style="width:52px" title="Вручну / для клієнтів без історії"></label>
-  <input type="file" id="statsFile" accept=".xlsx,.csv" style="display:none" onchange="uploadStats()">
-  <button class="sec" onclick="document.getElementById('statsFile').click()" title="Оновити нормативи простою з Cars_report">↻ Нормативи</button>
-  <label>Баланс <select id="balSel" style="width:104px">
-    <option value="off">викл</option>
-    <option value="soft" selected>м'який</option>
-    <option value="hard">жорсткий</option>
-  </select></label>
-  <label title="Штраф (хв) за точку поза зоною водія. 240+ = жорсткі зони">Зона, хв
-    <input type="number" id="zonePen" value="20" min="1" max="999" style="width:52px"></label>
-  <button class="sec" id="zonesBtn" onclick="toggleZonesLayer()">Зони на карті</button>
-  <button class="sec" id="vehBtn" onclick="openVehDlg()">Авто: 0</button>
-  <button onclick="doPlan(false)">Розрахувати</button>
-  <button onclick="doPlan(true)" style="background:#7b3fa0">Розрахувати по геозонах</button>
   <span id="status"></span>
 </header>
 <div id="layout">
@@ -112,13 +116,78 @@
       <select id="addVehSel"></select>
       <button onclick="addRoute()">+ Додати авто в день</button>
     </div>
-    <div id="routesPanel"></div>
     <div class="route-card" id="unassigned">
       <div class="route-head">Нерозподілені заявки (буфер)</div>
       <div class="stops" id="stops-un" data-route="0"></div>
     </div>
+    <div id="routesPanel"></div>
   </div>
 </div>
+<dialog id="planDlg">
+  <div class="dlg-head"><span>Планування · інструменти</span><span onclick="planDlg.close()">✕</span></div>
+  <div class="dlg-body">
+
+    <div class="tool-block">
+      <h3>Заявки</h3>
+      <div class="dropzone" id="dropzone" onclick="$('file').click()">
+        <div class="dz-icon">📄</div>
+        <div class="dz-main" id="dzMain">Перетягніть XLSX-файл або натисніть, щоб обрати</div>
+        <div class="dz-sub">Заявки з 1С · формат .xlsx</div>
+      </div>
+      <input type="file" id="file" accept=".xlsx" style="display:none" onchange="onFilePick()">
+      <div class="tool-row" style="margin-top:10px">
+        <button class="pri" onclick="doImport()">Імпорт + геокодинг</button>
+        <span style="font-size:11.5px;color:#888">Геокодинг адрес виконується автоматично після імпорту</span>
+      </div>
+    </div>
+
+    <div class="tool-block">
+      <h3>Час роботи депо</h3>
+      <div class="tool-row">
+        <label>Виїзд <input type="time" id="depDepart" value="09:00" style="width:90px"></label>
+        <label>Повернення <input type="time" id="depReturn" value="16:00" style="width:90px"></label>
+      </div>
+    </div>
+
+    <div class="tool-block">
+      <h3>Простій на точці</h3>
+      <div class="tool-row">
+        <label>Джерело <select id="svcSrc" style="width:170px">
+          <option value="hist_med" selected>Історія · медіана</option>
+          <option value="hist_p80">Історія · p80 (запас)</option>
+          <option value="manual">Вручну для всіх</option>
+        </select></label>
+        <label>Хвилин <input type="number" id="svcMin" value="15" min="1" max="120" style="width:60px" title="Вручну / для клієнтів без історії"></label>
+        <input type="file" id="statsFile" accept=".xlsx,.csv" style="display:none" onchange="uploadStats()">
+        <button class="sec" onclick="$('statsFile').click()" title="Оновити нормативи простою з Cars_report">↻ Нормативи з Cars_report</button>
+      </div>
+    </div>
+
+    <div class="tool-block">
+      <h3>Геозони і баланс</h3>
+      <div class="tool-row">
+        <label>Баланс <select id="balSel" style="width:120px">
+          <option value="off">викл</option>
+          <option value="soft" selected>м'який</option>
+          <option value="hard">жорсткий</option>
+        </select></label>
+        <label title="Штраф (хв) за точку поза зоною водія. 240+ = жорсткі зони">Зона, хв
+          <input type="number" id="zonePen" value="20" min="1" max="999" style="width:60px"></label>
+        <button class="sec" id="zonesBtn" onclick="toggleZonesLayer()">Зони на карті</button>
+        <button class="sec" id="vehBtn" onclick="openVehDlg()">Авто: 0</button>
+      </div>
+    </div>
+
+    <div class="tool-block">
+      <h3>Розрахунок маршрутів</h3>
+      <div class="tool-row">
+        <button class="pri" onclick="doPlan(false)">Розрахувати</button>
+        <button class="zones" onclick="doPlan(true)">Розрахувати по геозонах</button>
+      </div>
+    </div>
+
+  </div>
+</dialog>
 <dialog id="impDlg" style="max-width:520px">
   <div class="dlg-head"><span>Імпорт · на цю дату вже є проекти</span><span onclick="impDlg.close()">✕</span></div>
   <div class="dlg-body" id="impOptions" style="font-size:13px"></div>
@@ -181,6 +250,34 @@ const hm = t => t ? String(t).slice(0,5) : '';
 let vehicles = [];
 let projects = [];
 let pendingFile = null;
+
+function openPlanDlg() { $('planDlg').showModal(); }
+
+function setDzFile(name) {
+  const dz = $('dropzone');
+  if (name) {
+    dz.classList.add('has-file');
+    $('dzMain').textContent = '✓ ' + name;
+  } else {
+    dz.classList.remove('has-file');
+    $('dzMain').textContent = 'Перетягніть XLSX-файл або натисніть, щоб обрати';
+  }
+}
+function onFilePick() {
+  const f = $('file').files[0];
+  setDzFile(f ? f.name : null);
+}
+document.addEventListener('DOMContentLoaded', () => {
+  const dz = $('dropzone'); if (!dz) return;
+  ['dragenter','dragover'].forEach(ev => dz.addEventListener(ev, e => {
+    e.preventDefault(); dz.classList.add('drag'); }));
+  ['dragleave','drop'].forEach(ev => dz.addEventListener(ev, e => {
+    e.preventDefault(); dz.classList.remove('drag'); }));
+  dz.addEventListener('drop', e => {
+    const f = e.dataTransfer.files[0];
+    if (f) { $('file').files = e.dataTransfer.files; setDzFile(f.name); }
+  });
+});
 
 function curProject() { return +$('projSel').value || null; }
 
@@ -357,17 +454,21 @@ async function runImport(projectId) {
   st('Імпорт…');
   const url = `/api/import?plan_date=${$('planDate').value}` + (projectId ? `&project_id=${projectId}` : '');
   const j = await (await fetch(url, {method:'POST', body:fd})).json();
-  st(`Заявок: ${j.parsed} (нових ${j.inserted}), без координат: ${j.without_coords}`);
-  await loadProjects(j.project_id);
-  loadAll();
-}
-
-async function doGeocode() {
-  st('Геокодинг…');
-  if (!curProject()) return st('Немає проекту');
-  const j = await (await fetch(`/api/geocode?project_id=${curProject()}`, {method:'POST'})).json();
-  st(`Геокодовано: ${j.geocoded}, не знайдено: ${j.failed.length}`);
-  if (j.failed.length) console.warn('Не знайдено:', j.failed);
+  const pid = j.project_id;
+  await loadProjects(pid);
+  // геокодинг одразу після імпорту (окрема кнопка більше не потрібна)
+  if (j.without_coords > 0) {
+    st(`Заявок: ${j.parsed} (нових ${j.inserted}) · геокодинг…`);
+    try {
+      const g = await (await fetch(`/api/geocode?project_id=${pid}`, {method:'POST'})).json();
+      if (g.failed && g.failed.length) console.warn('Не знайдено:', g.failed);
+      st(`Заявок: ${j.parsed} (нових ${j.inserted}) · геокодовано ${g.geocoded}, без гео: ${(g.failed||[]).length}`);
+    } catch(e) {
+      st(`Заявок: ${j.parsed} (нових ${j.inserted}), без координат: ${j.without_coords} · геокодинг не вдався`);
+    }
+  } else {
+    st(`Заявок: ${j.parsed} (нових ${j.inserted}), всі з координатами`);
+  }
   loadAll();
 }
 
@@ -523,7 +624,7 @@ async function loadAll() {
   const routed = new Set(routes.flatMap(r => r.stops.map(s => s.order_id)));
   orders.forEach(o => {
     if (!o.lat || routed.has(o.id)) return;
-    L.circleMarker([o.lat, o.lon], {radius:6, color:'#E82A2C', fillOpacity:.8})
+    L.circleMarker([o.lat, o.lon], {radius:7, color:'#fff', weight:2, fillColor:'#E82A2C', fillOpacity:.95, className:'buf-dot'})
       .bindTooltip(tipHtml(o.client, o.address, +o.weight_kg||0, +o.volume_m3||0,
         `<br>${hm(o.tw_from)}–${hm(o.tw_to)}`), {sticky:true}).addTo(layers);
   });
@@ -558,9 +659,9 @@ async function loadAll() {
       });
     }
     group.forEach(p => {
+      const html = `<div class="pin-wrap"><div class="pin" style="--pc:${p.color};border-radius:${p.rounded?'11px':'50% 50% 50% 0'};${p.rounded?'':'transform:rotate(-45deg)'}"><span style="${p.rounded?'':'transform:rotate(45deg)'}">${p.label}</span></div></div>`;
       L.marker([p.lat, p.lon], {icon: L.divIcon({
-          html:`<div style="background:${p.color};color:#fff;border-radius:${p.rounded?'6px':'50%'};min-width:22px;height:22px;padding:0 3px;display:flex;align-items:center;justify-content:center;font-size:10.5px;font-weight:700;box-shadow:0 0 0 1.5px #fff">${p.label}</div>`,
-          iconSize:null})})
+          html, className:'', iconSize:[28,28], iconAnchor:p.rounded?[14,14]:[14,26]})})
         .bindTooltip(p.tip, {sticky:true}).addTo(layers);
     });
   });

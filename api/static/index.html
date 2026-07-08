@@ -307,6 +307,20 @@ function saveVehSelection() {
   $('vehDlg').close();
 }
 
+async function uploadStats() {
+  const f = $('statsFile').files[0];
+  if (!f) return;
+  const fd = new FormData(); fd.append('file', f);
+  st('Оновлюю нормативи простою…');
+  try {
+    const r = await fetch('/api/service-stats/import', {method:'POST', body:fd});
+    if (!r.ok) { st('⚠ ' + ((await r.json()).detail || r.status)); return; }
+    const j = await r.json();
+    st(`Нормативи оновлено: ${j.rows} записів (клієнт+адреса)`);
+  } catch(e) { st('⚠ Помилка завантаження'); }
+  $('statsFile').value = '';
+}
+
 async function doImport() {
   const f = $('file').files[0];
   if (!f) return st('Обери файл');

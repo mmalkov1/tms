@@ -89,6 +89,8 @@
     <option value="hist_p80">Історія · p80 (запас)</option>
     <option value="manual">Вручну для всіх</option>
   </select> <input type="number" id="svcMin" value="15" min="1" max="120" style="width:52px" title="Вручну / для клієнтів без історії"></label>
+  <input type="file" id="statsFile" accept=".xlsx,.csv" style="display:none" onchange="uploadStats()">
+  <button class="sec" onclick="document.getElementById('statsFile').click()" title="Оновити нормативи простою з Cars_report">↻ Нормативи</button>
   <button class="sec" id="zonesBtn" onclick="toggleZonesLayer()">Зони на карті</button>
   <button class="sec" id="vehBtn" onclick="openVehDlg()">Авто: 0</button>
   <button onclick="doPlan(false)">Розрахувати</button>

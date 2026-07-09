@@ -135,6 +135,7 @@ def _parse_order(el: ET.Element) -> dict | None:
     return {
         "doc_number": code,
         "doc_ref": name or code,
+        "warehouse_code": g("WAREHOUSE_CODE") or None,
         "kind": "pickup" if pickup else "delivery",
         "client": g("CLIENT_NAME") or g("SHOP_NAME") or "—",
         "address": g("ADDRESS"),
@@ -192,6 +193,11 @@ async def import_orders(request: Request,
 
     plan_date = await pool.fetchval("SELECT plan_date FROM projects WHERE id=$1", project_id)
 
+    # код склада 1С (для точек выезда/возвращения в экспорте рейсов)
+    wcode = next((r["warehouse_code"] for r in rows if r.get("warehouse_code")), None)
+    if wcode:
+        await pool.execute("UPDATE projects SET warehouse_code_1c=$1 WHERE id=$2", wcode, project_id)
+
     ins = upd = 0
     async with pool.acquire() as c:
         for r in rows:
@@ -246,10 +252,11 @@ async def export_trips(key: str = Query(""),
     if kind == "project":
         rr = await pool.fetch("""
             SELECT r.*, v.name vehicle_name, v.code_1c car_code, d.code_1c driver_code,
-                   d.name driver_name, dep.name depot_name
+                   d.name driver_name, dep.name depot_name, p.warehouse_code_1c
             FROM routes r JOIN vehicles v ON v.id=r.vehicle_id
             LEFT JOIN drivers d ON d.id=r.driver_id
             JOIN depots dep ON dep.id=r.depot_id
+            LEFT JOIN projects p ON p.id=r.project_id
             WHERE r.project_id=$1 ORDER BY r.id""", project_id)
     else:
         try:
@@ -259,10 +266,11 @@ async def export_trips(key: str = Query(""),
             return _err("start_date/end_date: очікується yyyy-MM-dd")
         rr = await pool.fetch("""
             SELECT r.*, v.name vehicle_name, v.code_1c car_code, d.code_1c driver_code,
-                   d.name driver_name, dep.name depot_name
+                   d.name driver_name, dep.name depot_name, p.warehouse_code_1c
             FROM routes r JOIN vehicles v ON v.id=r.vehicle_id
             LEFT JOIN drivers d ON d.id=r.driver_id
             JOIN depots dep ON dep.id=r.depot_id
+            LEFT JOIN projects p ON p.id=r.project_id
             WHERE r.plan_date BETWEEN $1 AND $2 ORDER BY r.id""", d1, d2)
 
     parts = ["<RESPONSE><ERROR>0</ERROR>"]
@@ -286,6 +294,19 @@ async def export_trips(key: str = Query(""),
         parts.append("<START_TIME_FACT></START_TIME_FACT><FINISH_TIME_FACT></FINISH_TIME_FACT>")
         parts.append(f"<TRIP_ORDERS_WEIGHT_PLAN>{round(total_w, 2)}</TRIP_ORDERS_WEIGHT_PLAN>")
         parts.append("<ORDERS>")
+        # склад — точка выезда (как у Tocan: 1С найдет по коду в Справочники.Склады)
+        wcode = r["warehouse_code_1c"]
+        if wcode:
+            parts.append("<ORDER>")
+            parts.append(f"<CODE>{_esc(wcode)}</CODE>")
+            parts.append("<IN_TRIP_NUMBER>0</IN_TRIP_NUMBER>")
+            parts.append("<PLAN_DIST>0</PLAN_DIST><FACT_DIST>0</FACT_DIST>")
+            parts.append(f"<DELIVERY_DATE_PLAN>{_dt(r['plan_date'], r['depart_time'])}</DELIVERY_DATE_PLAN>")
+            parts.append("<DELIVERY_DATE_FACT></DELIVERY_DATE_FACT>")
+            parts.append(f"<DELIVERY_OUTDATE_PLAN>{_dt(r['plan_date'], r['depart_time'])}</DELIVERY_OUTDATE_PLAN>")
+            parts.append("<DELIVERY_OUTDATE_FACT></DELIVERY_OUTDATE_FACT>")
+            parts.append("<STATUS_POINT>1</STATUS_POINT>")
+            parts.append("</ORDER>")
         for s in ss:
             parts.append("<ORDER>")
             parts.append(f"<CODE>{_esc(s['doc_number'])}</CODE>")
@@ -294,6 +315,19 @@ async def export_trips(key: str = Query(""),
             parts.append(f"<DELIVERY_DATE_PLAN>{_dt(r['plan_date'], s['eta'])}</DELIVERY_DATE_PLAN>")
             parts.append("<DELIVERY_DATE_FACT></DELIVERY_DATE_FACT>")
             parts.append(f"<DELIVERY_OUTDATE_PLAN>{_dt(r['plan_date'], s['etd'])}</DELIVERY_OUTDATE_PLAN>")
+            parts.append("<DELIVERY_OUTDATE_FACT></DELIVERY_OUTDATE_FACT>")
+            parts.append("<STATUS_POINT>1</STATUS_POINT>")
+            parts.append("</ORDER>")
+        # склад — точка возвращения (последняя в рейсе)
+        if wcode:
+            last_seq = max(s["seq"] for s in ss) + 1
+            parts.append("<ORDER>")
+            parts.append(f"<CODE>{_esc(wcode)}</CODE>")
+            parts.append(f"<IN_TRIP_NUMBER>{last_seq}</IN_TRIP_NUMBER>")
+            parts.append("<PLAN_DIST>0</PLAN_DIST><FACT_DIST>0</FACT_DIST>")
+            parts.append(f"<DELIVERY_DATE_PLAN>{_dt(r['plan_date'], r['return_time'])}</DELIVERY_DATE_PLAN>")
+            parts.append("<DELIVERY_DATE_FACT></DELIVERY_DATE_FACT>")
+            parts.append(f"<DELIVERY_OUTDATE_PLAN>{_dt(r['plan_date'], r['return_time'])}</DELIVERY_OUTDATE_PLAN>")
             parts.append("<DELIVERY_OUTDATE_FACT></DELIVERY_OUTDATE_FACT>")
             parts.append("<STATUS_POINT>1</STATUS_POINT>")
             parts.append("</ORDER>")

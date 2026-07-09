@@ -29,6 +29,8 @@ async def startup():
     # v13 (migrate_008): коды 1С для маппинга авто/водителей + ключи синхронизации
     await pool.execute("ALTER TABLE vehicles ADD COLUMN IF NOT EXISTS code_1c TEXT")
     await pool.execute("ALTER TABLE drivers  ADD COLUMN IF NOT EXISTS code_1c TEXT")
+    # v14 (migrate_009): код склада 1С на проекте — точки выезда/возвращения в экспорте рейсов
+    await pool.execute("ALTER TABLE projects ADD COLUMN IF NOT EXISTS warehouse_code_1c TEXT")
     await integration_1c.init(pool)
 
 

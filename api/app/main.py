@@ -623,12 +623,17 @@ async def set_stops(route_id: int, body: SetStops):
 # зеркальный разворот маршрута: последняя точка становится первой
 @app.post("/api/routes/{route_id}/reverse")
 async def reverse_route(route_id: int):
-    rows = await pool.fetch(
-        "SELECT id FROM route_stops WHERE route_id=$1 ORDER BY seq DESC", route_id)
-    if len(rows) < 2:
-        return {"ok": True, "note": "менше 2 точок — нема що розвертати"}
-    for pos, row in enumerate(rows, start=1):
-        await pool.execute("UPDATE route_stops SET seq=$1 WHERE id=$2", pos, row["id"])
+    async with pool.acquire() as c:
+        async with c.transaction():
+            rows = await c.fetch(
+                "SELECT id FROM route_stops WHERE route_id=$1 ORDER BY seq DESC", route_id)
+            if len(rows) < 2:
+                return {"ok": True, "note": "менше 2 точок — нема що розвертати"}
+            # сдвигаем seq в свободный диапазон, чтобы не нарушить UNIQUE(route_id, seq)
+            await c.execute(
+                "UPDATE route_stops SET seq = seq + 100000 WHERE route_id=$1", route_id)
+            for pos, row in enumerate(rows, start=1):
+                await c.execute("UPDATE route_stops SET seq=$1 WHERE id=$2", pos, row["id"])
     await _rebuild_route(route_id)
     return {"ok": True}
 

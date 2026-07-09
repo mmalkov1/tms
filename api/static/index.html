@@ -15,7 +15,14 @@
   header button { background:var(--red); color:#fff; cursor:pointer; font-weight:600; }
   header button.sec { background:#fff; color:var(--navy); }
   header label { font-size:12px; display:flex; align-items:center; gap:4px; }
-  dialog { border:none; border-radius:8px; padding:0; max-width:760px; width:92%; box-shadow:0 8px 40px rgba(0,0,0,.3); margin:auto; }
+  dialog { border:none; border-radius:8px; padding:0; max-width:760px; width:92%; box-shadow:0 8px 40px rgba(0,0,0,.3); margin:auto; resize:both; overflow:auto; max-height:92vh; }
+  .dlg-head { cursor:move; user-select:none; }
+  /* затемнение + спиннер на время расчета */
+  #busy { position:fixed; inset:0; background:rgba(15,25,45,.5); display:none; z-index:2000;
+          align-items:center; justify-content:center; flex-direction:column; gap:14px; color:#fff; font-weight:700; font-size:15px; }
+  #busy.on { display:flex; }
+  #busy .spin { width:48px; height:48px; border:5px solid rgba(255,255,255,.25); border-top-color:#fff; border-radius:50%; animation:bspin 1s linear infinite; }
+  @keyframes bspin { to { transform:rotate(360deg); } }
   dialog::backdrop { background:rgba(0,20,50,.45); }
   .dlg-head { background:var(--navy); color:#fff; padding:10px 16px; font-weight:700; display:flex; justify-content:space-between; }
   .dlg-head span:last-child { cursor:pointer; }
@@ -65,9 +72,12 @@
   .stop .eta { color:#333; white-space:nowrap; font-weight:600; }
   .stop .rm { cursor:pointer; color:#bbb; font-weight:700; } .stop .rm:hover { color:var(--red); }
   /* п.6: шкала 08:00-18:00 */
-  .tl { position:relative; height:14px; background:#eee; border-radius:2px; overflow:hidden; }
-  .tl .win { position:absolute; top:0; bottom:0; background:#d9c9ee; }
-  .tl .visit { position:absolute; top:0; bottom:0; background:var(--red); min-width:2px; }
+  .tl { position:relative; height:14px; background:#eee; border-radius:2px; }
+  .tl .win { position:absolute; top:0; bottom:0; background:#d9c9ee; border-radius:2px; }
+  .tl .visit { position:absolute; top:0; bottom:0; background:var(--red); min-width:2px; border-radius:2px; }
+  .tl:hover::after { content:attr(data-tip); position:absolute; bottom:calc(100% + 5px); left:50%; transform:translateX(-50%);
+    background:var(--navy); color:#fff; padding:4px 9px; border-radius:5px; font-size:11px; font-weight:600;
+    white-space:nowrap; z-index:60; box-shadow:0 2px 8px rgba(0,0,0,.3); pointer-events:none; }
   .sortable-ghost { opacity:.4; background:#dbe6f5; }
   #unassigned .route-head { background:#777; }
   #status { font-size:13px; color:#fff; opacity:.9; }
@@ -125,6 +135,7 @@
     <div id="routesPanel"></div>
   </div>
 </div>
+<div id="busy"><div class="spin"></div><div id="busyTxt">Розрахунок маршрутів…</div></div>
 <dialog id="planDlg">
   <div class="dlg-head"><span>Планування · інструменти</span><span onclick="planDlg.close()">✕</span></div>
   <div class="dlg-body">
@@ -345,7 +356,7 @@ function tlHtml(twF, twT, eta, etd) {
     (wF != null && wT != null) ? `Вікно доставки: ${hm(twF)}–${hm(twT)}` : 'Вікно доставки: не задано',
     a != null ? `Візит: ${hm(eta)}–${hm(etd)}` : ''
   ].filter(Boolean).join(' · ');
-  let h = `<div class="tl" title="${tip}">`;
+  let h = `<div class="tl" data-tip="${tip}">`;
   if (wF != null && wT != null)
     h += `<div class="win" style="left:${pct(wF)}%;width:${pct(wT)-pct(wF)}%"></div>`;
   if (a != null)
@@ -365,6 +376,7 @@ async function loadVehicles(keepSel = false) {
 }
 
 async function openVehDlg() {
+  await loadVehicles(true);   // свежие данные из БД (иначе рендер из устаревшего кеша)
   const dz = {};
   await Promise.all(vehicles.filter(v=>v.driver_id).map(async v => {
     try { dz[v.driver_id] = await (await fetch(`/api/drivers/${v.driver_id}/zones`)).json(); }
@@ -405,8 +417,11 @@ async function rowActions(el, vid) {
     can_delivery: tr.querySelector('.vdl').checked,
     code_1c: tr.querySelector('.vc1').value.trim(),
     driver_code_1c: tr.querySelector('.vdc1').disabled ? null : tr.querySelector('.vdc1').value.trim() };
-  await fetch(`/api/vehicles/${vid}`, {method:'PATCH',
+  const resp = await fetch(`/api/vehicles/${vid}`, {method:'PATCH',
     headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
+  if (!resp.ok) { st('Помилка збереження авто: ' + resp.status); return; }
+  const vv = vehicles.find(x => x.id === vid);
+  if (vv) Object.assign(vv, body);   // локальный кеш = БД
   el.textContent='🗑'; el.dataset.armed='1'; st('Збережено. Ще клік по 🗑 — деактивувати');
   setTimeout(()=>{el.textContent='💾'; delete el.dataset.armed;}, 3000);
 }
@@ -494,22 +509,50 @@ async function doPlan(useZones) {
   $('planDlg').close();
   const ids = [...selectedVeh];
   if (!ids.length) return st('Обери машини (кнопка «Авто»)');
-  st('Розрахунок…');
   if (!curProject()) return st('Немає проекту — імпортуй заявки');
-  const p = new URLSearchParams({
-    project_id: curProject(),
-    plan_date: $('planDate').value, vehicle_ids: ids.join(','),
-    service_min: $('svcMin').value, service_source: $('svcSrc').value, use_zones: !!useZones,
-    zone_penalty: $('zonePen').value, balance: $('balSel').value,
-    depot_depart: $('depDepart').value, depot_return: $('depReturn').value });
-  const r = await fetch(`/api/plan?${p}`, {method:'POST'});
-  if (!r.ok) { st('Помилка: ' + ((await r.json()).detail || r.status)); return; }
-  const j = await r.json();
-  const zs = j.zone_stats && Object.keys(j.zone_stats).length
-    ? ' · ' + Object.entries(j.zone_stats).map(([k,v])=>`${k}: ${v}`).join(', ') : '';
-  st(`Маршрутів: ${j.routes.length}, у буфері: ${j.dropped_orders.length}${zs}`);
-  loadAll();
+  $('busyTxt').textContent = useZones ? 'Розрахунок маршрутів по геозонах…' : 'Розрахунок маршрутів…';
+  $('busy').classList.add('on');
+  st('Розрахунок…');
+  try {
+    const p = new URLSearchParams({
+      project_id: curProject(),
+      plan_date: $('planDate').value, vehicle_ids: ids.join(','),
+      service_min: $('svcMin').value, service_source: $('svcSrc').value, use_zones: !!useZones,
+      zone_penalty: $('zonePen').value, balance: $('balSel').value,
+      depot_depart: $('depDepart').value, depot_return: $('depReturn').value });
+    const r = await fetch(`/api/plan?${p}`, {method:'POST'});
+    if (!r.ok) { st('Помилка: ' + ((await r.json()).detail || r.status)); return; }
+    const j = await r.json();
+    const zs = j.zone_stats && Object.keys(j.zone_stats).length
+      ? ' · ' + Object.entries(j.zone_stats).map(([k,v])=>`${k}: ${v}`).join(', ') : '';
+    st(`Маршрутів: ${j.routes.length}, у буфері: ${j.dropped_orders.length}${zs}`);
+    await loadAll();
+  } finally {
+    $('busy').classList.remove('on');
+  }
 }
+
+// перетаскивание модалок за шапку (ресайз — нативный, за правый нижний угол)
+document.addEventListener('DOMContentLoaded', () => {
+  document.querySelectorAll('dialog').forEach(d => {
+    const head = d.querySelector('.dlg-head');
+    if (!head) return;
+    head.addEventListener('mousedown', e => {
+      if (e.target !== head && e.target.textContent.trim() === '✕') return;  // клик по крестику
+      const r = d.getBoundingClientRect(), ox = e.clientX - r.left, oy = e.clientY - r.top;
+      const mv = ev => {
+        d.style.margin = '0'; d.style.position = 'fixed';
+        d.style.left = Math.max(0, ev.clientX - ox) + 'px';
+        d.style.top  = Math.max(0, ev.clientY - oy) + 'px';
+      };
+      const up = () => { window.removeEventListener('mousemove', mv); window.removeEventListener('mouseup', up); document.body.style.userSelect = ''; };
+      document.body.style.userSelect = 'none';
+      window.addEventListener('mousemove', mv);
+      window.addEventListener('mouseup', up);
+      e.preventDefault();
+    });
+  });
+});
 
 async function addRoute() {   // п.4
   if (!curProject()) return st('Немає проекту');
@@ -518,6 +561,13 @@ async function addRoute() {   // п.4
                           vehicle_id: +$('addVehSel').value,
                           depot_depart: $('depDepart').value})});
   if (!r.ok) { st('Помилка: '+(await r.json()).detail); return; }
+  loadAll();
+}
+
+async function reverseRoute(rid) {
+  st('Розвертаю маршрут…');
+  const r = await fetch(`/api/routes/${rid}/reverse`, {method:'POST'});
+  st(r.ok ? 'Маршрут розвернуто' : 'Помилка розвороту');
   loadAll();
 }
 
@@ -694,7 +744,7 @@ async function loadAll() {
     const over = wPct > 100 || vPct > 100;
     const card = document.createElement('div'); card.className = 'route-card';
     card.innerHTML = `<div class="route-head" style="background:${r.color}">
-      <span>${r.vehicle_name} · ${r.driver_name||'—'} ${r.stops.length?'':'<span class="del" onclick="delRoute('+r.id+')">🗑</span>'}</span>
+      <span>${r.vehicle_name} · ${r.driver_name||'—'} ${r.stops.length?'<span class="del" title="Розвернути маршрут у зворотному порядку" onclick="event.stopPropagation();reverseRoute('+r.id+')">⇆</span>':'<span class="del" onclick="delRoute('+r.id+')">🗑</span>'}</span>
       <span>${uniq} точок (${r.stops.length} завд.) · ${r.total_km||0} км ·
       пік ${(+r.peak_weight||0).toFixed(0)}/${(+r.max_weight_kg||0).toFixed(0)} кг (${wPct.toFixed(0)}%) ·
       ${(+r.peak_volume||0).toFixed(2)}/${(+r.max_volume_m3||0).toFixed(1)} м³ (${vPct.toFixed(0)}%)

@@ -225,6 +225,13 @@ async def import_orders(request: Request,
             else:
                 upd += 1
 
+    # координаты из кеша геокодирования (адреса, исправленные логистом ранее)
+    try:
+        from . import main as _main
+        await _main.geo_cache_fill(project_id)
+    except Exception:
+        pass
+
     return _xml(
         "<RESPONSE><ERROR>0</ERROR>"
         f"<MESSAGE><SECURITY_KEY>{project_key}</SECURITY_KEY>"

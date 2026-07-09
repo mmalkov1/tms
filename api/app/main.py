@@ -31,7 +31,45 @@ async def startup():
     await pool.execute("ALTER TABLE drivers  ADD COLUMN IF NOT EXISTS code_1c TEXT")
     # v14 (migrate_009): код склада 1С на проекте — точки выезда/возвращения в экспорте рейсов
     await pool.execute("ALTER TABLE projects ADD COLUMN IF NOT EXISTS warehouse_code_1c TEXT")
+    # v15 (migrate_010): кеш геокодирования — исправленные вручную адреса/координаты переживают реимпорт
+    await pool.execute("""
+        CREATE TABLE IF NOT EXISTS geo_cache (
+            address_norm TEXT PRIMARY KEY,
+            lat          DOUBLE PRECISION NOT NULL,
+            lon          DOUBLE PRECISION NOT NULL,
+            source       TEXT,
+            updated_at   TIMESTAMPTZ NOT NULL DEFAULT now())""")
     await integration_1c.init(pool)
+
+
+def norm_addr(a: str | None) -> str | None:
+    """Нормализация адреса для ключа кеша: нижний регистр, схлопнутые пробелы."""
+    return " ".join(a.lower().replace(",", " ").split()) if a else None
+
+
+async def geo_cache_put(address: str | None, lat, lon, source: str):
+    key = norm_addr(address)
+    if not key or lat is None or lon is None:
+        return
+    await pool.execute("""
+        INSERT INTO geo_cache (address_norm, lat, lon, source) VALUES ($1,$2,$3,$4)
+        ON CONFLICT (address_norm) DO UPDATE
+            SET lat=EXCLUDED.lat, lon=EXCLUDED.lon, source=EXCLUDED.source, updated_at=now()""",
+        key, float(lat), float(lon), source)
+
+
+async def geo_cache_fill(project_id: int) -> int:
+    """Проставить координаты заявкам проекта из кеша (по нормализованному адресу)."""
+    res = await pool.execute("""
+        UPDATE orders o SET lat=g.lat, lon=g.lon
+        FROM geo_cache g
+        WHERE o.project_id=$1 AND o.lat IS NULL AND o.address IS NOT NULL
+          AND btrim(lower(regexp_replace(replace(o.address, ',', ' '), '\\s+', ' ', 'g'))) = g.address_norm""",
+        project_id)
+    try:
+        return int(res.split()[-1])
+    except Exception:
+        return 0
 
 
 def t2m(t: time | None, default: int) -> int:
@@ -111,7 +149,10 @@ async def import_excel(plan_date: date = Query(...), file: UploadFile = File(...
                 ins += 1
             else:
                 upd += 1
-    no_geo = sum(1 for r in rows if r["lat"] is None)
+    # координаты из кеша (исправленные ранее адреса) — до подсчета "без координат"
+    await geo_cache_fill(project_id)
+    no_geo = await pool.fetchval(
+        "SELECT count(*) FROM orders WHERE project_id=$1 AND lat IS NULL", project_id)
     return {"parsed": len(rows), "inserted": ins, "updated": upd,
             "without_coords": no_geo, "project_id": project_id}
 
@@ -275,14 +316,17 @@ async def set_driver_zones(driver_id: int, body: ZoneIds):
 
 @app.post("/api/geocode")
 async def geocode_missing(project_id: int = Query(...)):
+    # сначала кеш (исправленные вручную / ранее геокодированные адреса)
+    from_cache = await geo_cache_fill(project_id)
     rows = await pool.fetch(
         "SELECT id, address FROM orders WHERE project_id=$1 AND lat IS NULL AND address IS NOT NULL",
         project_id)
-    ok, fail = 0, []
+    ok, fail = from_cache, []
     for r in rows:
         res = await geocoder.geocode(r["address"])
         if res:
             await pool.execute("UPDATE orders SET lat=$1, lon=$2 WHERE id=$3", res[0], res[1], r["id"])
+            await geo_cache_put(r["address"], res[0], res[1], "geocoder")
             ok += 1
         else:
             fail.append({"id": r["id"], "address": r["address"]})
@@ -300,10 +344,13 @@ async def patch_order(order_id: int, b: OrderPatch):
     cur = await pool.fetchrow("SELECT * FROM orders WHERE id=$1", order_id)
     if not cur:
         raise HTTPException(404, "Заявку не знайдено")
+    new_addr = b.address if b.address is not None else cur["address"]
+    new_lat = b.lat if b.lat is not None else cur["lat"]
+    new_lon = b.lon if b.lon is not None else cur["lon"]
     await pool.execute("UPDATE orders SET address=$1, lat=$2, lon=$3 WHERE id=$4",
-        b.address if b.address is not None else cur["address"],
-        b.lat if b.lat is not None else cur["lat"],
-        b.lon if b.lon is not None else cur["lon"], order_id)
+        new_addr, new_lat, new_lon, order_id)
+    # исправленные вручную координаты запоминаем: следующий импорт возьмет их из кеша
+    await geo_cache_put(new_addr, new_lat, new_lon, "manual")
     return {"ok": True}
 
 
@@ -316,6 +363,7 @@ async def geocode_one(order_id: int):
     if not res:
         raise HTTPException(422, "Адресу не знайдено — спробуй виправити її або ввести координати")
     await pool.execute("UPDATE orders SET lat=$1, lon=$2 WHERE id=$3", res[0], res[1], order_id)
+    await geo_cache_put(cur["address"], res[0], res[1], "geocoder")
     return {"lat": res[0], "lon": res[1]}
 
 
@@ -570,6 +618,19 @@ async def set_stops(route_id: int, body: SetStops):
                     or float(chk["load_volume"] or 0) > float(chk["max_volume_m3"])):
             warnings.append(f"{chk['name']}: перевантаження")
     return {"ok": True, "recalculated": sorted(affected), "warnings": warnings}
+
+
+# зеркальный разворот маршрута: последняя точка становится первой
+@app.post("/api/routes/{route_id}/reverse")
+async def reverse_route(route_id: int):
+    rows = await pool.fetch(
+        "SELECT id FROM route_stops WHERE route_id=$1 ORDER BY seq DESC", route_id)
+    if len(rows) < 2:
+        return {"ok": True, "note": "менше 2 точок — нема що розвертати"}
+    for pos, row in enumerate(rows, start=1):
+        await pool.execute("UPDATE route_stops SET seq=$1 WHERE id=$2", pos, row["id"])
+    await _rebuild_route(route_id)
+    return {"ok": True}
 
 
 # п.3: снять точку с маршрута в буфер

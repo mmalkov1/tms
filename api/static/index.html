@@ -217,12 +217,13 @@
   <div class="dlg-head"><span>Автопарк · вибір машин для розрахунку</span><span onclick="vehDlg.close()">✕</span></div>
   <div class="dlg-body">
     <table class="vtable">
-      <thead><tr><th>Розрах.</th><th>Назва</th><th>Водій</th><th>Вантаж., кг</th><th>Об'єм, м³</th><th>Геозони</th><th title="Може забирати товар (pickup)">Забір</th><th title="Може доставляти товар (delivery)">Дост.</th><th>Найм</th><th></th></tr></thead>
+      <thead><tr><th>Розрах.</th><th>Назва</th><th>Водій</th><th title="Коди довідників 1С: авто (Kult_Транспорт) / водій (ФизическиеЛица) — для вивантаження рейсів">Код 1С<br>авто / водій</th><th>Вантаж., кг</th><th>Об'єм, м³</th><th>Геозони</th><th title="Може забирати товар (pickup)">Забір</th><th title="Може доставляти товар (delivery)">Дост.</th><th>Найм</th><th></th></tr></thead>
       <tbody id="vehRows"></tbody>
       <tfoot><tr>
         <td></td>
         <td><input type="text" id="nvName" placeholder="Газель АА1234ВВ"></td>
         <td><input type="text" id="nvDriver" placeholder="ПІБ водія"></td>
+        <td></td>
         <td><input type="number" id="nvW" value="1000"></td>
         <td><input type="number" id="nvV" value="9" step="0.1"></td>
         <td></td>
@@ -373,6 +374,8 @@ async function openVehDlg() {
     <td style="text-align:center"><input type="checkbox" class="vsel" value="${v.id}" ${selectedVeh.has(v.id)?'checked':''}></td>
     <td><input type="text" class="vname" value="${v.name}"></td>
     <td>${v.driver_name||'—'}</td>
+    <td><input type="text" class="vc1" value="${v.code_1c||''}" placeholder="авто" style="width:82px;margin-bottom:2px" title="Код авто в 1С (Kult_Транспорт)">
+        <input type="text" class="vdc1" value="${v.driver_code_1c||''}" placeholder="водій" style="width:82px" title="Код водія в 1С (ФизическиеЛица)" ${v.driver_id?'':'disabled'}></td>
     <td><input type="number" class="vw" value="${v.max_weight_kg}"></td>
     <td><input type="number" class="vv" value="${v.max_volume_m3}" step="0.1"></td>
     <td style="font-size:11px">${v.driver_id ? geozones.map(z =>
@@ -399,7 +402,9 @@ async function rowActions(el, vid) {
     max_volume_m3: +tr.querySelector('.vv').value,
     is_hired: tr.querySelector('.vhired').checked,
     can_pickup: tr.querySelector('.vpk').checked,
-    can_delivery: tr.querySelector('.vdl').checked };
+    can_delivery: tr.querySelector('.vdl').checked,
+    code_1c: tr.querySelector('.vc1').value.trim(),
+    driver_code_1c: tr.querySelector('.vdc1').disabled ? null : tr.querySelector('.vdc1').value.trim() };
   await fetch(`/api/vehicles/${vid}`, {method:'PATCH',
     headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
   el.textContent='🗑'; el.dataset.armed='1'; st('Збережено. Ще клік по 🗑 — деактивувати');

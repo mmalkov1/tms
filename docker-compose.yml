@@ -23,6 +23,8 @@ services:
       DATABASE_URL: postgresql://tms:${DB_PASSWORD:-tms}@db:5432/tms
       OSRM_URL: http://osrm:5000
       VISICOM_API_KEY: ${VISICOM_API_KEY:-}
+      TMS_1C_LOGIN: ${TMS_1C_LOGIN:-1c}
+      TMS_1C_PASSWORD: ${TMS_1C_PASSWORD:-kultukr-1c}
     depends_on: [db, osrm]
     restart: unless-stopped
     networks:

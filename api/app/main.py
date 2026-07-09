@@ -7,7 +7,7 @@ from fastapi import FastAPI, File, HTTPException, Query, UploadFile
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import dwell, geo, geocoder, importer, osrm, solver
+from . import dwell, geo, geocoder, importer, integration_1c, osrm, solver
 
 DB_DSN = os.getenv("DATABASE_URL", "postgresql://tms:tms@db:5432/tms")
 ROUTE_COLORS = ["#E82A2C", "#00356B", "#2E8B57", "#B8860B", "#8B008B", "#FF6347",
@@ -26,6 +26,10 @@ async def startup():
         ALTER TABLE vehicles
             ADD COLUMN IF NOT EXISTS can_pickup   BOOLEAN NOT NULL DEFAULT TRUE,
             ADD COLUMN IF NOT EXISTS can_delivery BOOLEAN NOT NULL DEFAULT TRUE""")
+    # v13 (migrate_008): коды 1С для маппинга авто/водителей + ключи синхронизации
+    await pool.execute("ALTER TABLE vehicles ADD COLUMN IF NOT EXISTS code_1c TEXT")
+    await pool.execute("ALTER TABLE drivers  ADD COLUMN IF NOT EXISTS code_1c TEXT")
+    await integration_1c.init(pool)
 
 
 def t2m(t: time | None, default: int) -> int:
@@ -121,7 +125,7 @@ async def orders(project_id: int = Query(...)):
 @app.get("/api/vehicles")
 async def vehicles():
     rows = await pool.fetch("""
-        SELECT v.*, d.name AS driver_name, d.shift_start, d.shift_end
+        SELECT v.*, d.name AS driver_name, d.shift_start, d.shift_end, d.code_1c AS driver_code_1c
         FROM vehicles v LEFT JOIN drivers d ON d.id=v.driver_id
         WHERE v.is_active ORDER BY v.id""")
     return [dict(r) for r in rows]
@@ -161,6 +165,8 @@ class VehiclePatch(BaseModel):
     is_hired: bool | None = None
     can_pickup: bool | None = None
     can_delivery: bool | None = None
+    code_1c: str | None = None          # код авто в 1С (Kult_Транспорт)
+    driver_code_1c: str | None = None   # код водителя в 1С (ФизическиеЛица)
 
 
 @app.patch("/api/vehicles/{vehicle_id}")
@@ -170,13 +176,17 @@ async def patch_vehicle(vehicle_id: int, v: VehiclePatch):
         raise HTTPException(404, "Не знайдено")
     await pool.execute("""
         UPDATE vehicles SET name=$1, max_weight_kg=$2, max_volume_m3=$3, is_hired=$4,
-                            can_pickup=$5, can_delivery=$6 WHERE id=$7""",
+                            can_pickup=$5, can_delivery=$6, code_1c=$7 WHERE id=$8""",
         v.name or cur["name"],
         v.max_weight_kg if v.max_weight_kg is not None else cur["max_weight_kg"],
         v.max_volume_m3 if v.max_volume_m3 is not None else cur["max_volume_m3"],
         v.is_hired if v.is_hired is not None else cur["is_hired"],
         v.can_pickup if v.can_pickup is not None else cur["can_pickup"],
-        v.can_delivery if v.can_delivery is not None else cur["can_delivery"], vehicle_id)
+        v.can_delivery if v.can_delivery is not None else cur["can_delivery"],
+        v.code_1c if v.code_1c is not None else cur["code_1c"], vehicle_id)
+    if v.driver_code_1c is not None and cur["driver_id"]:
+        await pool.execute("UPDATE drivers SET code_1c=$1 WHERE id=$2",
+                           v.driver_code_1c, cur["driver_id"])
     return {"ok": True}
 
 
@@ -597,5 +607,7 @@ async def get_routes(project_id: int = Query(...)):
                        "peak_weight": round(peak_w, 1), "peak_volume": round(peak_v, 3)})
     return result
 
+
+app.include_router(integration_1c.router)
 
 app.mount("/", StaticFiles(directory="static", html=True), name="static")

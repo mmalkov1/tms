@@ -21,6 +21,11 @@ pool: asyncpg.Pool = None
 async def startup():
     global pool
     pool = await asyncpg.create_pool(DB_DSN)
+    # v11 (migrate_007): идемпотентно — возможности авто
+    await pool.execute("""
+        ALTER TABLE vehicles
+            ADD COLUMN IF NOT EXISTS can_pickup   BOOLEAN NOT NULL DEFAULT TRUE,
+            ADD COLUMN IF NOT EXISTS can_delivery BOOLEAN NOT NULL DEFAULT TRUE""")
 
 
 def t2m(t: time | None, default: int) -> int:
@@ -128,6 +133,8 @@ class VehicleIn(BaseModel):
     max_weight_kg: float
     max_volume_m3: float
     is_hired: bool = False
+    can_pickup: bool = True
+    can_delivery: bool = True
     driver_name: str | None = None
     shift_start: str = "08:00"
     shift_end: str = "18:00"
@@ -141,9 +148,9 @@ async def create_vehicle(v: VehicleIn):
             "INSERT INTO drivers (name, shift_start, shift_end) VALUES ($1,$2,$3) RETURNING id",
             v.driver_name, m2t(parse_hhmm(v.shift_start, 480)), m2t(parse_hhmm(v.shift_end, 1080)))
     vid = await pool.fetchval("""
-        INSERT INTO vehicles (name, plate, max_weight_kg, max_volume_m3, is_hired, driver_id)
-        VALUES ($1,$2,$3,$4,$5,$6) RETURNING id""",
-        v.name, v.plate, v.max_weight_kg, v.max_volume_m3, v.is_hired, driver_id)
+        INSERT INTO vehicles (name, plate, max_weight_kg, max_volume_m3, is_hired, can_pickup, can_delivery, driver_id)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id""",
+        v.name, v.plate, v.max_weight_kg, v.max_volume_m3, v.is_hired, v.can_pickup, v.can_delivery, driver_id)
     return {"vehicle_id": vid}
 
 
@@ -152,6 +159,8 @@ class VehiclePatch(BaseModel):
     max_weight_kg: float | None = None
     max_volume_m3: float | None = None
     is_hired: bool | None = None
+    can_pickup: bool | None = None
+    can_delivery: bool | None = None
 
 
 @app.patch("/api/vehicles/{vehicle_id}")
@@ -160,11 +169,14 @@ async def patch_vehicle(vehicle_id: int, v: VehiclePatch):
     if not cur:
         raise HTTPException(404, "Не знайдено")
     await pool.execute("""
-        UPDATE vehicles SET name=$1, max_weight_kg=$2, max_volume_m3=$3, is_hired=$4 WHERE id=$5""",
+        UPDATE vehicles SET name=$1, max_weight_kg=$2, max_volume_m3=$3, is_hired=$4,
+                            can_pickup=$5, can_delivery=$6 WHERE id=$7""",
         v.name or cur["name"],
         v.max_weight_kg if v.max_weight_kg is not None else cur["max_weight_kg"],
         v.max_volume_m3 if v.max_volume_m3 is not None else cur["max_volume_m3"],
-        v.is_hired if v.is_hired is not None else cur["is_hired"], vehicle_id)
+        v.is_hired if v.is_hired is not None else cur["is_hired"],
+        v.can_pickup if v.can_pickup is not None else cur["can_pickup"],
+        v.can_delivery if v.can_delivery is not None else cur["can_delivery"], vehicle_id)
     return {"ok": True}
 
 
@@ -394,8 +406,18 @@ async def plan(
 
     span = {"off": 0, "soft": 10, "hard": 100}.get(balance, 10)
     zpen = None if (not use_zones or zone_penalty >= 240) else max(1, zone_penalty)
+
+    # возможности авто: забор/доставка — жесткое ограничение (наемный "только доставка" и т.п.)
+    cap_allowed = None
+    if any(not v["can_pickup"] or not v["can_delivery"] for v in vrows):
+        cap_allowed = []
+        for o in orows:
+            key = "can_pickup" if o["kind"] == "pickup" else "can_delivery"
+            ok = [i for i, v in enumerate(vrows) if v[key]]
+            cap_allowed.append(ok if len(ok) < len(vrows) else None)
+
     routes_idx = solver.solve(stops, trucks, durations, time_limit, allowed,
-                              zone_penalty_min=zpen, span_cost=span)
+                              zone_penalty_min=zpen, span_cost=span, hard_allowed=cap_allowed)
     if routes_idx is None:
         raise HTTPException(422, "Рішення не знайдено — перевір вікна/ліміти")
 
@@ -562,7 +584,7 @@ async def get_routes(project_id: int = Query(...)):
     result = []
     for r in rr:
         ss = await pool.fetch("""
-            SELECT s.seq, s.eta, s.etd, o.id order_id, o.client, o.kind, o.address,
+            SELECT s.seq, s.eta, s.etd, o.id order_id, o.client, o.kind, o.address, o.address_extra,
                    o.lat, o.lon, o.tw_from, o.tw_to, o.weight_kg, o.volume_m3, o.service_min
             FROM route_stops s JOIN orders o ON o.id=s.order_id
             WHERE s.route_id=$1 ORDER BY s.seq""", r["id"])

@@ -15,7 +15,7 @@
   header button { background:var(--red); color:#fff; cursor:pointer; font-weight:600; }
   header button.sec { background:#fff; color:var(--navy); }
   header label { font-size:12px; display:flex; align-items:center; gap:4px; }
-  dialog { border:none; border-radius:8px; padding:0; max-width:760px; width:92%; box-shadow:0 8px 40px rgba(0,0,0,.3); }
+  dialog { border:none; border-radius:8px; padding:0; max-width:760px; width:92%; box-shadow:0 8px 40px rgba(0,0,0,.3); margin:auto; }
   dialog::backdrop { background:rgba(0,20,50,.45); }
   .dlg-head { background:var(--navy); color:#fff; padding:10px 16px; font-weight:700; display:flex; justify-content:space-between; }
   .dlg-head span:last-child { cursor:pointer; }
@@ -42,6 +42,8 @@
   .stop.depot { background:#e8edf5; cursor:default; grid-template-columns: 20px 16px 1fr 76px 120px 78px; font-weight:600; }
   .stop .cli { min-width:0; }
   .stop .cli .addr { color:#888; font-size:10px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .stop .cli .addr2 { display:none; color:#7b3fa0; font-size:10px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  #panel.wide .stop .cli .addr2 { display:block; }
   .stop .eta small { color:#888; font-weight:400; }
   .route-head { cursor:pointer; user-select:none; }
   .route-card.folded .stops { display:none; }
@@ -215,7 +217,7 @@
   <div class="dlg-head"><span>Автопарк · вибір машин для розрахунку</span><span onclick="vehDlg.close()">✕</span></div>
   <div class="dlg-body">
     <table class="vtable">
-      <thead><tr><th>Розрах.</th><th>Назва</th><th>Водій</th><th>Вантаж., кг</th><th>Об'єм, м³</th><th>Геозони</th><th>Найм</th><th></th></tr></thead>
+      <thead><tr><th>Розрах.</th><th>Назва</th><th>Водій</th><th>Вантаж., кг</th><th>Об'єм, м³</th><th>Геозони</th><th title="Може забирати товар (pickup)">Забір</th><th title="Може доставляти товар (delivery)">Дост.</th><th>Найм</th><th></th></tr></thead>
       <tbody id="vehRows"></tbody>
       <tfoot><tr>
         <td></td>
@@ -224,6 +226,8 @@
         <td><input type="number" id="nvW" value="1000"></td>
         <td><input type="number" id="nvV" value="9" step="0.1"></td>
         <td></td>
+        <td style="text-align:center"><input type="checkbox" id="nvPk" checked></td>
+        <td style="text-align:center"><input type="checkbox" id="nvDl" checked></td>
         <td style="text-align:center"><input type="checkbox" id="nvHired"></td>
         <td class="act" onclick="addVehicle()" title="Додати">➕</td>
       </tr></tfoot>
@@ -336,7 +340,11 @@ const toMin = t => { if(!t) return null; const [h,m]=String(t).split(':'); retur
 const pct = m => Math.max(0, Math.min(100, (m - TL0) / (TL1 - TL0) * 100));
 function tlHtml(twF, twT, eta, etd) {
   const wF = toMin(twF), wT = toMin(twT), a = toMin(eta), d = toMin(etd);
-  let h = '<div class="tl">';
+  const tip = [
+    (wF != null && wT != null) ? `Вікно доставки: ${hm(twF)}–${hm(twT)}` : 'Вікно доставки: не задано',
+    a != null ? `Візит: ${hm(eta)}–${hm(etd)}` : ''
+  ].filter(Boolean).join(' · ');
+  let h = `<div class="tl" title="${tip}">`;
   if (wF != null && wT != null)
     h += `<div class="win" style="left:${pct(wF)}%;width:${pct(wT)-pct(wF)}%"></div>`;
   if (a != null)
@@ -352,7 +360,7 @@ async function loadVehicles(keepSel = false) {
   selectedVeh = new Set([...selectedVeh].filter(id => vehicles.some(v=>v.id===id)));
   $('vehBtn').textContent = `Авто: ${selectedVeh.size}`;
   $('addVehSel').innerHTML = vehicles.map(v =>
-    `<option value="${v.id}">${v.name} · ${v.driver_name||'без водія'} · ${v.max_weight_kg} кг / ${v.max_volume_m3} м³</option>`).join('');
+    `<option value="${v.id}">${v.name} · ${v.driver_name||'без водія'} · ${v.max_weight_kg} кг / ${v.max_volume_m3} м³${v.can_pickup===false?' · без забору':''}${v.can_delivery===false?' · без доставки':''}</option>`).join('');
 }
 
 async function openVehDlg() {
@@ -372,6 +380,8 @@ async function openVehDlg() {
         ${ (dz[v.driver_id]||[]).includes(z.id)?'checked':'' }
         onchange="saveDriverZones(${v.driver_id}, this)"> ${z.name}</label>`).join('') : '—'}
       ${v.driver_id && geozones.length ? '<i style="color:#888">пусто = всі зони</i>' : ''}</td>
+    <td style="text-align:center"><input type="checkbox" class="vpk" ${v.can_pickup!==false?'checked':''}></td>
+    <td style="text-align:center"><input type="checkbox" class="vdl" ${v.can_delivery!==false?'checked':''}></td>
     <td style="text-align:center"><input type="checkbox" class="vhired" ${v.is_hired?'checked':''}></td>
     <td class="act" onclick="rowActions(this, ${v.id})" title="Зберегти зміни / 2й клік — деактивувати">💾</td>
   </tr>`).join('');
@@ -387,7 +397,9 @@ async function rowActions(el, vid) {
   const body = { name: tr.querySelector('.vname').value,
     max_weight_kg: +tr.querySelector('.vw').value,
     max_volume_m3: +tr.querySelector('.vv').value,
-    is_hired: tr.querySelector('.vhired').checked };
+    is_hired: tr.querySelector('.vhired').checked,
+    can_pickup: tr.querySelector('.vpk').checked,
+    can_delivery: tr.querySelector('.vdl').checked };
   await fetch(`/api/vehicles/${vid}`, {method:'PATCH',
     headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
   el.textContent='🗑'; el.dataset.armed='1'; st('Збережено. Ще клік по 🗑 — деактивувати');
@@ -400,7 +412,8 @@ async function addVehicle() {
     body: JSON.stringify({ name: $('nvName').value.trim(),
       driver_name: $('nvDriver').value.trim() || null,
       max_weight_kg: +$('nvW').value, max_volume_m3: +$('nvV').value,
-      is_hired: $('nvHired').checked })});
+      is_hired: $('nvHired').checked,
+      can_pickup: $('nvPk').checked, can_delivery: $('nvDl').checked })});
   const j = await r.json();
   selectedVeh.add(j.vehicle_id);
   $('nvName').value=''; $('nvDriver').value='';
@@ -473,6 +486,7 @@ async function runImport(projectId) {
 }
 
 async function doPlan(useZones) {
+  $('planDlg').close();
   const ids = [...selectedVeh];
   if (!ids.length) return st('Обери машини (кнопка «Авто»)');
   st('Розрахунок…');
@@ -538,7 +552,7 @@ function stopEl(o, seq, eta, etd, routeId) {
   if (o.lat) { d.dataset.lat = o.lat; d.dataset.lon = o.lon; }
   d.innerHTML = `<span class="seq">${seq ?? ''}</span>
     <span class="kind ${o.kind}">${o.kind==='pickup'?'З':'Д'}</span>
-    <span class="cli">${o.client}<div class="addr" title="${o.address||''}">${o.address||''}</div></span>
+    <span class="cli">${o.client}<div class="addr" title="${o.address||''}">${o.address||''}</div>${o.address_extra?`<div class="addr2" title="${o.address_extra}">📝 ${o.address_extra}</div>`:''}</span>
     <span class="wv">${sign}${(+o.weight_kg||0).toFixed(1)} кг<br>${sign}${(+o.volume_m3||0).toFixed(3)} м³</span>
     <span class="cum">${o.cum_weight!=null ? o.cum_weight.toFixed(1)+' кг<br>'+o.cum_volume.toFixed(2)+' м³' : ''}</span>
     ${tlHtml(o.tw_from, o.tw_to, eta, etd)}
@@ -709,7 +723,8 @@ async function loadAll() {
 }
 // перетаскивание границы панели
 (() => {
-  const bar = $('dragbar'), layout = $('layout');
+  const bar = $('dragbar'), layout = $('layout'), panel = $('panel');
+  const updWide = w => panel.classList.toggle('wide', w > window.innerWidth / 2);
   let drag = false;
   bar.addEventListener('mousedown', () => { drag = true; document.body.style.userSelect='none'; });
   window.addEventListener('mouseup', () => { drag = false; document.body.style.userSelect=''; map.invalidateSize(); });
@@ -717,7 +732,10 @@ async function loadAll() {
     if (!drag) return;
     const w = Math.min(Math.max(window.innerWidth - e.clientX, 340), window.innerWidth - 300);
     layout.style.gridTemplateColumns = `1fr 6px ${w}px`;
+    updWide(w);
   });
+  updWide(panel.getBoundingClientRect().width);
+  window.addEventListener('resize', () => updWide(panel.getBoundingClientRect().width));
 })();
 
 (async () => {

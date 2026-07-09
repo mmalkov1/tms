@@ -32,6 +32,7 @@ def solve(
     allowed_vehicles: list[list[int]] | None = None,  # per stop: индексы машин (геозоны)
     zone_penalty_min: int | None = None,  # None = жесткие зоны; N = мягкие, штраф N мин за чужую
     span_cost: int = 0,                   # баланс: штраф за разброс длительности машин
+    hard_allowed: list[list[int]] | None = None,  # ЖЕСТКО: только эти машины (возможности авто: забор/доставка)
 ) -> list[list[int]] | None:
     """Возвращает по каждой машине список индексов stops (0-based) в порядке объезда."""
     n = len(stops) + 1  # + депо
@@ -120,13 +121,25 @@ def solve(
     _add_load("Weight", lambda s_: s_.weight, [int(t.max_weight * 1000) for t in trucks])
     _add_load("Volume", lambda s_: s_.volume, [int(t.max_volume * 1000) for t in trucks])
 
-    # геозоны: точку могут обслуживать только машины разрешенных зон.
-    # Домен VehicleVar: разрешенные машины + (-1) = "точка не обслужена" (уйдет в буфер
+    # Жесткие ограничения по машинам на точке:
+    #   1) геозоны в жестком режиме (zone_penalty_min is None)
+    #   2) возможности авто (can_pickup / can_delivery) — всегда жестко
+    # Домен VehicleVar = пересечение. (-1) = "точка не обслужена" (уйдет в буфер
     # через дисжанкцию, а не сделает задачу неразрешимой).
+    hard: list[set | None] = [None] * len(stops)
     if allowed_vehicles and zone_penalty_min is None:
-        for i, allowed in enumerate(allowed_vehicles):
-            if allowed is not None and len(allowed) < k:
-                routing.VehicleVar(mgr.NodeToIndex(i + 1)).SetValues([-1] + [int(a) for a in allowed])
+        for i, a in enumerate(allowed_vehicles):
+            if a is not None:
+                hard[i] = set(int(x) for x in a)
+    if hard_allowed:
+        for i, a in enumerate(hard_allowed):
+            if a is None:
+                continue
+            s = set(int(x) for x in a)
+            hard[i] = s if hard[i] is None else (hard[i] & s)
+    for i, h in enumerate(hard):
+        if h is not None and len(h) < k:
+            routing.VehicleVar(mgr.NodeToIndex(i + 1)).SetValues([-1] + sorted(h))
 
     # разрешаем «выбросить» заявку со штрафом — план соберётся даже если всё не влазит
     penalty = 10_000_000

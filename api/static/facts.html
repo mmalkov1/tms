@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+<meta charset="utf-8">
+<title>План / Факт · TMS Культтовари</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<style>
+  :root { --navy:#00356B; --red:#E82A2C; --cream:#EFEEEC; --green:#2E8B57; }
+  * { box-sizing:border-box; margin:0; }
+  body { font-family:Manrope,system-ui,sans-serif; background:var(--cream); height:100vh; display:flex; flex-direction:column; }
+  header { background:var(--navy); color:#fff; padding:8px 16px; display:flex; gap:12px; align-items:center; }
+  header h1 { font-size:15px; }
+  header input { padding:5px 9px; border:none; border-radius:4px; font:inherit; font-size:13px; }
+  #layout { flex:1; display:flex; min-height:0; }
+  #map { flex:1; }
+  #panel { width:520px; overflow:auto; padding:10px; }
+  .route-card { background:#fff; border-radius:8px; margin-bottom:10px; overflow:hidden;
+                box-shadow:0 1px 3px rgba(0,0,0,.1); }
+  .route-head { color:#fff; padding:7px 12px; font-size:13px; font-weight:700;
+                display:flex; justify-content:space-between; }
+  table { width:100%; border-collapse:collapse; font-size:12px; }
+  th, td { padding:4px 8px; border-bottom:1px solid #eee; text-align:left; }
+  th { color:var(--navy); background:var(--cream); }
+  .late { color:var(--red); font-weight:700; } .early { color:var(--green); font-weight:700; }
+  .done td { opacity:.6; }
+</style>
+</head>
+<body>
+<header>
+  <h1>TMS · План / Факт</h1>
+  <input type="date" id="d">
+  <span id="status" style="font-size:12px"></span>
+</header>
+<div id="layout">
+  <div id="map"></div>
+  <div id="panel"></div>
+</div>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+const $ = id => document.getElementById(id);
+$('d').value = new Date().toISOString().slice(0,10);
+const map = L.map('map').setView([50.45, 30.52], 11);
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {attribution:'© OSM'}).addTo(map);
+let layers = L.layerGroup().addTo(map);
+const hm = ts => ts ? new Date(ts).toLocaleTimeString('uk-UA',{hour:'2-digit',minute:'2-digit'}) : '';
+const toMin = s => { if(!s) return null; const [h,m]=String(s).split(':'); return +h*60 + +m; };
+const tsMin = ts => { if(!ts) return null; const t=new Date(ts); return t.getHours()*60+t.getMinutes(); };
+
+function delta(eta, arrive_ts) {
+  const p = toMin(eta), f = tsMin(arrive_ts);
+  if (p==null || f==null) return '';
+  const d = f - p;
+  return `<span class="${d>5?'late':'early'}">${d>0?'+':''}${d} хв</span>`;
+}
+
+async function load() {
+  const r = await fetch(`/api/facts?plan_date=${$('d').value}`);
+  const routes = await r.json();
+  layers.clearLayers();
+  const pts = [];
+  $('panel').innerHTML = routes.map(rt => {
+    const done = rt.stops.filter(s=>s.depart_ts).length;
+    rt.stops.forEach(s => {
+      if (s.lat==null) return;
+      pts.push([s.lat, s.lon]);
+      const state = s.depart_ts ? 'done' : s.arrive_ts ? 'at' : 'wait';
+      const fill = state==='done' ? '#2E8B57' : state==='at' ? '#B8860B' : '#bbb';
+      L.circleMarker([s.lat, s.lon], {radius:8, color:rt.color, weight:2, fillColor:fill, fillOpacity:1})
+       .bindTooltip(`<b>${s.client}</b><br>${s.address||''}<br>План ${s.eta||'—'} · Факт ${hm(s.arrive_ts)||'—'}`)
+       .addTo(layers);
+    });
+    if (rt.last_gps) {
+      pts.push([rt.last_gps.lat, rt.last_gps.lon]);
+      L.marker([rt.last_gps.lat, rt.last_gps.lon], {icon: L.divIcon({className:'',
+        html:`<div style="background:${rt.color};color:#fff;border-radius:6px;padding:2px 6px;font-size:11px;font-weight:700;white-space:nowrap;box-shadow:0 0 0 2px #fff">🚚 ${rt.vehicle}</div>`,
+        iconSize:null})})
+       .bindTooltip(`${rt.driver||''} · ${hm(rt.last_gps.ts)}`)
+       .addTo(layers);
+    }
+    return `<div class="route-card">
+      <div class="route-head" style="background:${rt.color}">
+        <span>${rt.vehicle} · ${rt.driver||'—'}</span>
+        <span>${done}/${rt.stops.length} точок · GPS ${rt.last_gps?hm(rt.last_gps.ts):'—'}</span>
+      </div>
+      <table><tr><th>#</th><th>Клієнт</th><th>План</th><th>Прибув</th><th>Поїхав</th><th>Δ</th></tr>
+      ${rt.stops.map(s=>`<tr class="${s.depart_ts?'done':''}">
+        <td>${s.seq}</td><td>${s.client}</td><td>${s.eta||'—'}</td>
+        <td>${hm(s.arrive_ts)||'—'}</td><td>${hm(s.depart_ts)||'—'}</td>
+        <td>${delta(s.eta, s.arrive_ts)}</td></tr>`).join('')}
+      </table></div>`;
+  }).join('') || '<div style="padding:30px;color:#666">Маршрутів на цю дату немає</div>';
+  if (pts.length) map.fitBounds(pts, {padding:[30,30]});
+  $('status').textContent = 'Оновлено ' + new Date().toLocaleTimeString('uk-UA');
+}
+$('d').addEventListener('change', load);
+setInterval(load, 30000);
+load();
+</script>
+</body>
+</html>

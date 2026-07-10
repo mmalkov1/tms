@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+<meta charset="utf-8">
+<title>Доступ водіїв · TMS Культтовари</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  :root { --navy:#00356B; --red:#E82A2C; --cream:#EFEEEC; }
+  * { box-sizing:border-box; margin:0; }
+  body { font-family:Manrope,system-ui,sans-serif; background:var(--cream); }
+  header { background:var(--navy); color:#fff; padding:10px 16px; font-size:15px; font-weight:700; }
+  #list { max-width:760px; margin:16px auto; padding:0 12px; }
+  .card { background:#fff; border-radius:8px; padding:14px 16px; margin-bottom:12px;
+          box-shadow:0 1px 3px rgba(0,0,0,.1); display:flex; gap:16px; align-items:center; flex-wrap:wrap; }
+  .info { flex:1; min-width:220px; }
+  .name { font-weight:800; color:var(--navy); font-size:15px; }
+  .veh { font-size:13px; color:#666; margin-top:2px; }
+  .link { font-size:12px; margin-top:8px; word-break:break-all; }
+  .link a { color:var(--navy); }
+  button { padding:9px 14px; border:none; border-radius:6px; background:var(--red);
+           color:#fff; font:inherit; font-size:13px; font-weight:700; cursor:pointer; }
+  .qr { width:110px; height:110px; }
+  .hint { max-width:760px; margin:0 auto 20px; padding:0 12px; font-size:12px; color:#666; }
+</style>
+</head>
+<body>
+<header>TMS · Доступ водіїв до мобільного рейсу</header>
+<div id="list">Завантаження…</div>
+<div class="hint">Кнопка створює нове посилання і <b>анулює попереднє</b>. Водій сканує QR або
+відкриває посилання в Chrome на телефоні — сторінку варто додати на головний екран.</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<script>
+const $ = s => document.querySelector(s);
+
+async function load() {
+  const vehicles = await (await fetch('/api/vehicles')).json();
+  const drivers = new Map();
+  vehicles.forEach(v => { if (v.driver_id) {
+    if (!drivers.has(v.driver_id)) drivers.set(v.driver_id, {name:v.driver_name, veh:[]});
+    drivers.get(v.driver_id).veh.push(v.name);
+  }});
+  if (!drivers.size) { $('#list').innerHTML = 'Немає активних водіїв'; return; }
+  $('#list').innerHTML = [...drivers].map(([id, d]) => `
+    <div class="card" id="c${id}">
+      <div class="info">
+        <div class="name">${d.name}</div>
+        <div class="veh">${d.veh.join(', ')}</div>
+        <div class="link" id="l${id}">токен не створено</div>
+      </div>
+      <div class="qr" id="q${id}"></div>
+      <button onclick="gen(${id})">Створити / оновити</button>
+    </div>`).join('');
+  drivers.forEach((_, id) => show(id));
+}
+
+function render(id, token) {
+  const url = location.origin + '/driver.html?token=' + token;
+  document.getElementById('l'+id).innerHTML = `<a href="${url}" target="_blank">${url}</a>`;
+  const q = document.getElementById('q'+id);
+  q.innerHTML = '';
+  new QRCode(q, {text:url, width:110, height:110, colorDark:'#00356B'});
+}
+
+async function show(id) {
+  const j = await (await fetch(`/api/drivers/${id}/token`)).json();
+  if (j.token) render(id, j.token);
+}
+
+async function gen(id) {
+  if (!confirm('Старе посилання перестане працювати. Продовжити?')) return;
+  const j = await (await fetch(`/api/drivers/${id}/token`, {method:'POST'})).json();
+  render(id, j.token);
+}
+load();
+</script>
+</body>
+</html>

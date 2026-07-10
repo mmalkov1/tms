@@ -171,7 +171,7 @@ async def orders(project_id: int = Query(...)):
 async def vehicles():
     rows = await pool.fetch("""
         SELECT v.*, d.name AS driver_name, d.shift_start, d.shift_end, d.code_1c AS driver_code_1c
-        FROM vehicles v LEFT JOIN drivers d ON d.id=v.driver_id
+        FROM vehicles v LEFT JOIN drivers d ON d.id=v.driver_id AND d.is_active
         WHERE v.is_active ORDER BY v.id""")
     return [dict(r) for r in rows]
 

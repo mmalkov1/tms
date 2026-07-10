@@ -13,23 +13,37 @@
   header .sub { font-size:13px; opacity:.85; margin-top:2px; display:flex; gap:10px; flex-wrap:wrap; }
   .badge { display:inline-block; padding:2px 8px; border-radius:10px; font-size:12px; font-weight:700; }
   .badge.late { background:var(--red); } .badge.ok { background:var(--green); }
-  .gps { font-size:11px; opacity:.8; }
+  .gps { font-size:11px; opacity:.85; display:inline-flex; align-items:center; gap:5px; }
+  .gps .bars { display:inline-flex; align-items:flex-end; gap:2px; height:13px; }
+  .gps .bars i { width:3px; background:rgba(255,255,255,.35); border-radius:1px; }
+  .gps .bars i.on { background:#fff; }
+  .gps .bars i:nth-child(1){height:4px} .gps .bars i:nth-child(2){height:7px}
+  .gps .bars i:nth-child(3){height:10px} .gps .bars i:nth-child(4){height:13px}
   .stop { background:#fff; margin:10px 10px 0; border-radius:10px; padding:12px;
           border-left:6px solid var(--navy); box-shadow:0 1px 3px rgba(0,0,0,.08); }
   .stop.done { opacity:.55; border-left-color:var(--green); }
   .stop.current { border-left-color:var(--red); box-shadow:0 2px 8px rgba(232,42,44,.25); }
   .num { display:inline-flex; min-width:26px; height:26px; align-items:center; justify-content:center;
          background:var(--navy); color:#fff; border-radius:50%; font-weight:800; font-size:13px; margin-right:8px; }
+  .kind { display:inline-block; font-size:11px; font-weight:800; padding:2px 8px; border-radius:6px;
+          margin-left:6px; vertical-align:middle; }
+  .kind.del { background:#E8F1FF; color:var(--navy); }
+  .kind.pick { background:#FFF3D6; color:var(--amber); }
   .client { font-size:16px; font-weight:800; color:var(--navy); }
   .addr { font-size:14px; margin:4px 0 6px; }
+  .cmt { font-size:13.5px; font-weight:600; color:#7a4a00; background:#FFF3D6;
+         border-left:3px solid var(--amber); border-radius:6px; padding:7px 10px; margin:6px 0; }
   .meta { font-size:13px; color:#555; display:flex; gap:12px; flex-wrap:wrap; }
   .meta b { color:#222; }
   .fact { font-size:13px; color:var(--green); font-weight:700; margin-top:4px; }
   .btns { display:flex; gap:8px; margin-top:10px; }
+  .navbtns { display:flex; gap:8px; margin-top:8px; }
+  .navbtns a { flex:1; min-height:44px; display:flex; align-items:center; justify-content:center;
+               gap:6px; border-radius:9px; font-size:14px; font-weight:800; text-decoration:none; color:#fff; }
+  .navbtns .gmap { background:#1A73E8; } .navbtns .waze { background:#33CCFF; color:#062B45; }
   button { flex:1; min-height:54px; border:none; border-radius:9px; font:inherit;
            font-size:16px; font-weight:800; color:#fff; cursor:pointer; }
   button:disabled { opacity:.4; }
-  .b-nav { background:var(--navy); flex:0 0 54px; font-size:22px; }
   .b-arr { background:var(--red); }
   .b-dep { background:var(--green); }
   .empty { text-align:center; padding:50px 20px; color:#666; font-size:15px; }
@@ -41,7 +55,8 @@
 <header>
   <div class="veh" id="hVeh">Завантаження…</div>
   <div class="sub"><span id="hDriver"></span><span id="hDate"></span>
-    <span id="hDelay"></span><span class="gps" id="hGps">GPS: —</span></div>
+    <span id="hDelay"></span><span class="gps" id="hGps">
+      <span class="bars"><i></i><i></i><i></i><i></i></span><span id="hGpsTxt">GPS —</span></span></div>
 </header>
 <div id="list"></div>
 <div id="toast"></div>
@@ -63,7 +78,7 @@ function groupStops(stops) {
     const last = g[g.length-1];
     if (last && last.client===s.client && last.address===s.address) last.items.push(s);
     else g.push({client:s.client, address:s.address, address_extra:s.address_extra,
-                 lat:s.lat, lon:s.lon, items:[s]});
+                 kind:s.kind, lat:s.lat, lon:s.lon, items:[s]});
   }
   return g;
 }
@@ -102,18 +117,29 @@ function render() {
       const eta = toMin(first.eta);
       if (eta != null && !arrived) delay = nowMin - eta;   // + = запізнення
     }
-    const w = g.items.reduce((a,s)=>a+s.weight_kg,0), v = g.items.reduce((a,s)=>a+s.volume_m3,0);
+    const w = g.items.reduce((a,s)=>a+s.weight_kg,0);
     const win = first.tw_from ? `${first.tw_from}–${first.tw_to||''}` : 'без вікна';
-    const nav = g.lat ? `geo:${g.lat},${g.lon}?q=${g.lat},${g.lon}(${encodeURIComponent(g.client)})` : null;
+    const isPickup = g.kind === 'pickup';
+    const kindBadge = isPickup ? '<span class="kind pick">ЗАБІР</span>'
+                               : '<span class="kind del">ДОСТАВКА</span>';
+    const dest = g.lat ? `${g.lat},${g.lon}` : encodeURIComponent(g.address || g.client);
+    const gmap = `https://www.google.com/maps/dir/?api=1&destination=${dest}&travelmode=driving`;
+    const waze = g.lat ? `https://waze.com/ul?ll=${g.lat},${g.lon}&navigate=yes`
+                       : `https://waze.com/ul?q=${encodeURIComponent(g.address || g.client)}&navigate=yes`;
     const ids = g.items.map(s=>s.order_id).join(',');
     return `<div class="stop ${departed?'done':''} ${isCurrent?'current':''}">
-      <div><span class="num">${gi+1}</span><span class="client">${g.client}</span></div>
-      <div class="addr">${g.address||''}${g.address_extra?' · '+g.address_extra:''}</div>
+      <div><span class="num">${gi+1}</span><span class="client">${g.client}</span>${kindBadge}</div>
+      <div class="addr">${g.address||''}</div>
+      ${g.address_extra ? `<div class="cmt">💬 ${g.address_extra}</div>` : ''}
       <div class="meta"><span>План: <b>${first.eta||'—'}</b></span><span>Вікно: <b>${win}</b></span>
-        <span>${w.toFixed(0)} кг · ${v.toFixed(2)} м³ · ${g.items.length} завд.</span></div>
+        <span><b>${w.toFixed(0)}</b> кг · ${g.items.length} завд.</span></div>
       ${arrived ? `<div class="fact">✓ Прибув ${hm(first.arrive_ts)}${departed ? ' → Поїхав '+hm(lastIt.depart_ts):''}</div>` : ''}
-      ${departed ? '' : `<div class="btns">
-        ${nav ? `<button class="b-nav" onclick="location.href='${nav}'">🧭</button>` : ''}
+      ${departed ? '' : `
+      <div class="navbtns">
+        <a class="gmap" href="${gmap}" target="_blank" rel="noopener">🧭 Google Maps</a>
+        <a class="waze" href="${waze}" target="_blank" rel="noopener">Waze</a>
+      </div>
+      <div class="btns">
         <button class="b-arr" onclick="mark('${ids}','arrive')" ${arrived?'disabled':''}>Прибув</button>
         <button class="b-dep" onclick="mark('${ids}','depart')" ${arrived?'':'disabled'}>Поїхав</button>
       </div>`}
@@ -143,6 +169,12 @@ async function mark(ids, event) {
 let lastPos = null, queue = [];
 try { queue = JSON.parse(localStorage.getItem('gpsq')||'[]'); } catch(e) {}
 
+function setGps(bars, txt) {
+  const b = document.querySelectorAll('#hGps .bars i');
+  b.forEach((el,i)=> el.classList.toggle('on', i < bars));
+  $('hGpsTxt').textContent = txt;
+}
+
 if (navigator.geolocation && TOKEN) {
   navigator.geolocation.watchPosition(p => {
     lastPos = {lat:p.coords.latitude, lon:p.coords.longitude};
@@ -151,8 +183,10 @@ if (navigator.geolocation && TOKEN) {
       accuracy_m: p.coords.accuracy});
     if (queue.length>1000) queue = queue.slice(-1000);
     localStorage.setItem('gpsq', JSON.stringify(queue));
-    $('hGps').textContent = 'GPS: ✓ ±' + Math.round(p.coords.accuracy) + ' м';
-  }, e => { $('hGps').textContent = 'GPS: вимкнено'; },
+    const acc = p.coords.accuracy;                    // менше метрів = кращий сигнал
+    const bars = acc<=15?4 : acc<=40?3 : acc<=100?2 : 1;
+    setGps(bars, '±' + Math.round(acc) + ' м');
+  }, e => { setGps(0, 'вимкнено'); },
   {enableHighAccuracy:true, maximumAge:10000});
 }
 

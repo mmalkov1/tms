@@ -33,24 +33,24 @@
 const $ = s => document.querySelector(s);
 
 async function load() {
-  const vehicles = await (await fetch('/api/vehicles')).json();
-  const drivers = new Map();
-  vehicles.forEach(v => { if (v.driver_id) {
-    if (!drivers.has(v.driver_id)) drivers.set(v.driver_id, {name:v.driver_name, veh:[]});
-    drivers.get(v.driver_id).veh.push(v.name);
-  }});
-  if (!drivers.size) { $('#list').innerHTML = 'Немає активних водіїв'; return; }
-  $('#list').innerHTML = [...drivers].map(([id, d]) => `
-    <div class="card" id="c${id}">
+  const [drivers, vehicles] = await Promise.all([
+    (await fetch('/api/drivers')).json(),
+    (await fetch('/api/vehicles')).json(),
+  ]);
+  const vehByDrv = {};
+  vehicles.forEach(v => { if (v.driver_id) (vehByDrv[v.driver_id] ??= []).push(v.name); });
+  if (!drivers.length) { $('#list').innerHTML = 'Немає активних водіїв'; return; }
+  $('#list').innerHTML = drivers.map(d => `
+    <div class="card" id="c${d.id}">
       <div class="info">
         <div class="name">${d.name}</div>
-        <div class="veh">${d.veh.join(', ')}</div>
-        <div class="link" id="l${id}">токен не створено</div>
+        <div class="veh">${(vehByDrv[d.id] || []).join(', ') || 'без авто'}</div>
+        <div class="link" id="l${d.id}">токен не створено</div>
       </div>
-      <div class="qr" id="q${id}"></div>
-      <button onclick="gen(${id})">Створити / оновити</button>
+      <div class="qr" id="q${d.id}"></div>
+      <button onclick="gen(${d.id})">Створити / оновити</button>
     </div>`).join('');
-  drivers.forEach((_, id) => show(id));
+  drivers.forEach(d => show(d.id));
 }
 
 function render(id, token) {
@@ -62,14 +62,31 @@ function render(id, token) {
 }
 
 async function show(id) {
-  const j = await (await fetch(`/api/drivers/${id}/token`)).json();
-  if (j.token) render(id, j.token);
+  try {
+    const r = await fetch(`/api/drivers/${id}/token`);
+    if (!r.ok) return;
+    const j = await r.json();
+    if (j && j.token) render(id, j.token);
+  } catch (e) { /* токена ще немає — норм */ }
 }
 
 async function gen(id) {
   if (!confirm('Старе посилання перестане працювати. Продовжити?')) return;
-  const j = await (await fetch(`/api/drivers/${id}/token`, {method:'POST'})).json();
-  render(id, j.token);
+  const btn = event.target; btn.disabled = true;
+  try {
+    const r = await fetch(`/api/drivers/${id}/token`, {method:'POST'});
+    const raw = await r.text();
+    let j = {};
+    try { j = JSON.parse(raw); } catch (e) {}
+    if (!r.ok || !j.token) {
+      document.getElementById('l'+id).textContent =
+        'Помилка: ' + (j.detail || r.status + ' ' + raw.slice(0,120));
+      return;
+    }
+    render(id, j.token);
+  } catch (e) {
+    document.getElementById('l'+id).textContent = 'Немає зв’язку із сервером';
+  } finally { btn.disabled = false; }
 }
 load();
 </script>

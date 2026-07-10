@@ -37,10 +37,18 @@
   .meta b { color:#222; }
   .fact { font-size:13px; color:var(--green); font-weight:700; margin-top:4px; }
   .btns { display:flex; gap:8px; margin-top:10px; }
-  .navbtns { display:flex; gap:8px; margin-top:8px; }
-  .navbtns a { flex:1; min-height:44px; display:flex; align-items:center; justify-content:center;
-               gap:6px; border-radius:9px; font-size:14px; font-weight:800; text-decoration:none; color:#fff; }
-  .navbtns .gmap { background:#1A73E8; } .navbtns .waze { background:#33CCFF; color:#062B45; }
+  .actions { display:flex; gap:8px; margin-top:10px; }
+  .b-nav { flex:0 0 54px; min-height:48px; display:flex; align-items:center; justify-content:center;
+           border:none; border-radius:9px; background:var(--navy); cursor:pointer; padding:0; }
+  .b-nav svg { width:26px; height:26px; }
+  .b-nav.open { box-shadow:0 0 0 3px rgba(0,53,107,.25); }
+  .b-call { flex:1; min-height:48px; display:flex; align-items:center; justify-content:center; gap:7px;
+            border-radius:9px; font-size:15px; font-weight:800; text-decoration:none; }
+  .b-call.on  { background:var(--green); color:#fff; }
+  .b-call.off { background:#EEE; color:#999; pointer-events:none; }
+  .b-map { flex:1; min-height:48px; display:flex; align-items:center; justify-content:center;
+           border-radius:9px; font-size:14px; font-weight:800; text-decoration:none; }
+  .b-map.gmap { background:#1A73E8; color:#fff; } .b-map.waze { background:#33CCFF; color:#062B45; }
   button { flex:1; min-height:54px; border:none; border-radius:9px; font:inherit;
            font-size:16px; font-weight:800; color:#fff; cursor:pointer; }
   button:disabled { opacity:.4; }
@@ -64,6 +72,18 @@
 const qs = new URLSearchParams(location.search);
 const TOKEN = qs.get('token');
 const $ = id => document.getElementById(id);
+
+const NAV_ARROW = '<svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11l18-8-8 18-2-8-8-2z"/></svg>';
+const NAV_PHONE = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.13.96.36 1.9.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.9.34 1.85.57 2.81.7A2 2 0 0 1 22 16.92z"/></svg>';
+
+// показать/скрыть навигаторы: замещают кнопку «Подзвонити»
+function toggleNav(gi) {
+  const act = $('act' + gi);
+  const open = act.classList.toggle('open-nav');
+  act.querySelector('.b-nav').classList.toggle('open', open);
+  $('calls' + gi).style.display = open ? 'none' : '';
+  act.querySelectorAll('.b-map').forEach(a => a.style.display = open ? '' : 'none');
+}
 let trip = null;
 
 function toast(m) { const t=$('toast'); t.textContent=m; t.style.display='block';
@@ -76,9 +96,11 @@ function groupStops(stops) {
   const g = [];
   for (const s of stops) {
     const last = g[g.length-1];
-    if (last && last.client===s.client && last.address===s.address) last.items.push(s);
-    else g.push({client:s.client, address:s.address, address_extra:s.address_extra,
-                 kind:s.kind, lat:s.lat, lon:s.lon, items:[s]});
+    if (last && last.client===s.client && last.address===s.address) {
+      last.items.push(s);
+      if (!last.phone && s.phone) last.phone = s.phone;
+    } else g.push({client:s.client, address:s.address, address_extra:s.address_extra,
+                 kind:s.kind, lat:s.lat, lon:s.lon, phone:s.phone, items:[s]});
   }
   return g;
 }
@@ -126,6 +148,11 @@ function render() {
     const gmap = `https://www.google.com/maps/dir/?api=1&destination=${dest}&travelmode=driving`;
     const waze = g.lat ? `https://waze.com/ul?ll=${g.lat},${g.lon}&navigate=yes`
                        : `https://waze.com/ul?q=${encodeURIComponent(g.address || g.client)}&navigate=yes`;
+    const phone = (g.phone || '').trim();
+    const tel = phone.replace(/[^\d+]/g, '');
+    const call = phone
+      ? `<a class="b-call on" href="tel:${tel}">${NAV_PHONE} Подзвонити</a>`
+      : `<span class="b-call off">${NAV_PHONE} Подзвонити</span>`;
     const ids = g.items.map(s=>s.order_id).join(',');
     return `<div class="stop ${departed?'done':''} ${isCurrent?'current':''}">
       <div><span class="num">${gi+1}</span><span class="client">${g.client}</span>${kindBadge}</div>
@@ -135,9 +162,11 @@ function render() {
         <span><b>${w.toFixed(0)}</b> кг · ${g.items.length} завд.</span></div>
       ${arrived ? `<div class="fact">✓ Прибув ${hm(first.arrive_ts)}${departed ? ' → Поїхав '+hm(lastIt.depart_ts):''}</div>` : ''}
       ${departed ? '' : `
-      <div class="navbtns">
-        <a class="gmap" href="${gmap}" target="_blank" rel="noopener">🧭 Google Maps</a>
-        <a class="waze" href="${waze}" target="_blank" rel="noopener">Waze</a>
+      <div class="actions" id="act${gi}">
+        <button class="b-nav" onclick="toggleNav(${gi})" aria-label="Навігація">${NAV_ARROW}</button>
+        <span id="calls${gi}">${call}</span>
+        <a class="b-map gmap" href="${gmap}" target="_blank" rel="noopener" style="display:none">Google Maps</a>
+        <a class="b-map waze" href="${waze}" target="_blank" rel="noopener" style="display:none">Waze</a>
       </div>
       <div class="btns">
         <button class="b-arr" onclick="mark('${ids}','arrive')" ${arrived?'disabled':''}>Прибув</button>

@@ -141,6 +141,9 @@ def _parse_order(el: ET.Element) -> dict | None:
         "address": g("ADDRESS"),
         "address_extra": g("COMMENTS_SHOP") or None,
         "comment": g("COMMENTS") or None,
+        # v21: телефон точки — тег в выгрузке 1С пока не определён; при появлении
+        # добавить сюда фактическое имя (напр. g("PHONE")). Сейчас всегда None.
+        "phone": g("PHONE") or g("CONTACT_PHONE") or g("SHOP_PHONE") or None,
         "lat": lat, "lon": lon,
         "tw_from": tw_from, "tw_to": tw_to,
         "service_min": service or 15,
@@ -207,8 +210,8 @@ async def import_orders(request: Request,
             res = await c.execute("""
                 INSERT INTO orders (plan_date, doc_number, doc_ref, kind, client, address,
                     address_extra, lat, lon, tw_from, tw_to, service_min, weight_kg, volume_m3,
-                    status_1c, project_id)
-                VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
+                    status_1c, project_id, phone)
+                VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
                 ON CONFLICT (project_id, doc_number) DO UPDATE SET
                     kind=EXCLUDED.kind, client=EXCLUDED.client, address=EXCLUDED.address,
                     address_extra=EXCLUDED.address_extra,
@@ -216,10 +219,11 @@ async def import_orders(request: Request,
                     lon=COALESCE(EXCLUDED.lon, orders.lon),
                     tw_from=EXCLUDED.tw_from, tw_to=EXCLUDED.tw_to,
                     service_min=EXCLUDED.service_min,
-                    weight_kg=EXCLUDED.weight_kg, volume_m3=EXCLUDED.volume_m3
+                    weight_kg=EXCLUDED.weight_kg, volume_m3=EXCLUDED.volume_m3,
+                    phone=COALESCE(EXCLUDED.phone, orders.phone)
             """, plan_date, r["doc_number"], r["doc_ref"], r["kind"], r["client"], r["address"],
                 extra, r["lat"], r["lon"], r["tw_from"], r["tw_to"], r["service_min"],
-                r["weight_kg"], r["volume_m3"], "1C", project_id)
+                r["weight_kg"], r["volume_m3"], "1C", project_id, r["phone"])
             if res.startswith("INSERT"):
                 ins += 1
             else:

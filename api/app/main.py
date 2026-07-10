@@ -42,6 +42,8 @@ async def startup():
     await integration_1c.init(pool)
     # v17 (migrate_011): мобильный кабинет водителя — токены, факты, GPS
     await driver.init(pool)
+    # v21 (migrate_012): контактный телефон точки — для кнопки «Подзвонити»
+    await pool.execute("ALTER TABLE orders ADD COLUMN IF NOT EXISTS phone TEXT")
 
 
 def norm_addr(a: str | None) -> str | None:

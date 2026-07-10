@@ -115,7 +115,9 @@ async def driver_trip(token: str, d: date | None = Query(None)):
         SELECT r.id, r.plan_date, r.color, r.total_km, r.depart_time, r.return_time,
                v.name AS vehicle_name, v.plate
         FROM routes r JOIN vehicles v ON v.id = r.vehicle_id
-        WHERE r.driver_id = $1 AND r.plan_date = $2
+        WHERE r.plan_date = $2
+          AND (r.driver_id = $1
+               OR r.vehicle_id IN (SELECT id FROM vehicles WHERE driver_id = $1 AND is_active))
         ORDER BY r.id DESC LIMIT 1""", drv["id"], day)
     if not route:
         return {"driver": drv["name"], "date": day.isoformat(), "route": None, "stops": []}
@@ -165,7 +167,9 @@ async def stop_event(token: str, order_id: int, body: StopEvent):
     rs = await pool.fetchrow("""
         SELECT s.route_id FROM route_stops s
         JOIN routes r ON r.id = s.route_id
-        WHERE s.order_id = $1 AND r.driver_id = $2
+        WHERE s.order_id = $1
+          AND (r.driver_id = $2
+               OR r.vehicle_id IN (SELECT id FROM vehicles WHERE driver_id = $2 AND is_active))
         ORDER BY r.plan_date DESC, r.id DESC LIMIT 1""", order_id, drv["id"])
     if not rs:
         raise HTTPException(404, "Точка не на твоєму маршруті")
@@ -202,7 +206,9 @@ async def position(token: str, body: GpsBatch):
     if not body.points:
         return {"saved": 0}
     route_id = await pool.fetchval("""
-        SELECT id FROM routes WHERE driver_id=$1 AND plan_date=$2
+        SELECT id FROM routes WHERE plan_date=$2
+          AND (driver_id=$1
+               OR vehicle_id IN (SELECT id FROM vehicles WHERE driver_id=$1 AND is_active))
         ORDER BY id DESC LIMIT 1""", drv["id"], kyiv_today())
     rows = [(drv["id"], route_id,
              datetime.fromtimestamp(p.ts / 1000, tz=timezone.utc),
@@ -219,7 +225,8 @@ async def position(token: str, body: GpsBatch):
 async def facts(plan_date: date = Query(...)):
     routes = await pool.fetch("""
         SELECT r.id, r.color, r.plan_date, r.project_id,
-               v.name AS vehicle_name, d.id AS driver_id, d.name AS driver_name
+               v.name AS vehicle_name, v.driver_id AS veh_driver_id,
+               d.id AS driver_id, d.name AS driver_name
         FROM routes r JOIN vehicles v ON v.id=r.vehicle_id
         LEFT JOIN drivers d ON d.id=r.driver_id
         WHERE r.plan_date = $1 ORDER BY r.id""", plan_date)
@@ -234,8 +241,9 @@ async def facts(plan_date: date = Query(...)):
             WHERE s.route_id=$1 ORDER BY s.seq""", r["id"])
         last = await pool.fetchrow("""
             SELECT ts, lat, lon, speed_kmh FROM gps_points
-            WHERE driver_id=$1 ORDER BY ts DESC LIMIT 1""", r["driver_id"]) \
-            if r["driver_id"] else None
+            WHERE driver_id = ANY($1::int[]) ORDER BY ts DESC LIMIT 1""",
+            [i for i in {r["driver_id"], r["veh_driver_id"]} if i]) \
+            if (r["driver_id"] or r["veh_driver_id"]) else None
         out.append({
             "route_id": r["id"], "color": r["color"],
             "vehicle": r["vehicle_name"], "driver": r["driver_name"],

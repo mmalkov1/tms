@@ -235,7 +235,8 @@
       <tfoot><tr>
         <td></td>
         <td><input type="text" id="nvName" placeholder="Газель АА1234ВВ"></td>
-        <td><input type="text" id="nvDriver" placeholder="ПІБ водія"></td>
+        <td><select id="nvDriverSel" onchange="$('nvDriverNew').style.display=this.value==='new'?'block':'none'" style="width:100%"></select>
+            <input type="text" id="nvDriverNew" placeholder="ПІБ нового водія" style="display:none;margin-top:2px"></td>
         <td></td>
         <td><input type="number" id="nvW" value="1000"></td>
         <td><input type="number" id="nvV" value="9" step="0.1"></td>
@@ -367,9 +368,17 @@ function tlHtml(twF, twT, eta, etd) {
 }
 
 let selectedVeh = new Set();
+let driversList = [];
+
+function drvOptions(curId) {
+  return `<option value="">— без водія —</option>` + driversList.map(d =>
+    `<option value="${d.id}" ${d.id===curId?'selected':''}>${d.name}</option>`).join('');
+}
 
 async function loadVehicles(keepSel = false) {
-  vehicles = await (await fetch('/api/vehicles')).json();
+  const [vRes, dRes] = await Promise.all([fetch('/api/vehicles'), fetch('/api/drivers')]);
+  vehicles = await vRes.json();
+  driversList = await dRes.json();
   if (!keepSel) selectedVeh = new Set(vehicles.filter(v=>!v.is_hired).map(v=>v.id));
   selectedVeh = new Set([...selectedVeh].filter(id => vehicles.some(v=>v.id===id)));
   $('vehBtn').textContent = `Авто: ${selectedVeh.size}`;
@@ -387,7 +396,7 @@ async function openVehDlg() {
   $('vehRows').innerHTML = vehicles.map(v => `<tr data-vid="${v.id}">
     <td style="text-align:center"><input type="checkbox" class="vsel" value="${v.id}" ${selectedVeh.has(v.id)?'checked':''}></td>
     <td><input type="text" class="vname" value="${v.name}"></td>
-    <td>${v.driver_name||'—'}</td>
+    <td><select class="vdrv" style="width:110px">${drvOptions(v.driver_id)}</select></td>
     <td><input type="text" class="vc1" value="${v.code_1c||''}" placeholder="авто" style="width:82px;margin-bottom:2px" title="Код авто в 1С (Kult_Транспорт)">
         <input type="text" class="vdc1" value="${v.driver_code_1c||''}" placeholder="водій" style="width:82px" title="Код водія в 1С (ФизическиеЛица)" ${v.driver_id?'':'disabled'}></td>
     <td><input type="number" class="vw" value="${v.max_weight_kg}"></td>
@@ -402,6 +411,8 @@ async function openVehDlg() {
     <td style="text-align:center"><input type="checkbox" class="vhired" ${v.is_hired?'checked':''}></td>
     <td class="act" onclick="rowActions(this, ${v.id})" title="Зберегти зміни / 2й клік — деактивувати">💾</td>
   </tr>`).join('');
+  $('nvDriverSel').innerHTML = drvOptions(null) + '<option value="new">+ новий водій…</option>';
+  $('nvDriverNew').style.display = 'none';
   $('vehDlg').showModal();
 }
 
@@ -411,6 +422,9 @@ async function rowActions(el, vid) {
     await fetch(`/api/vehicles/${vid}`, {method:'DELETE'});
     st('Машину деактивовано'); await loadVehicles(true); openVehDlg(); return;
   }
+  const newDrvId = +tr.querySelector('.vdrv').value || 0;
+  const vcur = vehicles.find(x => x.id === vid);
+  const drvChanged = newDrvId !== (vcur?.driver_id || 0);
   const body = { name: tr.querySelector('.vname').value,
     max_weight_kg: +tr.querySelector('.vw').value,
     max_volume_m3: +tr.querySelector('.vv').value,
@@ -418,10 +432,15 @@ async function rowActions(el, vid) {
     can_pickup: tr.querySelector('.vpk').checked,
     can_delivery: tr.querySelector('.vdl').checked,
     code_1c: tr.querySelector('.vc1').value.trim(),
+    driver_id: newDrvId,
     driver_code_1c: tr.querySelector('.vdc1').disabled ? null : tr.querySelector('.vdc1').value.trim() };
   const resp = await fetch(`/api/vehicles/${vid}`, {method:'PATCH',
     headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
   if (!resp.ok) { st('Помилка збереження авто: ' + resp.status); return; }
+  if (drvChanged) {           // геозони/код 1С прив'язані до водія — перемалювати
+    st('Збережено, водія змінено');
+    await loadVehicles(true); openVehDlg(); return;
+  }
   const vv = vehicles.find(x => x.id === vid);
   if (vv) Object.assign(vv, body);   // локальный кеш = БД
   el.textContent='🗑'; el.dataset.armed='1'; st('Збережено. Ще клік по 🗑 — деактивувати');
@@ -430,15 +449,18 @@ async function rowActions(el, vid) {
 
 async function addVehicle() {
   if (!$('nvName').value.trim()) return st('Вкажи назву авто');
+  const sel = $('nvDriverSel').value;
+  if (sel === 'new' && !$('nvDriverNew').value.trim()) return st('Вкажи ПІБ нового водія');
   const r = await fetch('/api/vehicles', {method:'POST', headers:{'Content-Type':'application/json'},
     body: JSON.stringify({ name: $('nvName').value.trim(),
-      driver_name: $('nvDriver').value.trim() || null,
+      driver_id: (sel && sel !== 'new') ? +sel : null,
+      driver_name: sel === 'new' ? $('nvDriverNew').value.trim() : null,
       max_weight_kg: +$('nvW').value, max_volume_m3: +$('nvV').value,
       is_hired: $('nvHired').checked,
       can_pickup: $('nvPk').checked, can_delivery: $('nvDl').checked })});
   const j = await r.json();
   selectedVeh.add(j.vehicle_id);
-  $('nvName').value=''; $('nvDriver').value='';
+  $('nvName').value=''; $('nvDriverNew').value='';
   await loadVehicles(true); openVehDlg();
 }
 

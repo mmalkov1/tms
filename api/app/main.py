@@ -184,18 +184,37 @@ class VehicleIn(BaseModel):
     is_hired: bool = False
     can_pickup: bool = True
     can_delivery: bool = True
-    driver_name: str | None = None
+    driver_id: int | None = None        # існуючий водій (пріоритет)
+    driver_name: str | None = None      # новий водій (створюється, якщо ПІБ не знайдено)
     shift_start: str = "08:00"
     shift_end: str = "18:00"
+
+
+@app.get("/api/drivers")
+async def get_drivers():
+    rows = await pool.fetch(
+        "SELECT id, name, code_1c FROM drivers WHERE is_active ORDER BY name")
+    return [dict(r) for r in rows]
 
 
 @app.post("/api/vehicles")
 async def create_vehicle(v: VehicleIn):
     driver_id = None
-    if v.driver_name:
+    if v.driver_id:
         driver_id = await pool.fetchval(
-            "INSERT INTO drivers (name, shift_start, shift_end) VALUES ($1,$2,$3) RETURNING id",
-            v.driver_name, m2t(parse_hhmm(v.shift_start, 480)), m2t(parse_hhmm(v.shift_end, 1080)))
+            "SELECT id FROM drivers WHERE id=$1 AND is_active", v.driver_id)
+        if not driver_id:
+            raise HTTPException(404, "Водія не знайдено")
+    elif v.driver_name:
+        # захист від дублів: спершу шукаємо активного водія з таким ПІБ
+        driver_id = await pool.fetchval(
+            "SELECT id FROM drivers WHERE is_active AND upper(trim(name))=upper(trim($1))",
+            v.driver_name)
+        if not driver_id:
+            driver_id = await pool.fetchval(
+                "INSERT INTO drivers (name, shift_start, shift_end) VALUES ($1,$2,$3) RETURNING id",
+                v.driver_name.strip(), m2t(parse_hhmm(v.shift_start, 480)),
+                m2t(parse_hhmm(v.shift_end, 1080)))
     vid = await pool.fetchval("""
         INSERT INTO vehicles (name, plate, max_weight_kg, max_volume_m3, is_hired, can_pickup, can_delivery, driver_id)
         VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id""",
@@ -212,6 +231,7 @@ class VehiclePatch(BaseModel):
     can_delivery: bool | None = None
     code_1c: str | None = None          # код авто в 1С (Kult_Транспорт)
     driver_code_1c: str | None = None   # код водителя в 1С (ФизическиеЛица)
+    driver_id: int | None = None        # None = не змінювати, 0 = зняти, >0 = призначити
 
 
 @app.patch("/api/vehicles/{vehicle_id}")
@@ -229,6 +249,15 @@ async def patch_vehicle(vehicle_id: int, v: VehiclePatch):
         v.can_pickup if v.can_pickup is not None else cur["can_pickup"],
         v.can_delivery if v.can_delivery is not None else cur["can_delivery"],
         v.code_1c if v.code_1c is not None else cur["code_1c"], vehicle_id)
+    if v.driver_id is not None:         # 0 = зняти водія
+        new_drv = None
+        if v.driver_id > 0:
+            new_drv = await pool.fetchval(
+                "SELECT id FROM drivers WHERE id=$1 AND is_active", v.driver_id)
+            if not new_drv:
+                raise HTTPException(404, "Водія не знайдено")
+        await pool.execute("UPDATE vehicles SET driver_id=$1 WHERE id=$2", new_drv, vehicle_id)
+        cur = await pool.fetchrow("SELECT * FROM vehicles WHERE id=$1", vehicle_id)
     if v.driver_code_1c is not None and cur["driver_id"]:
         await pool.execute("UPDATE drivers SET code_1c=$1 WHERE id=$2",
                            v.driver_code_1c, cur["driver_id"])

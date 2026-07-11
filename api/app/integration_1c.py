@@ -103,6 +103,14 @@ def _parse_order(el: ET.Element) -> dict | None:
         x = el.find(tag)
         return (x.text or "").strip() if x is not None and x.text else default
 
+    def g_any(tag, default=""):
+        """Как g(), но ищет тег на любом уровне вложенности внутри ORDER.
+        1С может писать реквизит как прямым потомком, так и внутри строк заказа."""
+        x = el.find(tag)                       # сперва прямой потомок
+        if x is None or not (x.text or "").strip():
+            x = next((e for e in el.iter(tag) if (e.text or "").strip()), None)
+        return (x.text or "").strip() if x is not None and x.text else default
+
     code = g("CODE")
     if not code:
         return None
@@ -151,9 +159,9 @@ def _parse_order(el: ET.Element) -> dict | None:
         "address": g("ADDRESS"),
         "address_extra": g("COMMENTS_SHOP") or None,
         "comment": g("COMMENTS") or None,
-        # v21/v22: телефон контактної особи та кількість місць (теги 1С підтверджені)
-        "phone": g("PHONE") or None,
-        "seats": _int_or_none(g("SEATS")),
+        # v21/v22/v23: телефон і кількість місць — шукаємо на будь-якому рівні
+        "phone": g_any("PHONE") or None,
+        "seats": _int_or_none(g_any("SEATS")),
         "lat": lat, "lon": lon,
         "tw_from": tw_from, "tw_to": tw_to,
         "service_min": service or 15,
@@ -178,6 +186,30 @@ async def import_orders(request: Request,
         return _err(f"XML не розібрано: {e}")
 
     order_els = root.findall(".//ORDER") if root.tag != "ORDER" else [root]
+
+    # --- ВРЕМЕННАЯ ДИАГНОСТИКА (v23): что реально прислала 1С ---
+    if order_els:
+        first = order_els[0]
+        direct = [ch.tag for ch in first]                       # прямые потомки ORDER
+        all_tags = sorted({e.tag for e in first.iter()})        # все теги внутри ORDER (любой уровень)
+        print("=" * 60, flush=True)
+        print("[1C-DEBUG] ORDER, прямые потомки:", direct, flush=True)
+        print("[1C-DEBUG] ORDER, все теги внутри:", all_tags, flush=True)
+        for tag in ("SEATS", "PHONE"):
+            found = first.findall(f".//{tag}")                  # ищем на любом уровне
+            if found:
+                for el in found:
+                    parent = next((p.tag for p in first.iter()
+                                   for c in p if c is el), "ORDER")
+                    print(f"[1C-DEBUG] {tag}: НАЙДЕН, родитель=<{parent}>, "
+                          f"значение={el.text!r}", flush=True)
+            else:
+                print(f"[1C-DEBUG] {tag}: НЕТ В XML ВООБЩЕ", flush=True)
+        print("[1C-DEBUG] сырой XML первого ORDER:", flush=True)
+        print(ET.tostring(first, encoding="unicode")[:1500], flush=True)
+        print("=" * 60, flush=True)
+    # --- КОНЕЦ ДИАГНОСТИКИ ---
+
     rows = [r for r in (_parse_order(el) for el in order_els) if r]
     if not rows:
         return _err("У файлі немає жодного ORDER з CODE")

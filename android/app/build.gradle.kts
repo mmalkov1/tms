@@ -18,8 +18,8 @@ android {
         applicationId = "ua.kult.tmsdriver"
         minSdk = 26            // Android 8.0+
         targetSdk = 34
-        versionCode = 2        // ПІДНІМАТИ на кожну нову збірку APK
-        versionName = "1.1"
+        versionCode = 3        // ПІДНІМАТИ на кожну нову збірку APK
+        versionName = "1.2"
     }
 
     signingConfigs {

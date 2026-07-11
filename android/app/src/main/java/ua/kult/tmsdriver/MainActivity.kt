@@ -69,6 +69,7 @@ class MainActivity : AppCompatActivity() {
         webView = findViewById<WebView>(R.id.web).apply {
             settings.javaScriptEnabled = true
             settings.domStorageEnabled = true
+            settings.cacheMode = android.webkit.WebSettings.LOAD_NO_CACHE  // v27: driver.html завжди свіжий
             settings.userAgentString = settings.userAgentString + " TMSKultApp/1.0"
             webViewClient = object : WebViewClient() {
                 override fun shouldOverrideUrlLoading(
@@ -82,6 +83,7 @@ class MainActivity : AppCompatActivity() {
             loadUrl("$BASE_URL/driver.html?token=$token")
         }
         askPermissionsAndStart()
+        Updater.check(this, BASE_URL)          // v27: оновлення «по повітрю»
     }
 
     private fun askPermissionsAndStart() {

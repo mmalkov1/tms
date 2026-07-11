@@ -25,6 +25,9 @@ services:
       VISICOM_API_KEY: ${VISICOM_API_KEY:-}
       TMS_1C_LOGIN: ${TMS_1C_LOGIN:-1c}
       TMS_1C_PASSWORD: ${TMS_1C_PASSWORD:-kultukr-1c}
+      APK_UPLOAD_KEY: ${APK_UPLOAD_KEY:-}
+    volumes:
+      - tms_apk:/app/apk
     depends_on: [db, osrm]
     restart: unless-stopped
     networks:
@@ -33,6 +36,7 @@ services:
 
 volumes:
   tms_pgdata:
+  tms_apk:
 
 networks:
   n8n_default:

@@ -1,25 +1,73 @@
 # ТМС Культтовари — застосунок водія (Android)
 
-WebView поверх `driver.html` + foreground-сервіс GPS (фаза 2).
+WebView поверх `driver.html` + foreground-сервіс GPS + оновлення «по повітрю» (v27).
 
-## Як отримати APK
-1. `git push` (workflow `Android APK` збирає автоматично при змінах в `android/**`)
-   або GitHub → Actions → Android APK → Run workflow.
-2. Actions → останній запуск → Artifacts → `tms-driver-apk` → app-debug.apk.
-3. Скинути водію (Telegram/пошта), встановити з дозволом «невідомі джерела».
+## Разова настройка (один раз, далі не чіпати)
 
-## Перший запуск
-- Водій вставляє токен (або повне посилання від логіста) → «Увійти».
-- Дозволи: геолокація («Під час використання» достатньо — сервіс foreground) + сповіщення.
-- У шторці висить «Передача GPS у рейсі» — трек пишеться навіть зі згорнутим застосунком.
+### 1. Створити keystore
+На своїй машині (потрібна Java):
+```
+keytool -genkey -v -keystore keystore.jks -keyalg RSA -keysize 2048 \
+        -validity 10000 -alias tms
+```
+Придумай пароль. **Збережи keystore.jks і пароль у надійному місці** —
+без них не можна випустити оновлення (Android вимагає той самий ключ).
+У git файл НЕ комітиться (є в .gitignore).
+
+### 2. Ключ заливу на сервер
+На сервері згенерувати і додати в /opt/tms/.env:
+```
+openssl rand -hex 16                       # скопіювати результат
+echo 'APK_UPLOAD_KEY=<результат>' >> /opt/tms/.env
+```
+
+### 3. GitHub Secrets
+Repo → Settings → Secrets and variables → Actions → New secret:
+
+| Секрет | Значення |
+|---|---|
+| `KEYSTORE_B64` | `base64 -w0 keystore.jks` (одним рядком) |
+| `KEYSTORE_PASSWORD` | пароль keystore |
+| `KEY_ALIAS` | `tms` |
+| `KEY_PASSWORD` | пароль ключа (зазвичай той самий) |
+| `APK_UPLOAD_KEY` | значення APK_UPLOAD_KEY з .env |
+
+## Випуск нової версії застосунку
+
+1. Змінити код у `android/`.
+2. **Підняти `versionCode`** в `android/app/build.gradle.kts` (2 → 3 → …)
+   і за бажанням `versionName`. Без цього водії оновлення не побачать.
+3. `git push` — CI збирає підписаний release і сам заливає на сервер.
+4. Водій відкриває застосунок → діалог «Є оновлення» → «Оновити» → готово.
+   Текст діалогу = повідомлення коміта.
+
+## Що НЕ вимагає нового APK
+
+Уся логіка рейсу — в `driver.html` на сервері. Кнопки, поля, статуси, вёрстка,
+API — це звичайний деплой контейнера, водій нічого не встановлює
+(WebView з `LOAD_NO_CACHE` завжди тягне свіжу сторінку).
+
+APK потрібен лише для нативного: GPS-сервіс, дозволи, екран токена, апдейтер.
+
+## Перший запуск у водія
+
+- Токен (або посилання від логіста) → «Увійти».
+- Дозволи: геолокація + сповіщення.
+- **Батарея → «Без обмежень»** — інакше система придушить GPS у фоні
+  (Xiaomi/Huawei/Samsung особливо; на Xiaomi ще «Автозапуск» увімкнути).
+- У шторці висить «Передача GPS у рейсі» — трек іде і зі згорнутим застосунком.
 
 ## Архітектура
-- `MainActivity` — екран токена / WebView (UA-суфікс `TMSKultApp` вимикає web-GPS на сторінці).
-- `LocationService` — FusedLocation 10–15 с, черга до 1000 точок у SharedPreferences,
-  батч ≤500 кожні 20 с на `POST /api/driver/{token}/position` (той самий контракт, що web).
-- Сервіс шле accuracy у Activity → `nativeGps(acc)` оновлює індикатор сигналу в шапці.
+
+- `MainActivity` — екран токена / WebView (UA-суфікс `TMSKultApp` вимикає web-GPS
+  на сторінці, щоб не було дублів точок).
+- `LocationService` — FusedLocation 15 с, черга до 1000 точок у SharedPreferences,
+  батч ≤500 кожні 20 с на `POST /api/driver/{token}/position`.
+- `Updater` — `GET /api/app/version`, порівняння versionCode, скачування
+  `GET /api/app/apk`, установка через FileProvider.
 
 ## Далі (не в цій версії)
-- release-підпис (keystore) і власне оновлення APK
-- ACCESS_BACKGROUND_LOCATION + автостарт після перезавантаження телефона
+
+- автостарт сервісу після перезавантаження телефона (BOOT_COMPLETED)
 - кнопка «Стоп трек» у нотифікації
+- фото накладної на точці

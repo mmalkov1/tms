@@ -1,4 +1,5 @@
 name: Android APK
+
 on:
   push:
     paths: ['android/**', '.github/workflows/android-apk.yml']
@@ -9,17 +10,50 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
+
       - uses: gradle/actions/setup-gradle@v3
         with:
           gradle-version: '8.7'
-      - name: Build debug APK
-        run: gradle assembleDebug
+          cache-disabled: true
+
+      # keystore приїжджає з секрету у base64 (див. android/README.md)
+      - name: Restore keystore
+        run: echo "${{ secrets.KEYSTORE_B64 }}" | base64 -d > android/keystore.jks
+
+      - name: Build signed release APK
         working-directory: android
+        env:
+          KEYSTORE_FILE: keystore.jks
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: gradle assembleRelease
+
+      # версія береться прямо з build.gradle.kts — джерело правди одне
+      - name: Read version
+        id: ver
+        working-directory: android
+        run: |
+          echo "code=$(grep -oP 'versionCode\s*=\s*\K\d+' app/build.gradle.kts)" >> $GITHUB_OUTPUT
+          echo "name=$(grep -oP 'versionName\s*=\s*"\K[^"]+' app/build.gradle.kts)" >> $GITHUB_OUTPUT
+
+      - name: Upload APK to TMS server
+        run: |
+          curl -sS -f -X POST https://tms.rpa.com.ua/api/app/upload \
+            -F "key=${{ secrets.APK_UPLOAD_KEY }}" \
+            -F "version_code=${{ steps.ver.outputs.code }}" \
+            -F "version_name=${{ steps.ver.outputs.name }}" \
+            -F "notes=${{ github.event.head_commit.message }}" \
+            -F "apk=@android/app/build/outputs/apk/release/app-release.apk"
+          echo "Залито: v${{ steps.ver.outputs.name }} (code ${{ steps.ver.outputs.code }})"
+
+      # запасний шлях: скачати руками, якщо сервер недоступний
       - uses: actions/upload-artifact@v4
         with:
           name: tms-driver-apk
-          path: android/app/build/outputs/apk/debug/app-debug.apk
+          path: android/app/build/outputs/apk/release/app-release.apk

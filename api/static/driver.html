@@ -42,8 +42,9 @@
            border:none; border-radius:9px; background:var(--navy); cursor:pointer; padding:0; }
   .b-nav svg { width:26px; height:26px; }
   .b-nav.open { box-shadow:0 0 0 3px rgba(0,53,107,.25); }
-  .b-call { flex:1; min-height:48px; display:flex; align-items:center; justify-content:center; gap:7px;
-            border-radius:9px; font-size:15px; font-weight:800; text-decoration:none; }
+  .b-call { flex:1 1 auto; min-width:0; min-height:48px; display:flex; align-items:center;
+            justify-content:center; gap:7px; border-radius:9px; font-size:15px; font-weight:800;
+            text-decoration:none; }
   .b-call.on  { background:var(--green); color:#fff; }
   .b-call.off { background:#EEE; color:#999; pointer-events:none; }
   .b-map { flex:1; min-height:48px; display:flex; align-items:center; justify-content:center;
@@ -81,7 +82,7 @@ function toggleNav(gi) {
   const act = $('act' + gi);
   const open = act.classList.toggle('open-nav');
   act.querySelector('.b-nav').classList.toggle('open', open);
-  $('calls' + gi).style.display = open ? 'none' : '';
+  $('call' + gi).style.display = open ? 'none' : '';
   act.querySelectorAll('.b-map').forEach(a => a.style.display = open ? '' : 'none');
 }
 let trip = null;
@@ -151,20 +152,21 @@ function render() {
     const phone = (g.phone || '').trim();
     const tel = phone.replace(/[^\d+]/g, '');
     const call = phone
-      ? `<a class="b-call on" href="tel:${tel}">${NAV_PHONE} Подзвонити</a>`
-      : `<span class="b-call off">${NAV_PHONE} Подзвонити</span>`;
+      ? `<a class="b-call on" id="call${gi}" href="tel:${tel}">${NAV_PHONE} Подзвонити</a>`
+      : `<span class="b-call off" id="call${gi}">${NAV_PHONE} Подзвонити</span>`;
+    const seats = g.items.reduce((a,s)=>a+(s.seats||0),0);
     const ids = g.items.map(s=>s.order_id).join(',');
     return `<div class="stop ${departed?'done':''} ${isCurrent?'current':''}">
       <div><span class="num">${gi+1}</span><span class="client">${g.client}</span>${kindBadge}</div>
       <div class="addr">${g.address||''}</div>
       ${g.address_extra ? `<div class="cmt">💬 ${g.address_extra}</div>` : ''}
       <div class="meta"><span>План: <b>${first.eta||'—'}</b></span><span>Вікно: <b>${win}</b></span>
-        <span><b>${w.toFixed(0)}</b> кг · ${g.items.length} завд.</span></div>
+        <span><b>${w.toFixed(0)}</b> кг${seats ? ` · <b>${seats}</b> міс.` : ''} · ${g.items.length} завд.</span></div>
       ${arrived ? `<div class="fact">✓ Прибув ${hm(first.arrive_ts)}${departed ? ' → Поїхав '+hm(lastIt.depart_ts):''}</div>` : ''}
       ${departed ? '' : `
       <div class="actions" id="act${gi}">
         <button class="b-nav" onclick="toggleNav(${gi})" aria-label="Навігація">${NAV_ARROW}</button>
-        <span id="calls${gi}">${call}</span>
+        ${call}
         <a class="b-map gmap" href="${gmap}" target="_blank" rel="noopener" style="display:none">Google Maps</a>
         <a class="b-map waze" href="${waze}" target="_blank" rel="noopener" style="display:none">Waze</a>
       </div>

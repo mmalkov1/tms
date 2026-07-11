@@ -125,7 +125,7 @@ async def driver_trip(token: str, d: date | None = Query(None)):
     stops = await pool.fetch("""
         SELECT s.seq, s.eta, s.etd, o.id AS order_id, o.client, o.kind, o.address,
                o.address_extra, o.lat, o.lon, o.tw_from, o.tw_to,
-               o.weight_kg, o.volume_m3, o.doc_number, o.phone,
+               o.weight_kg, o.volume_m3, o.doc_number, o.phone, o.seats,
                ea.ts AS arrive_ts, ed.ts AS depart_ts
         FROM route_stops s
         JOIN orders o ON o.id = s.order_id
@@ -142,7 +142,7 @@ async def driver_trip(token: str, d: date | None = Query(None)):
             "seq": s["seq"], "order_id": s["order_id"], "doc_number": s["doc_number"],
             "client": s["client"], "kind": s["kind"],
             "address": s["address"], "address_extra": s["address_extra"],
-            "lat": s["lat"], "lon": s["lon"], "phone": s["phone"],
+            "lat": s["lat"], "lon": s["lon"], "phone": s["phone"], "seats": s["seats"],
             "tw_from": _hm(s["tw_from"]), "tw_to": _hm(s["tw_to"]),
             "eta": _hm(s["eta"]), "etd": _hm(s["etd"]),
             "weight_kg": float(s["weight_kg"] or 0), "volume_m3": float(s["volume_m3"] or 0),

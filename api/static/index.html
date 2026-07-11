@@ -631,7 +631,7 @@ function stopEl(o, seq, eta, etd, routeId) {
   if (o.lat) { d.dataset.lat = o.lat; d.dataset.lon = o.lon; }
   d.innerHTML = `<span class="seq">${seq ?? ''}</span>
     <span class="kind ${o.kind}">${o.kind==='pickup'?'З':'Д'}</span>
-    <span class="cli">${o.client}<div class="addr" title="${o.address||''}">${o.address||''}</div>${o.address_extra?`<div class="addr2" title="${o.address_extra}">📝 ${o.address_extra}</div>`:''}</span>
+    <span class="cli">${o.client}<div class="addr" title="${o.address||''}">${o.address||''}</div>${o.seats?`<div class="addr2">📦 ${o.seats} міс.</div>`:''}${o.address_extra?`<div class="addr2" title="${o.address_extra}">📝 ${o.address_extra}</div>`:''}</span>
     <span class="wv">${sign}${(+o.weight_kg||0).toFixed(1)} кг<br>${sign}${(+o.volume_m3||0).toFixed(3)} м³</span>
     <span class="cum">${o.cum_weight!=null ? o.cum_weight.toFixed(1)+' кг<br>'+o.cum_volume.toFixed(2)+' м³' : ''}</span>
     ${tlHtml(o.tw_from, o.tw_to, eta, etd)}

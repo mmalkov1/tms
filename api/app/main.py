@@ -44,6 +44,8 @@ async def startup():
     await driver.init(pool)
     # v21 (migrate_012): контактный телефон точки — для кнопки «Подзвонити»
     await pool.execute("ALTER TABLE orders ADD COLUMN IF NOT EXISTS phone TEXT")
+    # v22 (migrate_013): количество мест (SEATS из 1С)
+    await pool.execute("ALTER TABLE orders ADD COLUMN IF NOT EXISTS seats INT")
 
 
 def norm_addr(a: str | None) -> str | None:
@@ -695,7 +697,7 @@ async def get_routes(project_id: int = Query(...)):
     result = []
     for r in rr:
         ss = await pool.fetch("""
-            SELECT s.seq, s.eta, s.etd, o.id order_id, o.client, o.kind, o.address, o.address_extra,
+            SELECT s.seq, s.eta, s.etd, o.id order_id, o.client, o.kind, o.address, o.address_extra, o.seats,
                    o.lat, o.lon, o.tw_from, o.tw_to, o.weight_kg, o.volume_m3, o.service_min
             FROM route_stops s JOIN orders o ON o.id=s.order_id
             WHERE s.route_id=$1 ORDER BY s.seq""", r["id"])

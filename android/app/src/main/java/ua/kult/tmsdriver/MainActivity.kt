@@ -7,6 +7,8 @@ import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.webkit.JsResult
+import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
 import android.webkit.WebView
 import android.webkit.WebViewClient
@@ -71,6 +73,25 @@ class MainActivity : AppCompatActivity() {
             settings.domStorageEnabled = true
             settings.cacheMode = android.webkit.WebSettings.LOAD_NO_CACHE  // v27: driver.html завжди свіжий
             settings.userAgentString = settings.userAgentString + " TMSKultApp/1.0"
+            webChromeClient = object : WebChromeClient() {   // v31: confirm/alert зі сторінки
+                override fun onJsConfirm(v: WebView?, u: String?, msg: String?,
+                                         res: JsResult?): Boolean {
+                    android.app.AlertDialog.Builder(this@MainActivity)
+                        .setMessage(msg ?: "")
+                        .setPositiveButton("Так") { _, _ -> res?.confirm() }
+                        .setNegativeButton("Ні") { _, _ -> res?.cancel() }
+                        .setOnCancelListener { res?.cancel() }.show()
+                    return true
+                }
+                override fun onJsAlert(v: WebView?, u: String?, msg: String?,
+                                       res: JsResult?): Boolean {
+                    android.app.AlertDialog.Builder(this@MainActivity)
+                        .setMessage(msg ?: "")
+                        .setPositiveButton("OK") { _, _ -> res?.confirm() }
+                        .setOnCancelListener { res?.confirm() }.show()
+                    return true
+                }
+            }
             webViewClient = object : WebViewClient() {
                 override fun shouldOverrideUrlLoading(
                     view: WebView?, req: WebResourceRequest?): Boolean {

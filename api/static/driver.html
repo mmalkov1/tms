@@ -116,6 +116,15 @@
   </div>
 </header>
 <div id="list"></div>
+<div id="askDlg" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:60;align-items:center;justify-content:center;padding:24px">
+  <div style="background:#fff;border-radius:12px;padding:18px;max-width:320px;width:100%">
+    <div id="askTxt" style="font-size:15px;font-weight:700;color:#111;margin-bottom:14px"></div>
+    <div style="display:flex;gap:8px">
+      <button onclick="askDone(false)" style="flex:1;padding:11px;border:none;border-radius:8px;font:inherit;background:#eee">Ні</button>
+      <button onclick="askDone(true)" style="flex:1;padding:11px;border:none;border-radius:8px;font:inherit;font-weight:800;background:var(--navy);color:#fff">Так</button>
+    </div>
+  </div>
+</div>
 <div id="failDlg">
   <div id="failBox">
     <h3>Чому не виконано?</h3>
@@ -186,8 +195,19 @@ async function doFail() {
   await load();
 }
 
+let _askResolve = null;
+function askYes(text) {
+  $('askTxt').textContent = text;
+  $('askDlg').style.display = 'flex';
+  return new Promise(res => { _askResolve = res; });
+}
+function askDone(v) {
+  $('askDlg').style.display = 'none';
+  if (_askResolve) { _askResolve(v); _askResolve = null; }
+}
+
 async function unfail(ids) {
-  if (!confirm('Повернути точку в роботу?')) return;
+  if (!await askYes('Повернути точку в роботу?')) return;
   for (const id of ids.split(',')) {
     try {
       const r = await fetch(`/api/driver/${TOKEN}/stops/${id}/unfail`, {method:'POST'});
@@ -279,7 +299,7 @@ function renderNext() {
 
 async function routeEvent(ev) {
   const q = ev==='start' ? 'Позначити виїзд на маршрут?' : 'Завершити маршрут?';
-  if (!confirm(q)) return;
+  if (!await askYes(q)) return;
   const last = (typeof lastPos !== 'undefined' && lastPos) ? lastPos
              : (typeof queue !== 'undefined' && queue.length ? queue[queue.length-1] : null);
   const r = await fetch(`/api/driver/${TOKEN}/route/${trip.route.id}/event`, {

@@ -12,6 +12,7 @@ import org.json.JSONObject
 import java.net.HttpURLConnection
 import java.net.URL
 import java.util.concurrent.Executors
+import java.io.BufferedReader
 
 /**
  * Фоновий трек GPS (фаза 2).
@@ -47,10 +48,50 @@ class LocationService : Service() {
         }
     }
 
+    private var tick = 0
     private val flusher = object : Runnable {
         override fun run() {
             flush()
+            if (tick++ % 60 == 0) checkNextTrip()   // v28: кожні ~20 хв
             handler.postDelayed(this, 20_000)
+        }
+    }
+
+    /** v28: пуш «створено рейс на …» — без Firebase, опитуванням. */
+    private fun checkNextTrip() {
+        if (token.isBlank()) return
+        io.execute {
+            runCatching {
+                val con = URL("$base/api/driver/$token/next-trip")
+                    .openConnection() as HttpURLConnection
+                con.connectTimeout = 8_000; con.readTimeout = 8_000
+                val txt = con.inputStream.bufferedReader().use(BufferedReader::readText)
+                con.disconnect()
+                val trip = org.json.JSONObject(txt).optJSONObject("trip") ?: return@execute
+                val key = trip.optString("date") + "#" + trip.optInt("route_id")
+                val prefs = getSharedPreferences(MainActivity.PREFS, MODE_PRIVATE)
+                if (prefs.getString("trip_seen", "") == key) return@execute
+                prefs.edit().putString("trip_seen", key).apply()
+
+                val d = trip.optString("date").split("-").reversed()
+                    .take(2).joinToString(".")
+                val n = trip.optJSONArray("stops")?.length() ?: 0
+                val dep = trip.optString("depart", "")
+                val veh = trip.optString("vehicle", "")
+                val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+                if (nm.getNotificationChannel("trips") == null)
+                    nm.createNotificationChannel(NotificationChannel(
+                        "trips", "Нові рейси", NotificationManager.IMPORTANCE_DEFAULT))
+                val open = PendingIntent.getActivity(this, 1,
+                    Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE)
+                nm.notify(2, NotificationCompat.Builder(this, "trips")
+                    .setSmallIcon(R.drawable.ic_stat_gps)
+                    .setContentTitle("Рейс на $d")
+                    .setContentText("$n точок" +
+                        (if (dep.isNotBlank()) " · виїзд ~$dep" else "") +
+                        (if (veh.isNotBlank()) " · $veh" else ""))
+                    .setContentIntent(open).setAutoCancel(true).build())
+            }
         }
     }
 

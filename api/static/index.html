@@ -146,7 +146,7 @@
 <header>
   <h1>TMS · Планування</h1>
   <button onclick="openPlanDlg()">Планування</button>
-  <button class="sec" onclick="window.open('/facts.html','_blank')">План/Факт</button>
+  <button class="sec" onclick="location.href='/facts.html'">План/Факт</button>
   <input type="date" id="planDate">
   <select id="projSel" onchange="loadAll();updateRelBtn()" style="max-width:150px"></select>
   <button id="relBtn" onclick="toggleRelease()" style="display:none">У роботу ▸</button>

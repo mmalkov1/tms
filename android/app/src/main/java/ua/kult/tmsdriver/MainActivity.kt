@@ -75,7 +75,17 @@ class MainActivity : AppCompatActivity() {
                 override fun shouldOverrideUrlLoading(
                     view: WebView?, req: WebResourceRequest?): Boolean {
                     val url = req?.url ?: return false
-                    // свій домен — усередині, Maps/Waze/tel — назовні
+                    val sch = url.scheme ?: return false
+                    // v28: google.navigation / waze / tel — прямо у застосунок навігатора
+                    if (sch != "http" && sch != "https") {
+                        try { startActivity(Intent(Intent.ACTION_VIEW, url)) }
+                        catch (e: Exception) {
+                            Toast.makeText(this@MainActivity,
+                                "Застосунок не встановлено", Toast.LENGTH_SHORT).show()
+                        }
+                        return true
+                    }
+                    // свій домен — усередині, зовнішні http-посилання — назовні
                     return if (url.host == Uri.parse(BASE_URL).host) false
                     else { startActivity(Intent(Intent.ACTION_VIEW, url)); true }
                 }

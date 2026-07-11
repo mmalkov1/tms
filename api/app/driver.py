@@ -432,3 +432,57 @@ async def facts(plan_date: date = Query(...)):
             } for s in stops],
         })
     return out
+
+
+# ---------- v28: трек на План/Факт ----------
+
+@router.get("/api/facts/tracks")
+async def facts_tracks(plan_date: date = Query(...)):
+    """GPS-треки рейсів за день (київська доба). Проріджено до ~600 точок."""
+    routes = await pool.fetch("""
+        SELECT r.id, r.color, r.driver_id, v.driver_id AS veh_driver_id
+        FROM routes r JOIN vehicles v ON v.id=r.vehicle_id
+        WHERE r.plan_date = $1
+          AND r.project_id IN (SELECT id FROM projects WHERE is_released)""", plan_date)
+    out = []
+    for r in routes:
+        ids = [i for i in {r["driver_id"], r["veh_driver_id"]} if i]
+        pts = await pool.fetch("""
+            SELECT lat, lon FROM gps_points
+            WHERE driver_id = ANY($1::int[])
+              AND (ts AT TIME ZONE 'Europe/Kyiv')::date = $2
+            ORDER BY ts""", ids, plan_date) if ids else []
+        step = max(1, len(pts) // 600)
+        out.append({"route_id": r["id"], "color": r["color"],
+                    "points": [[p["lat"], p["lon"]] for p in pts[::step]]})
+    return out
+
+
+# ---------- v28: рейс на наступний день ----------
+
+@router.get("/api/driver/{token}/next-trip")
+async def driver_next_trip(token: str):
+    """Найближчий майбутній рейс водія в активованому проекті (перегляд + пуш)."""
+    drv = await _driver_by_token(token)
+    route = await pool.fetchrow("""
+        SELECT r.id, r.plan_date, r.depart_time, v.name AS vehicle_name, v.plate
+        FROM routes r JOIN vehicles v ON v.id = r.vehicle_id
+        WHERE r.plan_date > $2
+          AND r.project_id IN (SELECT id FROM projects WHERE is_released)
+          AND (r.driver_id = $1
+               OR r.vehicle_id IN (SELECT id FROM vehicles WHERE driver_id = $1 AND is_active))
+        ORDER BY r.plan_date, r.id DESC LIMIT 1""", drv["id"], kyiv_today())
+    if not route:
+        return {"trip": None}
+    stops = await pool.fetch("""
+        SELECT s.seq, s.eta, o.client, o.kind, o.address, o.address_extra, o.weight_kg
+        FROM route_stops s JOIN orders o ON o.id = s.order_id
+        WHERE s.route_id = $1 ORDER BY s.seq""", route["id"])
+    return {"trip": {
+        "date": route["plan_date"].isoformat(), "route_id": route["id"],
+        "vehicle": route["vehicle_name"], "plate": route["plate"],
+        "depart": _hm(route["depart_time"]),
+        "stops": [{"seq": s["seq"], "client": s["client"], "kind": s["kind"],
+                   "address": s["address"], "address_extra": s["address_extra"],
+                   "eta": _hm(s["eta"]), "weight_kg": float(s["weight_kg"] or 0)}
+                  for s in stops]}}

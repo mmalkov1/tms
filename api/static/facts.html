@@ -9,16 +9,23 @@
   :root { --navy:#00356B; --red:#E82A2C; --cream:#EFEEEC; --green:#2E8B57; }
   * { box-sizing:border-box; margin:0; }
   body { font-family:Manrope,system-ui,sans-serif; background:var(--cream); height:100vh; display:flex; flex-direction:column; }
-  header { background:var(--navy); color:#fff; padding:8px 16px; display:flex; gap:12px; align-items:center; }
-  header h1 { font-size:15px; }
+  header { background:var(--navy); color:#fff; padding:8px 16px; display:flex; gap:14px; align-items:center; }
+  header h1 { font-size:15px; display:flex; align-items:center; gap:9px; }
   header input { padding:5px 9px; border:none; border-radius:4px; font:inherit; font-size:13px; }
+  .tabs { display:flex; border:1px solid rgba(255,255,255,.4); border-radius:6px; overflow:hidden; font-size:13px; }
+  .tabs a { padding:5px 12px; color:#cfd9e6; text-decoration:none; }
+  .tabs a.on { background:#fff; color:var(--navy); font-weight:700; }
+  .trk { display:flex; align-items:center; gap:7px; font-size:13px; cursor:pointer; user-select:none; }
+  .sw { width:34px; height:18px; background:rgba(255,255,255,.3); border-radius:9px; position:relative; transition:background .15s; }
+  .sw i { position:absolute; left:2px; top:2px; width:14px; height:14px; background:#fff; border-radius:50%; transition:left .15s; }
+  .trk.on .sw { background:var(--green); } .trk.on .sw i { left:18px; }
   #layout { flex:1; display:flex; min-height:0; }
   #map { flex:1; }
   #panel { width:520px; overflow:auto; padding:10px; }
   .route-card { background:#fff; border-radius:8px; margin-bottom:10px; overflow:hidden;
                 box-shadow:0 1px 3px rgba(0,0,0,.1); }
   .route-head { color:#fff; padding:7px 12px; font-size:13px; font-weight:700;
-                display:flex; justify-content:space-between; }
+                display:flex; justify-content:space-between; cursor:pointer; }
   table { width:100%; border-collapse:collapse; font-size:12px; }
   th, td { padding:4px 8px; border-bottom:1px solid #eee; text-align:left; }
   th { color:var(--navy); background:var(--cream); }
@@ -30,9 +37,14 @@
 </head>
 <body>
 <header>
-  <h1>TMS · План / Факт</h1>
+  <h1><svg width="30" height="21" viewBox="0 0 289 205" fill="none"><path d="M142.601 0.0234656C64.6979 0.996655 1.07459 63.4296 0.0138122 139.957C-0.207669 155.848 2.24028 171.156 6.93801 185.468C10.7498 197.1 21.7539 205 34.2035 205H205.98C215.573 205 224.386 199.813 228.897 191.501C234.352 181.472 236.357 171.522 235.996 163.725C235.553 153.673 231.543 145.979 225.015 142.624C212.857 136.373 204.767 140.873 189.054 150.788C174.599 159.913 156.613 171.259 130.979 168.878C106.43 166.611 87.1841 151.83 78.185 128.359C68.1018 102.025 73.5222 70.677 91.3806 52.1063C99.9717 43.1529 118.448 30.1007 149.444 36.3635C154.584 37.4054 157.708 42.5461 156.146 47.4693L154.643 52.1864C153.302 56.3997 148.942 58.9644 144.536 58.1171C129.196 55.1289 116.618 58.2889 107.852 67.3911C95.9268 79.8021 92.3598 102.14 99.3889 120.504C102.816 129.435 111.745 144.731 133.112 146.723C150.947 148.383 163.502 140.449 176.791 132.057C192.889 121.901 211.155 110.372 235.506 122.886C249.401 130.03 257.841 144.548 258.645 162.752C259.088 172.896 257.037 184.941 251.465 197.043C249.751 200.764 252.561 204.989 256.722 204.989H269.16C272.156 204.989 274.872 203.271 276.107 200.592C284.396 182.708 289 162.844 289 141.914C289 62.9258 223.278 -1.00697 142.601 0.0120139V0.0234656ZM179.95 75.7032C178.796 74.398 177.642 73.276 176.453 72.2684C173.177 69.4748 172.513 64.7234 174.751 61.0596L177.14 57.1439C179.996 52.4612 186.408 51.4079 190.709 54.8541C193.169 56.8234 195.372 58.9644 197.878 62.1015C201.387 66.4751 200.011 72.8982 195.01 75.5086L190.965 77.6153C187.282 79.5387 182.689 78.7831 179.95 75.6918V75.7032Z" fill="#fff"/></svg>TMS</h1>
+  <nav class="tabs">
+    <a href="/index.html">Планування</a>
+    <a class="on">План / Факт</a>
+  </nav>
   <input type="date" id="d">
-  <span id="status" style="font-size:12px"></span>
+  <span class="trk" id="trk" onclick="toggleTrack()"><span class="sw"><i></i></span>Показувати трек</span>
+  <span id="status" style="font-size:12px;margin-left:auto"></span>
 </header>
 <div id="layout">
   <div id="map"></div>
@@ -45,15 +57,47 @@ $('d').value = new Date().toISOString().slice(0,10);
 const map = L.map('map').setView([50.45, 30.52], 11);
 L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {attribution:'© OSM'}).addTo(map);
 let layers = L.layerGroup().addTo(map);
+let trackLayer = L.layerGroup().addTo(map);
+let tracks = {};                                    // route_id -> polyline
+let focusRoute = null;                              // підсвічений рейс
+let showTrack = localStorage.getItem('tmsTrack') === '1';
 const hm = ts => ts ? new Date(ts).toLocaleTimeString('uk-UA',{hour:'2-digit',minute:'2-digit'}) : '';
 const toMin = s => { if(!s) return null; const [h,m]=String(s).split(':'); return +h*60 + +m; };
 const tsMin = ts => { if(!ts) return null; const t=new Date(ts); return t.getHours()*60+t.getMinutes(); };
+
+const TRUCK = `<svg viewBox="0 0 50 40" width="17" height="14" fill="none" stroke="#fff" stroke-width="4" stroke-linejoin="round" stroke-linecap="round"><rect x="2" y="4" width="26" height="22" rx="2"/><rect x="6" y="9" width="18" height="12" rx="1"/><path d="M6 9l9 6 9-6"/><path d="M28 12h8c5 0 8 4 8 8v6H28z"/><path d="M2 26h44"/><circle cx="13" cy="32" r="4.5"/><circle cx="37" cy="32" r="4.5"/></svg>`;
 
 function delta(eta, arrive_ts) {
   const p = toMin(eta), f = tsMin(arrive_ts);
   if (p==null || f==null) return '';
   const d = f - p;
   return `<span class="${d>5?'late':'early'}">${d>0?'+':''}${d} хв</span>`;
+}
+
+function toggleTrack() {
+  showTrack = !showTrack;
+  localStorage.setItem('tmsTrack', showTrack ? '1' : '0');
+  $('trk').classList.toggle('on', showTrack);
+  if (showTrack) loadTracks(); else { trackLayer.clearLayers(); tracks = {}; }
+}
+
+function focus(rid) {                               // клік по шапці рейсу
+  focusRoute = focusRoute === rid ? null : rid;
+  Object.entries(tracks).forEach(([id, pl]) =>
+    pl.setStyle({opacity: (focusRoute===null || +id===focusRoute) ? .85 : .12}));
+}
+
+async function loadTracks() {
+  if (!showTrack) return;
+  const r = await fetch(`/api/facts/tracks?plan_date=${$('d').value}`);
+  const data = await r.json();
+  trackLayer.clearLayers(); tracks = {};
+  data.forEach(t => {
+    if (t.points.length < 2) return;
+    tracks[t.route_id] = L.polyline(t.points, {color:t.color, weight:2.5,
+      dashArray:'6 5', opacity:(focusRoute===null||t.route_id===focusRoute)?.85:.12})
+      .addTo(trackLayer);
+  });
 }
 
 async function load() {
@@ -78,13 +122,16 @@ async function load() {
     if (rt.last_gps) {
       pts.push([rt.last_gps.lat, rt.last_gps.lon]);
       L.marker([rt.last_gps.lat, rt.last_gps.lon], {icon: L.divIcon({className:'',
-        html:`<div style="background:${rt.color};color:#fff;border-radius:6px;padding:2px 6px;font-size:11px;font-weight:700;white-space:nowrap;box-shadow:0 0 0 2px #fff">🚚 ${rt.vehicle}</div>`,
-        iconSize:null})})
+        html:`<div style="display:flex;align-items:center;gap:5px;cursor:pointer">
+          <div style="width:32px;height:32px;border-radius:50%;background:${rt.color};box-shadow:0 0 0 2.5px #fff,0 1px 4px rgba(0,0,0,.35);display:flex;align-items:center;justify-content:center;flex:none">${TRUCK}</div>
+          <div style="background:var(--navy);color:#fff;border-radius:5px;padding:2px 6px;font-size:11px;font-weight:700;white-space:nowrap;box-shadow:0 0 0 1.5px #fff">${rt.vehicle}</div></div>`,
+        iconSize:null, iconAnchor:[16,16]})})
        .bindTooltip(`${rt.driver||''} · ${hm(rt.last_gps.ts)}`)
+       .on('click', ()=>focus(rt.route_id))
        .addTo(layers);
     }
     return `<div class="route-card">
-      <div class="route-head" style="background:${rt.color}">
+      <div class="route-head" style="background:${rt.color}" onclick="focus(${rt.route_id})" title="Клік — підсвітити трек">
         <span>${rt.vehicle} · ${rt.driver||'—'}</span>
         <span>${done}/${rt.stops.length} точок${fails ? ' · '+fails+' відмов' : ''} · GPS ${rt.last_gps?hm(rt.last_gps.ts):'—'}</span>
       </div>
@@ -95,10 +142,12 @@ async function load() {
         <td>${s.fail_ts ? '<span class="failtag">✗ '+(s.fail_reason||'відмова')+'</span>' : delta(s.eta, s.arrive_ts)}</td></tr>`).join('')}
       </table></div>`;
   }).join('') || '<div style="padding:30px;color:#666">Немає активного проекту на цю дату.<br><small>Познач проект «У роботу» на головній сторінці — тут і у водіїв зʼявляться рейси.</small></div>';
-  if (pts.length) map.fitBounds(pts, {padding:[30,30]});
+  if (pts.length && !window._fitted) { map.fitBounds(pts, {padding:[30,30]}); window._fitted = true; }
+  loadTracks();
   $('status').textContent = 'Оновлено ' + new Date().toLocaleTimeString('uk-UA');
 }
-$('d').addEventListener('change', load);
+$('d').addEventListener('change', () => { window._fitted = false; focusRoute = null; load(); });
+if (showTrack) $('trk').classList.add('on');
 setInterval(load, 30000);
 load();
 </script>

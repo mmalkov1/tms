@@ -48,6 +48,18 @@ async def startup():
     await pool.execute("ALTER TABLE orders ADD COLUMN IF NOT EXISTS seats INT")
     # v24 (migrate_014): контактное лицо точки (PERSON_NAME из 1С)
     await pool.execute("ALTER TABLE orders ADD COLUMN IF NOT EXISTS contact_person TEXT")
+    # v25 (migrate_015): активация проекта («У роботу»); бэкфилл — один раз при добавлении колонки
+    had_rel = await pool.fetchval("""
+        SELECT 1 FROM information_schema.columns
+        WHERE table_name='projects' AND column_name='is_released'""")
+    await pool.execute(
+        "ALTER TABLE projects ADD COLUMN IF NOT EXISTS is_released BOOLEAN NOT NULL DEFAULT FALSE")
+    if not had_rel:
+        await pool.execute("""
+            UPDATE projects SET is_released = TRUE WHERE id IN (
+                SELECT DISTINCT ON (r.plan_date) r.project_id
+                FROM routes r WHERE r.project_id IS NOT NULL
+                ORDER BY r.plan_date, r.project_id DESC)""")
 
 
 def norm_addr(a: str | None) -> str | None:
@@ -120,6 +132,26 @@ async def get_projects(plan_date: date = Query(...)):
                (SELECT count(*) FROM routes r WHERE r.project_id=p.id) AS routes_count
         FROM projects p WHERE p.plan_date=$1 ORDER BY p.id""", plan_date)
     return [dict(r) for r in rows]
+
+
+@app.post("/api/projects/{project_id}/release")
+async def release_project(project_id: int):
+    """«У роботу»: активний проект на дату може бути лише один."""
+    p = await pool.fetchrow("SELECT id, plan_date FROM projects WHERE id=$1", project_id)
+    if not p:
+        raise HTTPException(404, "Проект не знайдено")
+    async with pool.acquire() as c:
+        await c.execute(
+            "UPDATE projects SET is_released=FALSE WHERE plan_date=$1", p["plan_date"])
+        await c.execute(
+            "UPDATE projects SET is_released=TRUE WHERE id=$1", project_id)
+    return {"ok": True}
+
+
+@app.post("/api/projects/{project_id}/unrelease")
+async def unrelease_project(project_id: int):
+    await pool.execute("UPDATE projects SET is_released=FALSE WHERE id=$1", project_id)
+    return {"ok": True}
 
 
 async def _new_project(plan_date: date) -> int:
@@ -198,9 +230,59 @@ class VehicleIn(BaseModel):
 
 @app.get("/api/drivers")
 async def get_drivers():
-    rows = await pool.fetch(
-        "SELECT id, name, code_1c FROM drivers WHERE is_active ORDER BY name")
+    rows = await pool.fetch("""
+        SELECT d.id, d.name, d.code_1c, d.phone, t.created_at AS token_created
+        FROM drivers d
+        LEFT JOIN driver_tokens t ON t.driver_id = d.id AND t.is_active
+        WHERE d.is_active ORDER BY d.name""")
     return [dict(r) for r in rows]
+
+
+class DriverIn(BaseModel):
+    name: str
+
+
+@app.post("/api/drivers")
+async def create_driver(d: DriverIn):
+    name = d.name.strip()
+    if not name:
+        raise HTTPException(400, "Вкажи ПІБ")
+    ex = await pool.fetchval(
+        "SELECT id FROM drivers WHERE is_active AND upper(trim(name))=upper($1)", name)
+    if ex:
+        raise HTTPException(409, "Такий водій вже є")
+    did = await pool.fetchval(
+        "INSERT INTO drivers (name) VALUES ($1) RETURNING id", name)
+    return {"driver_id": did}
+
+
+class DriverPatch(BaseModel):
+    name: str | None = None
+    phone: str | None = None
+    code_1c: str | None = None
+    is_active: bool | None = None
+
+
+@app.patch("/api/drivers/{driver_id}")
+async def patch_driver(driver_id: int, d: DriverPatch):
+    cur = await pool.fetchrow("SELECT id FROM drivers WHERE id=$1", driver_id)
+    if not cur:
+        raise HTTPException(404, "Водія не знайдено")
+    if d.name is not None and d.name.strip():
+        await pool.execute("UPDATE drivers SET name=$1 WHERE id=$2", d.name.strip(), driver_id)
+    if d.phone is not None:
+        await pool.execute("UPDATE drivers SET phone=$1 WHERE id=$2",
+                           d.phone.strip() or None, driver_id)
+    if d.code_1c is not None:
+        await pool.execute("UPDATE drivers SET code_1c=$1 WHERE id=$2",
+                           d.code_1c.strip() or None, driver_id)
+    if d.is_active is not None:
+        await pool.execute("UPDATE drivers SET is_active=$1 WHERE id=$2",
+                           d.is_active, driver_id)
+        if not d.is_active:   # архів водія — гасимо його токени
+            await pool.execute(
+                "UPDATE driver_tokens SET is_active=FALSE WHERE driver_id=$1", driver_id)
+    return {"ok": True}
 
 
 @app.post("/api/vehicles")

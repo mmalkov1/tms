@@ -94,7 +94,7 @@ async function load() {
         <td>${hm(s.arrive_ts)||'—'}</td><td>${hm(s.depart_ts)||'—'}</td>
         <td>${s.fail_ts ? '<span class="failtag">✗ '+(s.fail_reason||'відмова')+'</span>' : delta(s.eta, s.arrive_ts)}</td></tr>`).join('')}
       </table></div>`;
-  }).join('') || '<div style="padding:30px;color:#666">Маршрутів на цю дату немає</div>';
+  }).join('') || '<div style="padding:30px;color:#666">Немає активного проекту на цю дату.<br><small>Познач проект «У роботу» на головній сторінці — тут і у водіїв зʼявляться рейси.</small></div>';
   if (pts.length) map.fitBounds(pts, {padding:[30,30]});
   $('status').textContent = 'Оновлено ' + new Date().toLocaleTimeString('uk-UA');
 }

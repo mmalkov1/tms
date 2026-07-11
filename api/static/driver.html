@@ -222,8 +222,13 @@ function render() {
   $('hDriver').textContent = trip.driver;
   $('hDate').textContent = trip.date.split('-').reverse().join('.');
   if (!trip.route) {
-    $('hVeh').textContent = 'Рейсу на сьогодні немає';
-    $('list').innerHTML = '<div class="empty">План на цю дату ще не сформовано</div>';
+    if (trip.not_released) {
+      $('hVeh').textContent = 'Рейс ще не підтверджено';
+      $('list').innerHTML = '<div class="empty">Логіст ще не активував план на цю дату.<br>Сторінка оновиться автоматично.</div>';
+    } else {
+      $('hVeh').textContent = 'Рейсу на сьогодні немає';
+      $('list').innerHTML = '<div class="empty">План на цю дату ще не сформовано</div>';
+    }
     return;
   }
   $('hVeh').textContent = trip.route.vehicle + (trip.route.plate ? ' · '+trip.route.plate : '');

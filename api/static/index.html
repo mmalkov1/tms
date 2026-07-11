@@ -14,6 +14,36 @@
   header input, header select, header button { padding:5px 9px; border:none; border-radius:4px; font:inherit; font-size:13px; }
   header button { background:var(--red); color:#fff; cursor:pointer; font-weight:600; }
   header button.sec { background:#fff; color:var(--navy); }
+  #relBtn { background:#fff; color:var(--navy); font-weight:800; }
+  #relBtn.rel { background:#2E8B57; color:#fff; }
+  /* налаштування */
+  #setDlg .dlg-body { display:flex; padding:0; min-height:420px; }
+  #setSide { width:170px; background:var(--cream); flex:none; padding:8px 0; }
+  #setSide div { padding:9px 14px; font-size:13px; font-weight:600; color:var(--navy); cursor:pointer; }
+  #setSide div.on { background:var(--navy); color:#fff; font-weight:800; }
+  #setSide div.dis { color:#aaa; cursor:default; }
+  #setMain { flex:1; padding:14px 16px; overflow:auto; }
+  #setMain h4 { font-size:13px; font-weight:800; color:var(--navy); margin:0 0 8px; }
+  #setMain table { width:100%; border-collapse:collapse; font-size:12px; margin-bottom:16px; }
+  #setMain th { background:var(--cream); color:var(--navy); padding:5px 8px; text-align:left; }
+  #setMain td { padding:4px 8px; border-bottom:1px solid #eee; }
+  #setMain td input { padding:3px 6px; border:1px solid #ddd; border-radius:4px; font:inherit; font-size:12px; }
+  #setMain td select { padding:3px 6px; border:1px solid #ddd; border-radius:4px; font:inherit; font-size:12px; }
+  #setMain .act { cursor:pointer; }
+  .tok-ok { color:#2E8B57; font-weight:700; white-space:nowrap; }
+  .tok-no { color:#B8860B; font-weight:700; white-space:nowrap; }
+  .tok-btn { border:none; background:var(--navy); color:#fff; border-radius:4px; padding:3px 8px; font-size:11px; font-weight:700; cursor:pointer; }
+  #tokQr { display:none; background:var(--cream); border-radius:8px; padding:12px; margin-bottom:14px;
+           gap:14px; align-items:center; }
+  #tokQr.show { display:flex; }
+  #tokQr a { font-size:12px; word-break:break-all; color:var(--navy); }
+  .rtab { display:inline-block; padding:4px 12px; border-radius:6px; font-size:12px; font-weight:700;
+          cursor:pointer; background:var(--cream); color:var(--navy); margin-right:6px; }
+  .rtab.on { background:var(--navy); color:#fff; }
+  .rrow { display:flex; justify-content:space-between; align-items:center; padding:6px 4px;
+          border-bottom:1px solid #eee; font-size:13px; }
+  .rrow button { border:none; background:var(--cream); border-radius:4px; padding:2px 8px;
+                 font-size:11px; cursor:pointer; }
   header label { font-size:12px; display:flex; align-items:center; gap:4px; }
   dialog { border:none; border-radius:8px; padding:0; max-width:760px; width:92%; box-shadow:0 8px 40px rgba(0,0,0,.3); margin:auto; resize:both; overflow:auto; max-height:92vh; }
   .dlg-head { cursor:move; user-select:none; }
@@ -117,10 +147,16 @@
   <h1>TMS · Планування</h1>
   <button onclick="openPlanDlg()">Планування</button>
   <button class="sec" onclick="window.open('/facts.html','_blank')">План/Факт</button>
-  <button class="sec" onclick="window.open('/tokens.html','_blank')">Водії</button>
   <input type="date" id="planDate">
-  <select id="projSel" onchange="loadAll()" style="max-width:150px"></select>
+  <select id="projSel" onchange="loadAll();updateRelBtn()" style="max-width:150px"></select>
+  <button id="relBtn" onclick="toggleRelease()" style="display:none">У роботу ▸</button>
   <span id="status"></span>
+  <button id="gearBtn" onclick="openSettings()" title="Налаштування" style="margin-left:auto;background:transparent;padding:2px 6px">
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="1.8" stroke-linecap="round">
+      <path d="M12 2.5l1.2 2.6 2.8-.6 1 2.7 2.7 1-.6 2.8 2.6 1.2-2.6 1.2.6 2.8-2.7 1-1 2.7-2.8-.6L12 21.5l-1.2-2.6-2.8.6-1-2.7-2.7-1 .6-2.8L2.3 12l2.6-1.2-.6-2.8 2.7-1 1-2.7 2.8.6z"/>
+      <circle cx="12" cy="12" r="3.2" stroke="#E8A33D" stroke-width="2.2"/>
+    </svg>
+  </button>
 </header>
 <div id="layout">
   <div id="map"></div>
@@ -230,22 +266,10 @@
   <div class="dlg-head"><span>Автопарк · вибір машин для розрахунку</span><span onclick="vehDlg.close()">✕</span></div>
   <div class="dlg-body">
     <table class="vtable">
-      <thead><tr><th>Розрах.</th><th>Назва</th><th>Водій</th><th title="Коди довідників 1С: авто (Kult_Транспорт) / водій (ФизическиеЛица) — для вивантаження рейсів">Код 1С<br>авто / водій</th><th>Вантаж., кг</th><th>Об'єм, м³</th><th>Геозони</th><th title="Може забирати товар (pickup)">Забір</th><th title="Може доставляти товар (delivery)">Дост.</th><th>Найм</th><th></th></tr></thead>
+      <thead><tr><th>Розрах.</th><th>Назва</th><th>Водій</th><th>Вантаж., кг</th><th>Об'єм, м³</th><th>Геозони</th><th title="Може забирати товар (pickup)">Забір</th><th title="Може доставляти товар (delivery)">Дост.</th><th>Найм</th><th></th></tr></thead>
       <tbody id="vehRows"></tbody>
-      <tfoot><tr>
-        <td></td>
-        <td><input type="text" id="nvName" placeholder="Газель АА1234ВВ"></td>
-        <td><select id="nvDriverSel" onchange="$('nvDriverNew').style.display=this.value==='new'?'block':'none'" style="width:100%"></select>
-            <input type="text" id="nvDriverNew" placeholder="ПІБ нового водія" style="display:none;margin-top:2px"></td>
-        <td></td>
-        <td><input type="number" id="nvW" value="1000"></td>
-        <td><input type="number" id="nvV" value="9" step="0.1"></td>
-        <td></td>
-        <td style="text-align:center"><input type="checkbox" id="nvPk" checked></td>
-        <td style="text-align:center"><input type="checkbox" id="nvDl" checked></td>
-        <td style="text-align:center"><input type="checkbox" id="nvHired"></td>
-        <td class="act" onclick="addVehicle()" title="Додати">➕</td>
-      </tr></tfoot>
+      <tfoot><tr><td colspan="10" style="font-size:11px;color:#888;padding:8px">
+        додати авто, змінити назву, водія чи коди 1С — у Налаштуваннях (⚙ праворуч зверху)</td></tr></tfoot>
     </table>
   </div>
   <div class="dlg-foot">
@@ -253,6 +277,52 @@
     <button class="pri" onclick="saveVehSelection()">Застосувати вибір</button>
   </div>
 </dialog>
+<dialog id="setDlg">
+  <div class="dlg-head"><span>Налаштування</span><span onclick="setDlg.close()">✕</span></div>
+  <div class="dlg-body">
+    <div id="setSide">
+      <div class="on" onclick="setSection('da', this)">Водії та авто</div>
+      <div onclick="setSection('fr', this)">Причини відмов</div>
+      <div class="dis">Планування <small>(згодом)</small></div>
+      <div class="dis">1С <small>(згодом)</small></div>
+    </div>
+    <div id="setMain">
+      <div id="sec-da">
+        <div id="tokQr"><div id="tokQrCode"></div>
+          <div><b id="tokQrName" style="font-size:13px;color:var(--navy)"></b><br>
+            <a id="tokQrLink" target="_blank"></a><br>
+            <small style="color:#888">водій сканує QR або відкриває посилання в Chrome</small></div></div>
+        <h4>Водії</h4>
+        <table><thead><tr><th>ПІБ</th><th>Телефон</th><th>Код 1С</th><th>Кабінет водія</th><th></th></tr></thead>
+          <tbody id="setDrvRows"></tbody>
+          <tfoot><tr><td><input id="ndName" placeholder="ПІБ нового водія" style="width:140px"></td>
+            <td colspan="3"></td><td class="act" onclick="addDriverSet()" title="Додати">➕</td></tr></tfoot>
+        </table>
+        <h4>Авто</h4>
+        <table><thead><tr><th>Назва</th><th>Код 1С авто</th><th>Водій</th><th></th></tr></thead>
+          <tbody id="setVehRows"></tbody>
+          <tfoot><tr><td><input id="nsvName" placeholder="Газель АА1234ВВ" style="width:150px"></td>
+            <td></td><td><select id="nsvDrv"></select></td>
+            <td class="act" onclick="addVehicleSet()" title="Додати">➕</td></tr></tfoot>
+        </table>
+        <small style="color:#888">вага/обʼєм, найм, забір/доставка, геозони — в модалці «Планування → Авто» (оперативні параметри)</small>
+      </div>
+      <div id="sec-fr" style="display:none">
+        <div style="margin-bottom:10px">
+          <span class="rtab on" data-kind="delivery" onclick="frTab(this)">Доставка</span>
+          <span class="rtab" data-kind="pickup" onclick="frTab(this)">Забір</span>
+        </div>
+        <div id="frRows"></div>
+        <div style="display:flex;gap:6px;margin-top:10px">
+          <input id="frNew" placeholder="Нова причина…" style="flex:1;padding:6px 9px;border:1px solid #ddd;border-radius:6px;font-size:12px">
+          <button onclick="addReason()" style="border:none;background:var(--red);color:#fff;border-radius:6px;padding:6px 14px;font-size:12px;font-weight:800;cursor:pointer">Додати</button>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="dlg-foot"><button onclick="setDlg.close()">Закрити</button></div>
+</dialog>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="https://unpkg.com/@mapbox/polyline@1.2.1/src/polyline.js"></script>
 <script src="https://unpkg.com/sortablejs@1.15.2/Sortable.min.js"></script>
@@ -303,10 +373,41 @@ function curProject() { return +$('projSel').value || null; }
 async function loadProjects(selectId) {
   projects = await (await fetch(`/api/projects?plan_date=${$('planDate').value}`)).json();
   $('projSel').innerHTML = projects.length
-    ? projects.map(p=>`<option value="${p.id}">${p.name} (${p.orders_count} заяв.)</option>`).join('')
+    ? projects.map(p=>`<option value="${p.id}">${p.is_released?'✓ ':''}${p.name} (${p.orders_count} заяв.)</option>`).join('')
     : '<option value="">— немає проектів —</option>';
   if (selectId) $('projSel').value = selectId;
-  else if (projects.length) $('projSel').value = projects[projects.length-1].id;
+  else {
+    const rel = projects.find(p=>p.is_released);   // за замовчуванням — активний проект
+    $('projSel').value = rel ? rel.id : (projects.length ? projects[projects.length-1].id : '');
+  }
+  updateRelBtn();
+}
+
+function updateRelBtn() {
+  const b = $('relBtn'), p = projects.find(x => x.id === curProject());
+  if (!p) { b.style.display = 'none'; return; }
+  b.style.display = '';
+  b.classList.toggle('rel', !!p.is_released);
+  b.textContent = p.is_released ? '✓ Активний' : 'У роботу ▸';
+  b.title = p.is_released
+    ? 'Проект у роботі: його бачать водії та План/Факт. Клік — зняти з роботи.'
+    : 'Зробити проект активним: водії та План/Факт бачать лише активний проект дати.';
+}
+
+async function toggleRelease() {
+  const pid = curProject(); if (!pid) return;
+  const p = projects.find(x => x.id === pid);
+  if (p.is_released) {
+    if (!confirm('Зняти проект з роботи? Водії перестануть бачити рейси на цю дату.')) return;
+    await fetch(`/api/projects/${pid}/unrelease`, {method:'POST'});
+    st('Проект знято з роботи');
+  } else {
+    const other = projects.find(x => x.is_released && x.id !== pid);
+    if (other && !confirm(`Зараз активний «${other.name}». Переключити на цей проект?`)) return;
+    await fetch(`/api/projects/${pid}/release`, {method:'POST'});
+    st('Проект у роботі — водії бачать рейси');
+  }
+  await loadProjects(pid);
 }
 let foldState = {};   // route_id -> свернут ли список
 let geozones = [];
@@ -395,10 +496,8 @@ async function openVehDlg() {
   }));
   $('vehRows').innerHTML = vehicles.map(v => `<tr data-vid="${v.id}">
     <td style="text-align:center"><input type="checkbox" class="vsel" value="${v.id}" ${selectedVeh.has(v.id)?'checked':''}></td>
-    <td><input type="text" class="vname" value="${v.name}"></td>
-    <td><select class="vdrv" style="width:110px">${drvOptions(v.driver_id)}</select></td>
-    <td><input type="text" class="vc1" value="${v.code_1c||''}" placeholder="авто" style="width:82px;margin-bottom:2px" title="Код авто в 1С (Kult_Транспорт)">
-        <input type="text" class="vdc1" value="${v.driver_code_1c||''}" placeholder="водій" style="width:82px" title="Код водія в 1С (ФизическиеЛица)" ${v.driver_id?'':'disabled'}></td>
+    <td><b>${v.name}</b></td>
+    <td>${v.driver_name || '—'}</td>
     <td><input type="number" class="vw" value="${v.max_weight_kg}"></td>
     <td><input type="number" class="vv" value="${v.max_volume_m3}" step="0.1"></td>
     <td style="font-size:11px">${v.driver_id ? geozones.map(z =>
@@ -409,59 +508,204 @@ async function openVehDlg() {
     <td style="text-align:center"><input type="checkbox" class="vpk" ${v.can_pickup!==false?'checked':''}></td>
     <td style="text-align:center"><input type="checkbox" class="vdl" ${v.can_delivery!==false?'checked':''}></td>
     <td style="text-align:center"><input type="checkbox" class="vhired" ${v.is_hired?'checked':''}></td>
-    <td class="act" onclick="rowActions(this, ${v.id})" title="Зберегти зміни / 2й клік — деактивувати">💾</td>
+    <td class="act" onclick="rowActions(this, ${v.id})" title="Зберегти зміни">💾</td>
   </tr>`).join('');
-  $('nvDriverSel').innerHTML = drvOptions(null) + '<option value="new">+ новий водій…</option>';
-  $('nvDriverNew').style.display = 'none';
   $('vehDlg').showModal();
 }
 
 async function rowActions(el, vid) {
   const tr = el.closest('tr');
-  if (el.dataset.armed) {   // второй клик = деактивация
-    await fetch(`/api/vehicles/${vid}`, {method:'DELETE'});
-    st('Машину деактивовано'); await loadVehicles(true); openVehDlg(); return;
-  }
-  const newDrvId = +tr.querySelector('.vdrv').value || 0;
-  const vcur = vehicles.find(x => x.id === vid);
-  const drvChanged = newDrvId !== (vcur?.driver_id || 0);
-  const body = { name: tr.querySelector('.vname').value,
-    max_weight_kg: +tr.querySelector('.vw').value,
+  const body = { max_weight_kg: +tr.querySelector('.vw').value,
     max_volume_m3: +tr.querySelector('.vv').value,
     is_hired: tr.querySelector('.vhired').checked,
     can_pickup: tr.querySelector('.vpk').checked,
-    can_delivery: tr.querySelector('.vdl').checked,
-    code_1c: tr.querySelector('.vc1').value.trim(),
-    driver_id: newDrvId,
-    driver_code_1c: tr.querySelector('.vdc1').disabled ? null : tr.querySelector('.vdc1').value.trim() };
+    can_delivery: tr.querySelector('.vdl').checked };
   const resp = await fetch(`/api/vehicles/${vid}`, {method:'PATCH',
     headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
   if (!resp.ok) { st('Помилка збереження авто: ' + resp.status); return; }
-  if (drvChanged) {           // геозони/код 1С прив'язані до водія — перемалювати
-    st('Збережено, водія змінено');
-    await loadVehicles(true); openVehDlg(); return;
-  }
   const vv = vehicles.find(x => x.id === vid);
   if (vv) Object.assign(vv, body);   // локальный кеш = БД
-  el.textContent='🗑'; el.dataset.armed='1'; st('Збережено. Ще клік по 🗑 — деактивувати');
-  setTimeout(()=>{el.textContent='💾'; delete el.dataset.armed;}, 3000);
+  st('Збережено');
 }
 
-async function addVehicle() {
-  if (!$('nvName').value.trim()) return st('Вкажи назву авто');
-  const sel = $('nvDriverSel').value;
-  if (sel === 'new' && !$('nvDriverNew').value.trim()) return st('Вкажи ПІБ нового водія');
-  const r = await fetch('/api/vehicles', {method:'POST', headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({ name: $('nvName').value.trim(),
-      driver_id: (sel && sel !== 'new') ? +sel : null,
-      driver_name: sel === 'new' ? $('nvDriverNew').value.trim() : null,
-      max_weight_kg: +$('nvW').value, max_volume_m3: +$('nvV').value,
-      is_hired: $('nvHired').checked,
-      can_pickup: $('nvPk').checked, can_delivery: $('nvDl').checked })});
-  const j = await r.json();
-  selectedVeh.add(j.vehicle_id);
-  $('nvName').value=''; $('nvDriverNew').value='';
-  await loadVehicles(true); openVehDlg();
+// ================== НАЛАШТУВАННЯ ==================
+let setDrivers = [], setReasons = [], frKind = 'delivery';
+
+async function openSettings() {
+  await Promise.all([loadVehicles(true), loadSetDrivers(), loadReasons()]);
+  renderSetDA(); renderReasons();
+  $('tokQr').classList.remove('show');
+  $('setDlg').showModal();
+}
+
+function setSection(sec, el) {
+  if (el.classList.contains('dis')) return;
+  document.querySelectorAll('#setSide div').forEach(d => d.classList.remove('on'));
+  el.classList.add('on');
+  $('sec-da').style.display = sec === 'da' ? '' : 'none';
+  $('sec-fr').style.display = sec === 'fr' ? '' : 'none';
+}
+
+async function loadSetDrivers() {
+  setDrivers = await (await fetch('/api/drivers')).json();
+}
+
+function renderSetDA() {
+  const dd = n => n ? new Date(n).toLocaleDateString('uk-UA', {day:'2-digit',month:'2-digit'}) : '';
+  $('setDrvRows').innerHTML = setDrivers.map(d => `<tr data-did="${d.id}">
+    <td><input class="sdn" value="${d.name}" style="width:140px"></td>
+    <td><input class="sdp" value="${d.phone||''}" placeholder="—" style="width:110px"></td>
+    <td><input class="sdc" value="${d.code_1c||''}" placeholder="—" style="width:95px" title="Код водія в 1С (ФизическиеЛица)"></td>
+    <td>${d.token_created
+        ? `<span class="tok-ok">✓ від ${dd(d.token_created)}</span>`
+        : `<span class="tok-no">немає токена</span>`}
+      <button class="tok-btn" onclick="genTokenSet(${d.id}, ${!!d.token_created})">QR</button></td>
+    <td class="act" onclick="saveDriverSet(this, ${d.id})" title="Зберегти">💾</td>
+    <td class="act" onclick="deactDriverSet(${d.id}, '${d.name.replace(/'/g,"\\'")}')" title="Деактивувати">🗑</td>
+  </tr>`).join('');
+
+  $('setVehRows').innerHTML = vehicles.map(v => `<tr data-vid="${v.id}">
+    <td><input class="svn" value="${v.name}" style="width:150px"></td>
+    <td><input class="svc" value="${v.code_1c||''}" placeholder="—" style="width:95px" title="Код авто в 1С (Kult_Транспорт)"></td>
+    <td><select class="svd">${drvOptions(v.driver_id)}</select></td>
+    <td class="act" onclick="saveVehicleSet(this, ${v.id})" title="Зберегти">💾</td>
+    <td class="act" onclick="deactVehicleSet(${v.id}, '${v.name.replace(/'/g,"\\'")}')" title="Деактивувати">🗑</td>
+  </tr>`).join('');
+  $('nsvDrv').innerHTML = drvOptions(null);
+}
+
+async function saveDriverSet(el, did) {
+  const tr = el.closest('tr');
+  const r = await fetch(`/api/drivers/${did}`, {method:'PATCH',
+    headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({ name: tr.querySelector('.sdn').value,
+      phone: tr.querySelector('.sdp').value, code_1c: tr.querySelector('.sdc').value })});
+  if (!r.ok) { st('Помилка збереження водія'); return; }
+  st('Водія збережено');
+  await loadSetDrivers(); await loadVehicles(true); renderSetDA();
+}
+
+async function deactDriverSet(did, name) {
+  if (!confirm(`Деактивувати водія «${name}»? Його токен перестане працювати.`)) return;
+  await fetch(`/api/drivers/${did}`, {method:'PATCH',
+    headers:{'Content-Type':'application/json'}, body: JSON.stringify({is_active:false})});
+  st('Водія деактивовано');
+  await loadSetDrivers(); await loadVehicles(true); renderSetDA();
+}
+
+async function addDriverSet() {
+  const name = $('ndName').value.trim();
+  if (!name) return st('Вкажи ПІБ');
+  const r = await fetch('/api/drivers', {method:'POST',
+    headers:{'Content-Type':'application/json'}, body: JSON.stringify({name})});
+  if (!r.ok) { const j = await r.json().catch(()=>({})); st(j.detail || 'Помилка'); return; }
+  $('ndName').value = '';
+  await loadSetDrivers(); renderSetDA();
+}
+
+async function genTokenSet(did, hasToken) {
+  let token = null;
+  if (hasToken) {
+    const j = await (await fetch(`/api/drivers/${did}/token`)).json();
+    token = j.token;
+  }
+  if (!token) {
+    const r = await fetch(`/api/drivers/${did}/token`, {method:'POST'});
+    if (!r.ok) { st('Помилка створення токена'); return; }
+    token = (await r.json()).token;
+    await loadSetDrivers(); renderSetDA();
+  }
+  showTokenQr(did, token);
+}
+
+async function rotateToken(did) {
+  if (!confirm('Старе посилання перестане працювати. Створити нове?')) return;
+  const r = await fetch(`/api/drivers/${did}/token`, {method:'POST'});
+  if (!r.ok) { st('Помилка'); return; }
+  showTokenQr(did, (await r.json()).token);
+  await loadSetDrivers(); renderSetDA();
+}
+
+function showTokenQr(did, token) {
+  const d = setDrivers.find(x => x.id === did);
+  const url = location.origin + '/driver.html?token=' + token;
+  $('tokQrName').innerHTML = (d ? d.name : '') +
+    ` <button class="tok-btn" onclick="rotateToken(${did})" title="Анулювати старе посилання і створити нове">⟳ нове посилання</button>`;
+  $('tokQrLink').textContent = url; $('tokQrLink').href = url;
+  $('tokQrCode').innerHTML = '';
+  new QRCode($('tokQrCode'), {text:url, width:96, height:96, colorDark:'#00356B'});
+  $('tokQr').classList.add('show');
+}
+
+async function saveVehicleSet(el, vid) {
+  const tr = el.closest('tr');
+  const r = await fetch(`/api/vehicles/${vid}`, {method:'PATCH',
+    headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({ name: tr.querySelector('.svn').value,
+      code_1c: tr.querySelector('.svc').value.trim(),
+      driver_id: +tr.querySelector('.svd').value || 0 })});
+  if (!r.ok) { st('Помилка збереження авто'); return; }
+  st('Авто збережено');
+  await loadVehicles(true); renderSetDA();
+}
+
+async function deactVehicleSet(vid, name) {
+  if (!confirm(`Деактивувати авто «${name}»?`)) return;
+  await fetch(`/api/vehicles/${vid}`, {method:'DELETE'});
+  selectedVeh.delete(vid);
+  st('Авто деактивовано');
+  await loadVehicles(true); renderSetDA();
+}
+
+async function addVehicleSet() {
+  const name = $('nsvName').value.trim();
+  if (!name) return st('Вкажи назву авто');
+  const r = await fetch('/api/vehicles', {method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({ name, driver_id: +$('nsvDrv').value || null,
+      max_weight_kg: 1000, max_volume_m3: 9 })});
+  if (!r.ok) { st('Помилка створення авто'); return; }
+  $('nsvName').value = '';
+  st('Авто додано (вага/обʼєм за замовчуванням — зміни в «Планування → Авто»)');
+  await loadVehicles(true); renderSetDA();
+}
+
+// --- причини відмов ---
+async function loadReasons() {
+  setReasons = await (await fetch('/api/fail-reasons')).json();
+}
+
+function frTab(el) {
+  document.querySelectorAll('.rtab').forEach(t => t.classList.remove('on'));
+  el.classList.add('on');
+  frKind = el.dataset.kind;
+  renderReasons();
+}
+
+function renderReasons() {
+  const rows = setReasons.filter(r => r.kind === frKind && r.is_active);
+  $('frRows').innerHTML = rows.map(r => `<div class="rrow">
+    <span>${r.name}</span>
+    ${r.is_system ? '<small style="color:#aaa">системна</small>'
+                  : `<button onclick="archReason(${r.id})">архів</button>`}
+  </div>`).join('') || '<div style="color:#888;font-size:12px">немає причин</div>';
+}
+
+async function addReason() {
+  const name = $('frNew').value.trim();
+  if (!name) return st('Вкажи назву причини');
+  const r = await fetch('/api/fail-reasons', {method:'POST',
+    headers:{'Content-Type':'application/json'}, body: JSON.stringify({kind: frKind, name})});
+  if (!r.ok) { const j = await r.json().catch(()=>({})); st(j.detail || 'Помилка'); return; }
+  $('frNew').value = '';
+  await loadReasons(); renderReasons();
+}
+
+async function archReason(id) {
+  if (!confirm('Прибрати причину зі списку водіїв? Історія відмов збережеться.')) return;
+  await fetch(`/api/fail-reasons/${id}`, {method:'PATCH',
+    headers:{'Content-Type':'application/json'}, body: JSON.stringify({is_active:false})});
+  await loadReasons(); renderReasons();
 }
 
 function saveVehSelection() {

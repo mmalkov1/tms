@@ -146,11 +146,20 @@ async def driver_trip(token: str, d: date | None = Query(None)):
                v.name AS vehicle_name, v.plate
         FROM routes r JOIN vehicles v ON v.id = r.vehicle_id
         WHERE r.plan_date = $2
+          AND r.project_id IN (SELECT id FROM projects WHERE is_released)
           AND (r.driver_id = $1
                OR r.vehicle_id IN (SELECT id FROM vehicles WHERE driver_id = $1 AND is_active))
         ORDER BY r.id DESC LIMIT 1""", drv["id"], day)
     if not route:
-        return {"driver": drv["name"], "date": day.isoformat(), "route": None, "stops": []}
+        # рейси є, але проект не активовано?
+        pending = await pool.fetchval("""
+            SELECT 1 FROM routes r
+            WHERE r.plan_date = $2
+              AND (r.driver_id = $1
+                   OR r.vehicle_id IN (SELECT id FROM vehicles WHERE driver_id = $1 AND is_active))
+            LIMIT 1""", drv["id"], day)
+        return {"driver": drv["name"], "date": day.isoformat(),
+                "route": None, "stops": [], "not_released": bool(pending)}
 
     stops = await pool.fetch("""
         SELECT s.seq, s.eta, s.etd, o.id AS order_id, o.client, o.kind, o.address,
@@ -288,6 +297,63 @@ async def stop_unfail(token: str, order_id: int):
     return {"ok": True}
 
 
+# ---------- довідник причин відмов (налаштування) ----------
+
+@router.get("/api/fail-reasons")
+async def fail_reasons_list():
+    rows = await pool.fetch("""
+        SELECT id, kind, name, sort, is_system, is_active
+        FROM fail_reasons ORDER BY kind, sort, id""")
+    return [dict(r) for r in rows]
+
+
+class ReasonIn(BaseModel):
+    kind: str
+    name: str
+
+
+@router.post("/api/fail-reasons")
+async def fail_reason_add(r: ReasonIn):
+    if r.kind not in ("delivery", "pickup"):
+        raise HTTPException(400, "kind: delivery | pickup")
+    name = r.name.strip()
+    if not name:
+        raise HTTPException(400, "Вкажи назву")
+    ex = await pool.fetchval("""
+        SELECT id FROM fail_reasons
+        WHERE kind=$1 AND is_active AND upper(trim(name))=upper($2)""", r.kind, name)
+    if ex:
+        raise HTTPException(409, "Така причина вже є")
+    # нові причини — перед системним «Інше» (sort 999)
+    nxt = await pool.fetchval(
+        "SELECT COALESCE(MAX(sort),0)+10 FROM fail_reasons WHERE kind=$1 AND NOT is_system", r.kind)
+    rid = await pool.fetchval(
+        "INSERT INTO fail_reasons (kind, name, sort) VALUES ($1,$2,$3) RETURNING id",
+        r.kind, name, nxt)
+    return {"id": rid}
+
+
+class ReasonPatch(BaseModel):
+    name: str | None = None
+    is_active: bool | None = None
+
+
+@router.patch("/api/fail-reasons/{reason_id}")
+async def fail_reason_patch(reason_id: int, r: ReasonPatch):
+    cur = await pool.fetchrow("SELECT is_system FROM fail_reasons WHERE id=$1", reason_id)
+    if not cur:
+        raise HTTPException(404, "Причину не знайдено")
+    if r.is_active is not None:
+        if cur["is_system"] and not r.is_active:
+            raise HTTPException(403, "Системну причину не можна архівувати")
+        await pool.execute("UPDATE fail_reasons SET is_active=$1 WHERE id=$2",
+                           r.is_active, reason_id)
+    if r.name is not None and r.name.strip():
+        await pool.execute("UPDATE fail_reasons SET name=$1 WHERE id=$2",
+                           r.name.strip(), reason_id)
+    return {"ok": True}
+
+
 # ---------- GPS ----------
 
 class GpsPoint(BaseModel):
@@ -309,6 +375,7 @@ async def position(token: str, body: GpsBatch):
         return {"saved": 0}
     route_id = await pool.fetchval("""
         SELECT id FROM routes WHERE plan_date=$2
+          AND project_id IN (SELECT id FROM projects WHERE is_released)
           AND (driver_id=$1
                OR vehicle_id IN (SELECT id FROM vehicles WHERE driver_id=$1 AND is_active))
         ORDER BY id DESC LIMIT 1""", drv["id"], kyiv_today())
@@ -331,7 +398,9 @@ async def facts(plan_date: date = Query(...)):
                d.id AS driver_id, d.name AS driver_name
         FROM routes r JOIN vehicles v ON v.id=r.vehicle_id
         LEFT JOIN drivers d ON d.id=r.driver_id
-        WHERE r.plan_date = $1 ORDER BY r.id""", plan_date)
+        WHERE r.plan_date = $1
+          AND r.project_id IN (SELECT id FROM projects WHERE is_released)
+        ORDER BY r.id""", plan_date)
     out = []
     for r in routes:
         stops = await pool.fetch("""

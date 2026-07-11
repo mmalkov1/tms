@@ -188,7 +188,9 @@ async def driver_trip(token: str, d: date | None = Query(None)):
         "fail_reasons": fail_reasons,
         "route": {"id": route["id"], "vehicle": route["vehicle_name"], "plate": route["plate"],
                   "color": route["color"], "total_km": float(route["total_km"] or 0),
-                  "depart": _hm(route["depart_time"]), "return": _hm(route["return_time"])},
+                  "depart": _hm(route["depart_time"]), "return": _hm(route["return_time"]),
+                  **dict(zip(("start_ts", "finish_ts", "work_min", "gps_km"),
+                             await _route_worklog(route["id"], [drv["id"]])))},
         "stops": [{
             "seq": s["seq"], "order_id": s["order_id"], "doc_number": s["doc_number"],
             "client": s["client"], "kind": s["kind"],
@@ -420,9 +422,12 @@ async def facts(plan_date: date = Query(...)):
             WHERE driver_id = ANY($1::int[]) ORDER BY ts DESC LIMIT 1""",
             [i for i in {r["driver_id"], r["veh_driver_id"]} if i]) \
             if (r["driver_id"] or r["veh_driver_id"]) else None
+        w_start, w_fin, w_min, w_km = await _route_worklog(
+            r["id"], [i for i in {r["driver_id"], r["veh_driver_id"]} if i])
         out.append({
             "route_id": r["id"], "color": r["color"],
             "vehicle": r["vehicle_name"], "driver": r["driver_name"],
+            "start_ts": w_start, "finish_ts": w_fin, "work_min": w_min, "gps_km": w_km,
             "last_gps": ({"ts": _iso(last["ts"]), "lat": last["lat"], "lon": last["lon"],
                           "speed_kmh": last["speed_kmh"]} if last else None),
             "stops": [{
@@ -500,3 +505,68 @@ async def driver_next_trip(token: str):
                    "address": s["address"], "address_extra": s["address_extra"],
                    "eta": _hm(s["eta"]), "weight_kg": float(s["weight_kg"] or 0)}
                   for s in stops]}}
+
+
+# ---------- v30: «виїхав / завершив маршрут» ----------
+
+class RouteEventIn(BaseModel):
+    event: str                     # start | finish
+    lat: float | None = None
+    lon: float | None = None
+
+
+@router.post("/api/driver/{token}/route/{route_id}/event")
+async def route_event(token: str, route_id: int, body: RouteEventIn):
+    if body.event not in ("start", "finish"):
+        raise HTTPException(400, "event: start|finish")
+    drv = await _driver_by_token(token)
+    ok = await pool.fetchval("""
+        SELECT 1 FROM routes r
+        WHERE r.id = $2
+          AND (r.driver_id = $1
+               OR r.vehicle_id IN (SELECT id FROM vehicles WHERE driver_id = $1 AND is_active))""",
+        drv["id"], route_id)
+    if not ok:
+        raise HTTPException(404, "Не твій рейс")
+    if body.event == "finish":
+        started = await pool.fetchval(
+            "SELECT 1 FROM route_events WHERE route_id=$1 AND event='start'", route_id)
+        if not started:
+            raise HTTPException(400, "Спочатку познач виїзд")
+    # перше натискання перемагає, повторне — ігнорується
+    await pool.execute("""
+        INSERT INTO route_events (route_id, driver_id, event, lat, lon)
+        VALUES ($1,$2,$3,$4,$5) ON CONFLICT (route_id, event) DO NOTHING""",
+        route_id, drv["id"], body.event, body.lat, body.lon)
+    evs = await pool.fetch(
+        "SELECT event, ts FROM route_events WHERE route_id=$1", route_id)
+    return {e["event"]: _iso(e["ts"]) for e in evs}
+
+
+def _haversine_km(lat1, lon1, lat2, lon2):
+    from math import asin, cos, radians, sin, sqrt
+    p1, p2 = radians(lat1), radians(lat2)
+    dp, dl = radians(lat2 - lat1), radians(lon2 - lon1)
+    a = sin(dp / 2) ** 2 + cos(p1) * cos(p2) * sin(dl / 2) ** 2
+    return 12742 * asin(sqrt(a))
+
+
+async def _route_worklog(route_id: int, driver_ids: list[int]):
+    """(start_ts, finish_ts, хвилини, км по GPS) між подіями рейсу."""
+    evs = {e["event"]: e["ts"] for e in await pool.fetch(
+        "SELECT event, ts FROM route_events WHERE route_id=$1", route_id)}
+    start, fin = evs.get("start"), evs.get("finish")
+    minutes = int((fin - start).total_seconds() // 60) if start and fin else None
+    km = None
+    if start and driver_ids:
+        pts = await pool.fetch("""
+            SELECT lat, lon FROM gps_points
+            WHERE driver_id = ANY($1::int[]) AND ts >= $2 AND ts <= $3
+              AND (accuracy_m IS NULL OR accuracy_m <= 60)
+            ORDER BY ts""", driver_ids, start, fin or datetime.now(timezone.utc))
+        km = 0.0
+        for a, b in zip(pts, pts[1:]):
+            seg = _haversine_km(a["lat"], a["lon"], b["lat"], b["lon"])
+            if seg < 2:            # телепорти від збоїв GPS не рахуємо
+                km += seg
+    return _iso(start), _iso(fin), minutes, (round(km, 1) if km is not None else None)

@@ -89,6 +89,13 @@
         background:rgba(255,255,255,.15); color:#cfd9e6; }
   .dt.on { background:#fff; color:var(--navy); font-weight:700; }
   .cnt { background:var(--red); color:#fff; border-radius:8px; padding:0 6px; font-size:11px; font-weight:800; }
+  .b-route { display:block; width:calc(100% - 20px); margin:10px; padding:14px; border:none;
+             border-radius:10px; font:inherit; font-size:15px; font-weight:800; }
+  .b-route.go { background:var(--green); color:#fff; }
+  .b-route.fin { background:#fff; color:var(--navy); border:2px solid var(--navy); }
+  .onroute { background:#E1F5EE; border:1px solid #1D9E75; color:#085041; border-radius:8px;
+             padding:8px 11px; margin:10px 10px 0; font-size:13px; }
+  .routedone { background:#fff; border-radius:8px; padding:10px 12px; margin:10px 10px 0; font-size:13px; }
   .preview-note { background:#FFF7E6; border:1px solid #EF9F27; border-radius:8px;
                   padding:8px 11px; font-size:12px; color:#854F0B; margin:10px 10px 0; }
 </style>
@@ -270,6 +277,18 @@ function renderNext() {
     }).join('');
 }
 
+async function routeEvent(ev) {
+  const q = ev==='start' ? 'Позначити виїзд на маршрут?' : 'Завершити маршрут?';
+  if (!confirm(q)) return;
+  const last = (typeof lastPos !== 'undefined' && lastPos) ? lastPos
+             : (typeof queue !== 'undefined' && queue.length ? queue[queue.length-1] : null);
+  const r = await fetch(`/api/driver/${TOKEN}/route/${trip.route.id}/event`, {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({event:ev, lat:last?.lat ?? null, lon:last?.lon ?? null})});
+  if (r.ok) { toast(ev==='start' ? 'Гарної дороги!' : 'Рейс завершено'); load(); }
+  else toast('Не вдалося, спробуй ще раз');
+}
+
 async function load() {
   if (!TOKEN) { $('list').innerHTML='<div class="empty">Немає токена в посиланні</div>'; return; }
   let r;
@@ -300,7 +319,19 @@ function render() {
   const nowMin = now.getHours()*60 + now.getMinutes();
   let currentShown = false, delay = null;
 
-  $('list').innerHTML = groups.map((g, gi) => {
+  const rt = trip.route;
+  const fmtDur = m => m==null ? '' : `${Math.floor(m/60)} год ${String(m%60).padStart(2,'0')} хв`;
+  let head = '', tail = '';
+  if (!rt.start_ts) {
+    head = `<button class="b-route go" onclick="routeEvent('start')">🚚 Виїхав на маршрут</button>`;
+  } else if (!rt.finish_ts) {
+    head = `<div class="onroute">У рейсі з <b>${hm(rt.start_ts)}</b></div>`;
+    tail = `<button class="b-route fin" onclick="routeEvent('finish')">🏁 Завершив маршрут</button>`;
+  } else {
+    head = `<div class="routedone">Рейс завершено <b>${hm(rt.finish_ts)}</b><br>
+      <span style="color:#5F5E5A">У дорозі ${fmtDur(rt.work_min)}</span></div>`;
+  }
+  $('list').innerHTML = head + groups.map((g, gi) => {
     const arrived  = g.items.every(s => s.arrive_ts);
     const departed = g.items.every(s => s.depart_ts);
     const failed   = g.items.every(s => s.fail_ts);
@@ -356,7 +387,7 @@ function render() {
         <button class="b-fail" onclick="openFail(${gi},'${ids}','${isPickup?'pickup':'delivery'}')" title="Не виконано">✗</button>
       </div>`}
     </div>`;
-  }).join('') || '<div class="empty">На маршруті немає точок</div>';
+  }).join('') + tail || '<div class="empty">На маршруті немає точок</div>';
 
   const d = $('hDelay');
   if (delay == null) d.innerHTML = '';

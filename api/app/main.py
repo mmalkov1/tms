@@ -48,6 +48,17 @@ async def startup():
             lon          DOUBLE PRECISION NOT NULL,
             source       TEXT,
             updated_at   TIMESTAMPTZ NOT NULL DEFAULT now())""")
+    # v30 (migrate_016): події рейсу «виїхав/завершив»
+    await pool.execute("""
+        CREATE TABLE IF NOT EXISTS route_events (
+            id        SERIAL PRIMARY KEY,
+            route_id  INT NOT NULL REFERENCES routes(id) ON DELETE CASCADE,
+            driver_id INT,
+            event     TEXT NOT NULL CHECK (event IN ('start','finish')),
+            ts        TIMESTAMPTZ NOT NULL DEFAULT now(),
+            lat       DOUBLE PRECISION,
+            lon       DOUBLE PRECISION,
+            UNIQUE (route_id, event))""")
     appupd.init()                      # v27: каталог APK для оновлень застосунку
     await integration_1c.init(pool)
     # v17 (migrate_011): мобильный кабинет водителя — токены, факты, GPS

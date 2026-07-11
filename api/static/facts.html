@@ -136,6 +136,12 @@ async function load() {
         <span>${rt.vehicle} · ${rt.driver||'—'}</span>
         <span>${done}/${rt.stops.length} точок${fails ? ' · '+fails+' відмов' : ''} · GPS ${rt.last_gps?hm(rt.last_gps.ts):'—'}</span>
       </div>
+      ${rt.start_ts ? `<div style="background:#F7F6F2;padding:6px 12px;font-size:12px;color:#444;display:flex;gap:14px;flex-wrap:wrap">
+        <span>Виїзд <b>${hm(rt.start_ts)}</b></span>
+        <span>Повернення <b>${rt.finish_ts?hm(rt.finish_ts):'—'}</b></span>
+        ${rt.work_min!=null ? `<span><b>${Math.floor(rt.work_min/60)} год ${String(rt.work_min%60).padStart(2,'0')} хв</b></span>` : ''}
+        ${rt.gps_km!=null ? `<span><b>${rt.gps_km} км</b> по GPS</span>` : ''}
+      </div>` : ''}
       <table><tr><th>#</th><th>Клієнт</th><th>План</th><th>Прибув</th><th>Поїхав</th><th>Δ / Статус</th></tr>
       ${rt.stops.map(s=>`<tr class="${s.fail_ts?'failrow':s.depart_ts?'done':''}">
         <td>${s.seq}</td><td>${s.client}</td><td>${s.eta||'—'}</td>

@@ -55,6 +55,32 @@
   button:disabled { opacity:.4; }
   .b-arr { background:var(--red); }
   .b-dep { background:var(--green); }
+  .b-fail { flex:0 0 54px; background:#fff; color:var(--red); border:2px solid var(--red);
+            font-size:20px; }
+  .stop.failed { opacity:.75; border-left-color:var(--amber); }
+  .person { font-size:13px; color:var(--navy); margin-top:6px; display:flex;
+            align-items:center; gap:6px; }
+  .fail-line { font-size:13px; color:var(--amber); font-weight:800; margin-top:6px;
+               display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+  .b-unfail { flex:0 0 auto; min-height:30px; padding:0 12px; font-size:12px;
+              background:#fff; color:var(--navy); border:1.5px solid var(--navy); border-radius:7px; }
+  #failDlg { position:fixed; inset:0; background:rgba(0,0,0,.45); display:none;
+             align-items:flex-end; justify-content:center; z-index:20; }
+  #failDlg.open { display:flex; }
+  #failBox { background:#fff; border-radius:14px 14px 0 0; padding:16px; width:100%;
+             max-width:480px; max-height:80vh; overflow:auto; }
+  #failBox h3 { font-size:15px; font-weight:800; color:var(--navy); margin-bottom:2px; }
+  #failBox .sub { font-size:13px; color:#666; margin-bottom:12px; }
+  .r-btn { display:block; width:100%; min-height:50px; border:none; border-radius:9px;
+           background:var(--cream); color:var(--navy); font:inherit; font-size:15px;
+           font-weight:800; margin-bottom:8px; }
+  .r-btn.sel { background:var(--navy); color:#fff; }
+  #failTxt { width:100%; box-sizing:border-box; min-height:44px; border:1.5px solid #ccc;
+             border-radius:9px; padding:10px 12px; font:inherit; font-size:14px;
+             margin-bottom:10px; display:none; }
+  #failActions { display:flex; gap:8px; }
+  #failActions .cancel { background:#ccc; color:#333; }
+  #failActions .confirm { background:var(--red); }
   .empty { text-align:center; padding:50px 20px; color:#666; font-size:15px; }
   #toast { position:fixed; bottom:14px; left:50%; transform:translateX(-50%); background:#222; color:#fff;
            padding:10px 18px; border-radius:8px; font-size:14px; display:none; z-index:10; }
@@ -68,6 +94,18 @@
       <span class="bars"><i></i><i></i><i></i><i></i></span><span id="hGpsTxt">GPS —</span></span></div>
 </header>
 <div id="list"></div>
+<div id="failDlg">
+  <div id="failBox">
+    <h3>Чому не виконано?</h3>
+    <div class="sub" id="failSub"></div>
+    <div id="failReasons"></div>
+    <input id="failTxt" placeholder="Опиши причину">
+    <div id="failActions">
+      <button class="cancel" onclick="closeFail()">Скасувати</button>
+      <button class="confirm" onclick="doFail()">Підтвердити</button>
+    </div>
+  </div>
+</div>
 <div id="toast"></div>
 <script>
 const qs = new URLSearchParams(location.search);
@@ -76,6 +114,69 @@ const $ = id => document.getElementById(id);
 
 const NAV_ARROW = '<svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11l18-8-8 18-2-8-8-2z"/></svg>';
 const NAV_PHONE = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.13.96.36 1.9.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.9.34 1.85.57 2.81.7A2 2 0 0 1 22 16.92z"/></svg>';
+
+const PERSON_ICO = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>';
+
+// --- відмова: модалка вибору причини ---
+let failCtx = null;   // {ids, kind, reasonId}
+
+function openFail(gi, ids, kind) {
+  failCtx = { ids, kind, reasonId: null };
+  const grp = document.querySelectorAll('.stop')[gi];
+  $('failSub').textContent = (grp?.querySelector('.client')?.textContent || '') +
+    ' · ' + (kind === 'pickup' ? 'забір' : 'доставка');
+  const reasons = (trip.fail_reasons && trip.fail_reasons[kind]) || [];
+  $('failReasons').innerHTML = reasons.map(r =>
+    `<button class="r-btn" data-id="${r.id}" data-name="${r.name}"
+       onclick="pickReason(this)">${r.name}</button>`).join('');
+  $('failTxt').style.display = 'none';
+  $('failTxt').value = '';
+  $('failDlg').classList.add('open');
+}
+
+function pickReason(btn) {
+  document.querySelectorAll('.r-btn').forEach(b => b.classList.remove('sel'));
+  btn.classList.add('sel');
+  failCtx.reasonId = +btn.dataset.id;
+  const isOther = btn.dataset.name.trim().toLowerCase().startsWith('інше');
+  $('failTxt').style.display = isOther ? 'block' : 'none';
+  if (isOther) $('failTxt').focus();
+}
+
+function closeFail() { $('failDlg').classList.remove('open'); failCtx = null; }
+
+async function doFail() {
+  if (!failCtx || !failCtx.reasonId) { toast('Обери причину'); return; }
+  const txt = $('failTxt').style.display !== 'none' ? $('failTxt').value.trim() : '';
+  if ($('failTxt').style.display !== 'none' && !txt) { toast('Опиши причину'); return; }
+  const pos = lastPos ? {lat:lastPos.lat, lon:lastPos.lon} : {};
+  for (const id of failCtx.ids.split(',')) {
+    try {
+      const r = await fetch(`/api/driver/${TOKEN}/stops/${id}/fail`, {method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({reason_id: failCtx.reasonId, reason_text: txt || null, ...pos})});
+      if (!r.ok) { toast('Помилка — спробуй ще раз'); return; }
+    } catch(e) { toast('Немає зв’язку — спробуй ще раз'); return; }
+  }
+  closeFail();
+  toast('Відмову зафіксовано');
+  await load();
+}
+
+async function unfail(ids) {
+  if (!confirm('Повернути точку в роботу?')) return;
+  for (const id of ids.split(',')) {
+    try {
+      const r = await fetch(`/api/driver/${TOKEN}/stops/${id}/unfail`, {method:'POST'});
+      if (!r.ok) {
+        const j = await r.json().catch(()=>({}));
+        toast(j.detail || 'Помилка'); return;
+      }
+    } catch(e) { toast('Немає зв’язку — спробуй ще раз'); return; }
+  }
+  toast('Точку повернуто в роботу');
+  await load();
+}
 
 // показать/скрыть навигаторы: замещают кнопку «Подзвонити»
 function toggleNav(gi) {
@@ -100,8 +201,10 @@ function groupStops(stops) {
     if (last && last.client===s.client && last.address===s.address) {
       last.items.push(s);
       if (!last.phone && s.phone) last.phone = s.phone;
+      if (!last.contact_person && s.contact_person) last.contact_person = s.contact_person;
     } else g.push({client:s.client, address:s.address, address_extra:s.address_extra,
-                 kind:s.kind, lat:s.lat, lon:s.lon, phone:s.phone, items:[s]});
+                 kind:s.kind, lat:s.lat, lon:s.lon, phone:s.phone,
+                 contact_person:s.contact_person, items:[s]});
   }
   return g;
 }
@@ -133,8 +236,10 @@ function render() {
   $('list').innerHTML = groups.map((g, gi) => {
     const arrived  = g.items.every(s => s.arrive_ts);
     const departed = g.items.every(s => s.depart_ts);
+    const failed   = g.items.every(s => s.fail_ts);
+    const closed   = departed || failed;
     const first = g.items[0], lastIt = g.items[g.items.length-1];
-    const isCurrent = !departed && !currentShown;
+    const isCurrent = !closed && !currentShown;
     if (isCurrent) {
       currentShown = true;
       const eta = toMin(first.eta);
@@ -156,14 +261,17 @@ function render() {
       : `<span class="b-call off" id="call${gi}">${NAV_PHONE} Подзвонити</span>`;
     const seats = g.items.reduce((a,s)=>a+(s.seats||0),0);
     const ids = g.items.map(s=>s.order_id).join(',');
-    return `<div class="stop ${departed?'done':''} ${isCurrent?'current':''}">
+    return `<div class="stop ${departed?'done':''} ${failed?'failed':''} ${isCurrent?'current':''}">
       <div><span class="num">${gi+1}</span><span class="client">${g.client}</span>${kindBadge}</div>
       <div class="addr">${g.address||''}</div>
       ${g.address_extra ? `<div class="cmt">💬 ${g.address_extra}</div>` : ''}
       <div class="meta"><span>План: <b>${first.eta||'—'}</b></span><span>Вікно: <b>${win}</b></span>
         <span><b>${w.toFixed(0)}</b> кг${seats ? ` · <b>${seats}</b> міс.` : ''} · ${g.items.length} завд.</span></div>
-      ${arrived ? `<div class="fact">✓ Прибув ${hm(first.arrive_ts)}${departed ? ' → Поїхав '+hm(lastIt.depart_ts):''}</div>` : ''}
-      ${departed ? '' : `
+      ${g.contact_person ? `<div class="person">${PERSON_ICO} <b>${g.contact_person}</b></div>` : ''}
+      ${arrived && !failed ? `<div class="fact">✓ Прибув ${hm(first.arrive_ts)}${departed ? ' → Поїхав '+hm(lastIt.depart_ts):''}</div>` : ''}
+      ${failed ? `<div class="fail-line">✗ Не виконано · ${first.fail_reason||''} · ${hm(first.fail_ts)}${first.arrive_ts ? ' (прибув '+hm(first.arrive_ts)+')' : ''}
+        <button class="b-unfail" onclick="unfail('${ids}')">Відмінити</button></div>` : ''}
+      ${closed ? '' : `
       <div class="actions" id="act${gi}">
         <button class="b-nav" onclick="toggleNav(${gi})" aria-label="Навігація">${NAV_ARROW}</button>
         ${call}
@@ -173,6 +281,7 @@ function render() {
       <div class="btns">
         <button class="b-arr" onclick="mark('${ids}','arrive')" ${arrived?'disabled':''}>Прибув</button>
         <button class="b-dep" onclick="mark('${ids}','depart')" ${arrived?'':'disabled'}>Поїхав</button>
+        <button class="b-fail" onclick="openFail(${gi},'${ids}','${isPickup?'pickup':'delivery'}')" title="Не виконано">✗</button>
       </div>`}
     </div>`;
   }).join('') || '<div class="empty">На маршруті немає точок</div>';

@@ -162,6 +162,7 @@ def _parse_order(el: ET.Element) -> dict | None:
         # v21/v22/v23: телефон і кількість місць — шукаємо на будь-якому рівні
         "phone": g_any("PHONE") or None,
         "seats": _int_or_none(g_any("SEATS")),
+        "contact_person": g_any("PERSON_NAME") or None,
         "lat": lat, "lon": lon,
         "tw_from": tw_from, "tw_to": tw_to,
         "service_min": service or 15,
@@ -252,8 +253,8 @@ async def import_orders(request: Request,
             res = await c.execute("""
                 INSERT INTO orders (plan_date, doc_number, doc_ref, kind, client, address,
                     address_extra, lat, lon, tw_from, tw_to, service_min, weight_kg, volume_m3,
-                    status_1c, project_id, phone, seats)
-                VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)
+                    status_1c, project_id, phone, seats, contact_person)
+                VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)
                 ON CONFLICT (project_id, doc_number) DO UPDATE SET
                     kind=EXCLUDED.kind, client=EXCLUDED.client, address=EXCLUDED.address,
                     address_extra=EXCLUDED.address_extra,
@@ -263,10 +264,11 @@ async def import_orders(request: Request,
                     service_min=EXCLUDED.service_min,
                     weight_kg=EXCLUDED.weight_kg, volume_m3=EXCLUDED.volume_m3,
                     phone=COALESCE(EXCLUDED.phone, orders.phone),
-                    seats=COALESCE(EXCLUDED.seats, orders.seats)
+                    seats=COALESCE(EXCLUDED.seats, orders.seats),
+                    contact_person=COALESCE(EXCLUDED.contact_person, orders.contact_person)
             """, plan_date, r["doc_number"], r["doc_ref"], r["kind"], r["client"], r["address"],
                 extra, r["lat"], r["lon"], r["tw_from"], r["tw_to"], r["service_min"],
-                r["weight_kg"], r["volume_m3"], "1C", project_id, r["phone"], r["seats"])
+                r["weight_kg"], r["volume_m3"], "1C", project_id, r["phone"], r["seats"], r["contact_person"])
             if res.startswith("INSERT"):
                 ins += 1
             else:

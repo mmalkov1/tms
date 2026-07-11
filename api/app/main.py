@@ -46,6 +46,8 @@ async def startup():
     await pool.execute("ALTER TABLE orders ADD COLUMN IF NOT EXISTS phone TEXT")
     # v22 (migrate_013): количество мест (SEATS из 1С)
     await pool.execute("ALTER TABLE orders ADD COLUMN IF NOT EXISTS seats INT")
+    # v24 (migrate_014): контактное лицо точки (PERSON_NAME из 1С)
+    await pool.execute("ALTER TABLE orders ADD COLUMN IF NOT EXISTS contact_person TEXT")
 
 
 def norm_addr(a: str | None) -> str | None:

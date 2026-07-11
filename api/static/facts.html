@@ -24,6 +24,8 @@
   th { color:var(--navy); background:var(--cream); }
   .late { color:var(--red); font-weight:700; } .early { color:var(--green); font-weight:700; }
   .done td { opacity:.6; }
+  .failrow { background:#FFF3D6; }
+  .failtag { color:#B8860B; font-weight:800; }
 </style>
 </head>
 <body>
@@ -61,13 +63,16 @@ async function load() {
   const pts = [];
   $('panel').innerHTML = routes.map(rt => {
     const done = rt.stops.filter(s=>s.depart_ts).length;
+    const fails = rt.stops.filter(s=>s.fail_ts).length;
     rt.stops.forEach(s => {
       if (s.lat==null) return;
       pts.push([s.lat, s.lon]);
-      const state = s.depart_ts ? 'done' : s.arrive_ts ? 'at' : 'wait';
-      const fill = state==='done' ? '#2E8B57' : state==='at' ? '#B8860B' : '#bbb';
+      const fill = s.fail_ts ? '#E8890C'
+                 : s.depart_ts ? '#2E8B57' : s.arrive_ts ? '#B8860B' : '#bbb';
       L.circleMarker([s.lat, s.lon], {radius:8, color:rt.color, weight:2, fillColor:fill, fillOpacity:1})
-       .bindTooltip(`<b>${s.client}</b><br>${s.address||''}<br>План ${s.eta||'—'} · Факт ${hm(s.arrive_ts)||'—'}`)
+       .bindTooltip(`<b>${s.client}</b><br>${s.address||''}<br>` +
+         (s.fail_ts ? `<b style="color:#B8860B">✗ ${s.fail_reason||'відмова'}</b> · ${hm(s.fail_ts)}`
+                    : `План ${s.eta||'—'} · Факт ${hm(s.arrive_ts)||'—'}`))
        .addTo(layers);
     });
     if (rt.last_gps) {
@@ -81,13 +86,13 @@ async function load() {
     return `<div class="route-card">
       <div class="route-head" style="background:${rt.color}">
         <span>${rt.vehicle} · ${rt.driver||'—'}</span>
-        <span>${done}/${rt.stops.length} точок · GPS ${rt.last_gps?hm(rt.last_gps.ts):'—'}</span>
+        <span>${done}/${rt.stops.length} точок${fails ? ' · '+fails+' відмов' : ''} · GPS ${rt.last_gps?hm(rt.last_gps.ts):'—'}</span>
       </div>
-      <table><tr><th>#</th><th>Клієнт</th><th>План</th><th>Прибув</th><th>Поїхав</th><th>Δ</th></tr>
-      ${rt.stops.map(s=>`<tr class="${s.depart_ts?'done':''}">
+      <table><tr><th>#</th><th>Клієнт</th><th>План</th><th>Прибув</th><th>Поїхав</th><th>Δ / Статус</th></tr>
+      ${rt.stops.map(s=>`<tr class="${s.fail_ts?'failrow':s.depart_ts?'done':''}">
         <td>${s.seq}</td><td>${s.client}</td><td>${s.eta||'—'}</td>
         <td>${hm(s.arrive_ts)||'—'}</td><td>${hm(s.depart_ts)||'—'}</td>
-        <td>${delta(s.eta, s.arrive_ts)}</td></tr>`).join('')}
+        <td>${s.fail_ts ? '<span class="failtag">✗ '+(s.fail_reason||'відмова')+'</span>' : delta(s.eta, s.arrive_ts)}</td></tr>`).join('')}
       </table></div>`;
   }).join('') || '<div style="padding:30px;color:#666">Маршрутів на цю дату немає</div>';
   if (pts.length) map.fitBounds(pts, {padding:[30,30]});

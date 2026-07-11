@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent" android:layout_height="match_parent"
+    android:orientation="vertical" android:gravity="center"
+    android:padding="28dp" android:background="#EFEEEC">
+
+    <TextView
+        android:layout_width="wrap_content" android:layout_height="wrap_content"
+        android:text="@string/app_name" android:textSize="22sp"
+        android:textStyle="bold" android:textColor="#00356B"
+        android:layout_marginBottom="6dp"/>
+
+    <TextView
+        android:layout_width="wrap_content" android:layout_height="wrap_content"
+        android:text="Встав токен водія або посилання від логіста"
+        android:textSize="14sp" android:textColor="#555555"
+        android:layout_marginBottom="18dp"/>
+
+    <EditText
+        android:id="@+id/tokenInput"
+        android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:hint="токен або https://…?token=…"
+        android:inputType="textUri" android:background="#FFFFFF"
+        android:padding="14dp" android:textSize="15sp"/>
+
+    <Button
+        android:id="@+id/tokenSave"
+        android:layout_width="match_parent" android:layout_height="54dp"
+        android:layout_marginTop="16dp" android:text="Увійти"
+        android:textStyle="bold" android:textSize="16sp"
+        android:backgroundTint="#00356B" android:textColor="#FFFFFF"/>
+</LinearLayout>

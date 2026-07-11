@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.TMS" parent="Theme.AppCompat.DayNight.NoActionBar">
+        <item name="colorPrimary">#00356B</item>
+        <item name="colorPrimaryDark">#00274F</item>
+        <item name="colorAccent">#E82A2C</item>
+        <item name="android:statusBarColor">#00356B</item>
+    </style>
+</resources>

@@ -110,6 +110,7 @@
 <script>
 const qs = new URLSearchParams(location.search);
 const TOKEN = qs.get('token');
+const NATIVE = /TMSKultApp/.test(navigator.userAgent);   // v26: сторінка всередині APK
 const $ = id => document.getElementById(id);
 
 const NAV_ARROW = '<svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11l18-8-8 18-2-8-8-2z"/></svg>';
@@ -320,7 +321,13 @@ function setGps(bars, txt) {
   $('hGpsTxt').textContent = txt;
 }
 
-if (navigator.geolocation && TOKEN) {
+window.nativeGps = acc => {                 // v26: APK оновлює індикатор сигналу
+  const bars = acc<=15?4 : acc<=40?3 : acc<=100?2 : 1;
+  setGps(bars, '±' + Math.round(acc) + ' м');
+};
+if (NATIVE) setGps(0, 'додаток');
+
+if (navigator.geolocation && TOKEN && !NATIVE) {
   navigator.geolocation.watchPosition(p => {
     lastPos = {lat:p.coords.latitude, lon:p.coords.longitude};
     queue.push({ts:p.timestamp, lat:p.coords.latitude, lon:p.coords.longitude,

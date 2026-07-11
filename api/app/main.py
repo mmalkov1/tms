@@ -14,6 +14,15 @@ ROUTE_COLORS = ["#E82A2C", "#00356B", "#2E8B57", "#B8860B", "#8B008B", "#FF6347"
                 "#1E90FF", "#FF8C00"]
 
 app = FastAPI(title="TMS Kultukr")
+
+
+@app.middleware("http")
+async def no_html_cache(request, call_next):
+    """v29: HTML завжди свіжий — деплой видно без Ctrl+Shift+R, незалежно від проксі."""
+    resp = await call_next(request)
+    if request.url.path == "/" or request.url.path.endswith(".html"):
+        resp.headers["Cache-Control"] = "no-cache"
+    return resp
 pool: asyncpg.Pool = None
 
 

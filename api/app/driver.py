@@ -10,6 +10,8 @@ from datetime import date, datetime, timedelta, timezone
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
+from . import osrm
+
 router = APIRouter(tags=["driver"])
 pool = None
 
@@ -438,7 +440,12 @@ async def facts(plan_date: date = Query(...)):
 
 @router.get("/api/facts/tracks")
 async def facts_tracks(plan_date: date = Query(...)):
-    """GPS-треки рейсів за день (київська доба). Проріджено до ~600 точок."""
+    """v29: GPS-треки, прив'язані до доріг через OSRM /match.
+
+    Сирі точки фільтруємо за точністю (<=60 м), проріджуємо і матчимо
+    на дорожній граф — трек більше не «скаче». Якщо OSRM не впорався,
+    падаємо назад на сирі точки.
+    """
     routes = await pool.fetch("""
         SELECT r.id, r.color, r.driver_id, v.driver_id AS veh_driver_id
         FROM routes r JOIN vehicles v ON v.id=r.vehicle_id
@@ -448,13 +455,20 @@ async def facts_tracks(plan_date: date = Query(...)):
     for r in routes:
         ids = [i for i in {r["driver_id"], r["veh_driver_id"]} if i]
         pts = await pool.fetch("""
-            SELECT lat, lon FROM gps_points
+            SELECT lat, lon, ts, accuracy_m FROM gps_points
             WHERE driver_id = ANY($1::int[])
               AND (ts AT TIME ZONE 'Europe/Kyiv')::date = $2
+              AND (accuracy_m IS NULL OR accuracy_m <= 60)
             ORDER BY ts""", ids, plan_date) if ids else []
-        step = max(1, len(pts) // 600)
+        step = max(1, len(pts) // 400)
+        thin = pts[::step]
+        matched = await osrm.match([
+            (p["lat"], p["lon"], int(p["ts"].timestamp()),
+             min(50, max(10, int(p["accuracy_m"] or 25))))
+            for p in thin])
         out.append({"route_id": r["id"], "color": r["color"],
-                    "points": [[p["lat"], p["lon"]] for p in pts[::step]]})
+                    "matched": matched is not None,
+                    "points": matched or [[p["lat"], p["lon"]] for p in thin]})
     return out
 
 

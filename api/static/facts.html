@@ -94,8 +94,9 @@ async function loadTracks() {
   trackLayer.clearLayers(); tracks = {};
   data.forEach(t => {
     if (t.points.length < 2) return;
-    tracks[t.route_id] = L.polyline(t.points, {color:t.color, weight:2.5,
-      dashArray:'6 5', opacity:(focusRoute===null||t.route_id===focusRoute)?.85:.12})
+    tracks[t.route_id] = L.polyline(t.points, {color:t.color,
+      weight:t.matched?3:2.5, dashArray:t.matched?null:'6 5',
+      opacity:(focusRoute===null||t.route_id===focusRoute)?.8:.12})
       .addTo(trackLayer);
   });
 }

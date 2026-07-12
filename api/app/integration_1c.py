@@ -9,13 +9,27 @@
 
 Формат дат в экспорте: yyyy-MM-ddTHH:mm:ss (парсится в 1С функцией TMS_ПрочитатьДату).
 Знак веса/объема в PRODUCT: отрицательный или COUNT=-1 => забор груза (pickup).
+
+v34: экспорт отдает ФАКТИЧЕСКИЕ статусы точек и время из stop_events /
+route_events — для фоновой синхронизации статусов документов в 1С
+(замена Tocan exportAPILogist). Семантика STATUS_POINT (как у Tocan):
+  склад-выезд (IN_TRIP_NUMBER=0): 4 после «Виїхав на маршрут», иначе 1
+  точка: fail -> 5, depart -> 4, arrive без depart -> 2, иначе 1
+  склад-возврат: 4 после «Завершив маршрут», иначе 1
+Все фактические времена — Europe/Kyiv.
 """
 import os
 import secrets
 import xml.etree.ElementTree as ET
-from datetime import date, datetime, time, timedelta
+from datetime import date, datetime, time, timedelta, timezone
 
 from fastapi import APIRouter, Query, Request, Response
+
+try:
+    from zoneinfo import ZoneInfo
+    KYIV = ZoneInfo("Europe/Kyiv")
+except Exception:                       # в контейнере нет tzdata — летнее UTC+3
+    KYIV = timezone(timedelta(hours=3))
 
 router = APIRouter(prefix="/api/1c", tags=["1c"])
 pool = None  # инициализируется из main.py
@@ -310,6 +324,13 @@ def _dt(plan_date: date, t: time | None) -> str:
     return datetime.combine(plan_date, t).strftime("%Y-%m-%dT%H:%M:%S")
 
 
+def _ft(ts) -> str:
+    """v34: фактическое время (TIMESTAMPTZ) -> строка в Europe/Kyiv для 1С."""
+    if ts is None:
+        return ""
+    return ts.astimezone(KYIV).strftime("%Y-%m-%dT%H:%M:%S")
+
+
 @router.get("/export")
 async def export_trips(key: str = Query(""),
                        start_date: str = Query(None), end_date: str = Query(None)):
@@ -345,11 +366,21 @@ async def export_trips(key: str = Query(""),
     parts = ["<RESPONSE><ERROR>0</ERROR>"]
     for r in rr:
         ss = await pool.fetch("""
-            SELECT s.seq, s.eta, s.etd, o.doc_number, o.weight_kg
+            SELECT s.seq, s.eta, s.etd, s.order_id, o.doc_number, o.weight_kg
             FROM route_stops s JOIN orders o ON o.id=s.order_id
             WHERE s.route_id=$1 ORDER BY s.seq""", r["id"])
         if not ss:
             continue   # пустые машины в 1С не отдаем
+
+        # v34: факты рейса и точек — для STATUS_POINT и *_FACT
+        r_ev = {e["event"]: e["ts"] for e in await pool.fetch(
+            "SELECT event, ts FROM route_events WHERE route_id=$1", r["id"])}
+        s_ev = {}
+        for e in await pool.fetch(
+                "SELECT order_id, event, ts FROM stop_events WHERE route_id=$1", r["id"]):
+            s_ev.setdefault(e["order_id"], {})[e["event"]] = e["ts"]
+        started, finished = r_ev.get("start"), r_ev.get("finish")
+
         total_w = sum(float(s["weight_kg"] or 0) for s in ss)
         parts.append("<TRIP>")
         parts.append(f"<TRIP_CODE>{r['id']}</TRIP_CODE>")
@@ -360,10 +391,13 @@ async def export_trips(key: str = Query(""),
         parts.append("<TRIP_DIST_FACT></TRIP_DIST_FACT>")
         parts.append(f"<START_TIME_PLAN>{_dt(r['plan_date'], r['depart_time'])}</START_TIME_PLAN>")
         parts.append(f"<FINISH_TIME_PLAN>{_dt(r['plan_date'], r['return_time'])}</FINISH_TIME_PLAN>")
-        parts.append("<START_TIME_FACT></START_TIME_FACT><FINISH_TIME_FACT></FINISH_TIME_FACT>")
+        parts.append(f"<START_TIME_FACT>{_ft(started)}</START_TIME_FACT>"
+                     f"<FINISH_TIME_FACT>{_ft(finished)}</FINISH_TIME_FACT>")
         parts.append(f"<TRIP_ORDERS_WEIGHT_PLAN>{round(total_w, 2)}</TRIP_ORDERS_WEIGHT_PLAN>")
         parts.append("<ORDERS>")
         # склад — точка выезда (как у Tocan: 1С найдет по коду в Справочники.Склады)
+        # v34: STATUS_POINT=4 после «Виїхав на маршрут» — открывает синхронизацию
+        # статусов точек на стороне 1С (логика СтатусСоСклада)
         wcode = r["warehouse_code_1c"]
         if wcode:
             parts.append("<ORDER>")
@@ -371,21 +405,30 @@ async def export_trips(key: str = Query(""),
             parts.append("<IN_TRIP_NUMBER>0</IN_TRIP_NUMBER>")
             parts.append("<PLAN_DIST>0</PLAN_DIST><FACT_DIST>0</FACT_DIST>")
             parts.append(f"<DELIVERY_DATE_PLAN>{_dt(r['plan_date'], r['depart_time'])}</DELIVERY_DATE_PLAN>")
-            parts.append("<DELIVERY_DATE_FACT></DELIVERY_DATE_FACT>")
+            parts.append(f"<DELIVERY_DATE_FACT>{_ft(started)}</DELIVERY_DATE_FACT>")
             parts.append(f"<DELIVERY_OUTDATE_PLAN>{_dt(r['plan_date'], r['depart_time'])}</DELIVERY_OUTDATE_PLAN>")
-            parts.append("<DELIVERY_OUTDATE_FACT></DELIVERY_OUTDATE_FACT>")
-            parts.append("<STATUS_POINT>1</STATUS_POINT>")
+            parts.append(f"<DELIVERY_OUTDATE_FACT>{_ft(started)}</DELIVERY_OUTDATE_FACT>")
+            parts.append(f"<STATUS_POINT>{4 if started else 1}</STATUS_POINT>")
             parts.append("</ORDER>")
         for s in ss:
+            ev = s_ev.get(s["order_id"], {})
+            if "fail" in ev:                       # відмова водія
+                st, f_in, f_out = 5, ev.get("arrive"), ev.get("fail")
+            elif "depart" in ev:                   # поїхав від клієнта
+                st, f_in, f_out = 4, ev.get("arrive"), ev.get("depart")
+            elif "arrive" in ev:                   # на точці
+                st, f_in, f_out = 2, ev.get("arrive"), None
+            else:                                  # план; 1С сама повысит до «2»
+                st, f_in, f_out = 1, None, None    # после выезда со склада
             parts.append("<ORDER>")
             parts.append(f"<CODE>{_esc(s['doc_number'])}</CODE>")
             parts.append(f"<IN_TRIP_NUMBER>{s['seq']}</IN_TRIP_NUMBER>")
             parts.append("<PLAN_DIST>0</PLAN_DIST><FACT_DIST>0</FACT_DIST>")
             parts.append(f"<DELIVERY_DATE_PLAN>{_dt(r['plan_date'], s['eta'])}</DELIVERY_DATE_PLAN>")
-            parts.append("<DELIVERY_DATE_FACT></DELIVERY_DATE_FACT>")
+            parts.append(f"<DELIVERY_DATE_FACT>{_ft(f_in)}</DELIVERY_DATE_FACT>")
             parts.append(f"<DELIVERY_OUTDATE_PLAN>{_dt(r['plan_date'], s['etd'])}</DELIVERY_OUTDATE_PLAN>")
-            parts.append("<DELIVERY_OUTDATE_FACT></DELIVERY_OUTDATE_FACT>")
-            parts.append("<STATUS_POINT>1</STATUS_POINT>")
+            parts.append(f"<DELIVERY_OUTDATE_FACT>{_ft(f_out)}</DELIVERY_OUTDATE_FACT>")
+            parts.append(f"<STATUS_POINT>{st}</STATUS_POINT>")
             parts.append("</ORDER>")
         # склад — точка возвращения (последняя в рейсе)
         if wcode:
@@ -395,10 +438,10 @@ async def export_trips(key: str = Query(""),
             parts.append(f"<IN_TRIP_NUMBER>{last_seq}</IN_TRIP_NUMBER>")
             parts.append("<PLAN_DIST>0</PLAN_DIST><FACT_DIST>0</FACT_DIST>")
             parts.append(f"<DELIVERY_DATE_PLAN>{_dt(r['plan_date'], r['return_time'])}</DELIVERY_DATE_PLAN>")
-            parts.append("<DELIVERY_DATE_FACT></DELIVERY_DATE_FACT>")
+            parts.append(f"<DELIVERY_DATE_FACT>{_ft(finished)}</DELIVERY_DATE_FACT>")
             parts.append(f"<DELIVERY_OUTDATE_PLAN>{_dt(r['plan_date'], r['return_time'])}</DELIVERY_OUTDATE_PLAN>")
-            parts.append("<DELIVERY_OUTDATE_FACT></DELIVERY_OUTDATE_FACT>")
-            parts.append("<STATUS_POINT>1</STATUS_POINT>")
+            parts.append(f"<DELIVERY_OUTDATE_FACT>{_ft(finished)}</DELIVERY_OUTDATE_FACT>")
+            parts.append(f"<STATUS_POINT>{4 if finished else 1}</STATUS_POINT>")
             parts.append("</ORDER>")
         parts.append("</ORDERS></TRIP>")
     parts.append("</RESPONSE>")

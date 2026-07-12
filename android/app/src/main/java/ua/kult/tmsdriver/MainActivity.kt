@@ -10,6 +10,7 @@ import android.os.Bundle
 import android.webkit.JsResult
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
+import android.webkit.WebResourceResponse
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.Button
@@ -18,6 +19,9 @@ import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
+import java.net.HttpURLConnection
+import java.net.URL
+import java.util.concurrent.Executors
 
 class MainActivity : AppCompatActivity() {
 
@@ -28,6 +32,8 @@ class MainActivity : AppCompatActivity() {
     }
 
     private var webView: WebView? = null
+    private val io = Executors.newSingleThreadExecutor()          // v35
+    @Volatile private var tokenReset = false                      // v35: один скид за раз
 
     private val gpsReceiver = object : BroadcastReceiver() {
         override fun onReceive(c: Context?, i: Intent?) {
@@ -59,7 +65,41 @@ class MainActivity : AppCompatActivity() {
                 return@setOnClickListener
             }
             prefs().edit().putString("token", t).apply()
+            tokenReset = false                                    // v35: новий токен — знову стежимо
             showTrip(t)
+        }
+    }
+
+    // ---------- v35: недійсний токен -> назад на екран введення ----------
+
+    private fun resetToken() {
+        if (tokenReset) return
+        tokenReset = true
+        prefs().edit().remove("token").apply()
+        // старий токен більше не приймається — глушимо GPS-сервіс,
+        // інакше він вічно довбе /position мертвим токеном
+        stopService(Intent(this, LocationService::class.java))
+        runOnUiThread {
+            Toast.makeText(this,
+                "Посилання недійсне — логіст створив нове. Введи його.",
+                Toast.LENGTH_LONG).show()
+            showTokenScreen()
+        }
+    }
+
+    /** Швидка перевірка токена на старті: 401 -> екран введення. */
+    private fun checkTokenAsync(token: String) {
+        io.execute {
+            runCatching {
+                val con = URL("$BASE_URL/api/driver/$token/trip")
+                    .openConnection() as HttpURLConnection
+                con.connectTimeout = 8_000
+                con.readTimeout = 8_000
+                val code = con.responseCode
+                con.disconnect()
+                if (code == 401) resetToken()
+                // немає мережі / 5xx — нічого не робимо, сторінка сама покаже стан
+            }
         }
     }
 
@@ -110,9 +150,20 @@ class MainActivity : AppCompatActivity() {
                     return if (url.host == Uri.parse(BASE_URL).host) false
                     else { startActivity(Intent(Intent.ACTION_VIEW, url)); true }
                 }
+
+                // v35: логіст змінив токен, поки застосунок відкритий —
+                // будь-який 401 від нашого API повертає на екран введення
+                override fun onReceivedHttpError(view: WebView?, req: WebResourceRequest?,
+                                                 resp: WebResourceResponse?) {
+                    if (resp?.statusCode == 401 &&
+                        req?.url?.host == Uri.parse(BASE_URL).host &&
+                        req.url?.path?.startsWith("/api/driver/") == true)
+                        resetToken()
+                }
             }
             loadUrl("$BASE_URL/driver.html?token=$token")
         }
+        checkTokenAsync(token)                 // v35: старт зі скинутим токеном
         askPermissionsAndStart()
         Updater.check(this, BASE_URL)          // v27: оновлення «по повітрю»
     }

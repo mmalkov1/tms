@@ -20,13 +20,56 @@ app = FastAPI(title="TMS Kultukr")
 async def _route_autoclose_loop():
     """v32: страхувальне авто-закриття рейсів.
 
-    Кожні 10 хв: рейси з «виїхав» без «завершив» закриваються, якщо
-    (а) день рейсу вже минув, або (б) сьогодні і в Києві вже 23:30+.
-    ts завершення = остання GPS-точка водія за той день (не now(),
-    щоб не намотувати нічний простій у робочий час).
+    Кожні 10 хв, два рівні:
+    1) Геозона складу: всі точки опрацьовані + водій стоїть у радіусі 300 м
+       від складу щонайменше 10 хв → finish (ts = момент входу в геозону).
+    2) Страховка: 23:30 Києва або минулий день → finish останньою GPS-точкою дня.
+    Ручна кнопка «Завершив» завжди пріоритетніша — автоматика лише доганяє.
     """
+    from .driver import _haversine_km
     while True:
         try:
+            # --- рівень 1: геозона складу ---
+            cand = await pool.fetch("""
+                SELECT re.route_id, re.driver_id, d.lat AS dlat, d.lon AS dlon
+                FROM route_events re
+                JOIN routes r ON r.id = re.route_id
+                JOIN depots d ON d.id = r.depot_id
+                WHERE re.event = 'start'
+                  AND r.plan_date = (now() AT TIME ZONE 'Europe/Kyiv')::date
+                  AND NOT EXISTS (SELECT 1 FROM route_events f
+                                  WHERE f.route_id = re.route_id AND f.event='finish')
+                  AND NOT EXISTS (SELECT 1 FROM route_stops s
+                                  WHERE s.route_id = re.route_id
+                                    AND NOT EXISTS (SELECT 1 FROM stop_events e
+                                        WHERE e.route_id = s.route_id AND e.order_id = s.order_id
+                                          AND e.event IN ('depart','fail')))""")
+            for cd in cand:
+                pts = await pool.fetch("""
+                    SELECT ts, lat, lon FROM gps_points
+                    WHERE driver_id = $1 AND ts > now() - interval '40 minutes'
+                      AND (accuracy_m IS NULL OR accuracy_m <= 80)
+                    ORDER BY ts DESC""", cd["driver_id"])
+                inside = [p for p in pts if _haversine_km(
+                    p["lat"], p["lon"], cd["dlat"], cd["dlon"]) <= 0.3]
+                if len(pts) < 2 or not inside:
+                    continue
+                # свіжа точка в геозоні і пробув там >= 10 хв
+                if pts[0] not in inside:
+                    continue
+                streak = []
+                for p in pts:                      # від свіжих назад, поки в геозоні
+                    if p in inside:
+                        streak.append(p)
+                    else:
+                        break
+                if streak and (streak[0]["ts"] - streak[-1]["ts"]).total_seconds() >= 600:
+                    await pool.execute("""
+                        INSERT INTO route_events (route_id, driver_id, event, ts, lat, lon)
+                        VALUES ($1,$2,'finish',$3,$4,$5)
+                        ON CONFLICT (route_id, event) DO NOTHING""",
+                        cd["route_id"], cd["driver_id"], streak[-1]["ts"],
+                        streak[-1]["lat"], streak[-1]["lon"])
             rows = await pool.fetch("""
                 SELECT re.route_id, re.driver_id, r.plan_date
                 FROM route_events re

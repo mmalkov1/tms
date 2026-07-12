@@ -281,6 +281,19 @@ async def import_orders(request: Request,
     except Exception:
         pass
 
+    # v33: повторний імпорт оновлює заявки, що вже в рейсах (вага/місця/вікна
+    # можуть змінитися вранці) — перераховуємо зачеплені рейси, водій побачить
+    # свіже при наступному оновленні застосунку
+    try:
+        from . import main as _main
+        rids = await pool.fetch("""
+            SELECT DISTINCT s.route_id FROM route_stops s
+            JOIN orders o ON o.id = s.order_id WHERE o.project_id = $1""", project_id)
+        for row in rids:
+            await _main._rebuild_route(row["route_id"])
+    except Exception:
+        pass
+
     return _xml(
         "<RESPONSE><ERROR>0</ERROR>"
         f"<MESSAGE><SECURITY_KEY>{project_key}</SECURITY_KEY>"

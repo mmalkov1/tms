@@ -487,8 +487,10 @@ async def driver_next_trip(token: str):
     """Найближчий майбутній рейс водія в активованому проекті (перегляд + пуш)."""
     drv = await _driver_by_token(token)
     route = await pool.fetchrow("""
-        SELECT r.id, r.plan_date, r.depart_time, v.name AS vehicle_name, v.plate
+        SELECT r.id, r.plan_date, r.depart_time, v.name AS vehicle_name, v.plate,
+               d.lat AS depot_lat, d.lon AS depot_lon, d.name AS depot_name
         FROM routes r JOIN vehicles v ON v.id = r.vehicle_id
+        JOIN depots d ON d.id = r.depot_id
         WHERE r.plan_date > $2
           AND r.project_id IN (SELECT id FROM projects WHERE is_released)
           AND (r.driver_id = $1
@@ -501,12 +503,15 @@ async def driver_next_trip(token: str):
                o.lat, o.lon
         FROM route_stops s JOIN orders o ON o.id = s.order_id
         WHERE s.route_id = $1 ORDER BY s.seq""", route["id"])
-    geometry = await osrm.route_latlon(
-        [(s["lat"], s["lon"]) for s in stops if s["lat"] is not None])
+    depot_pt = (route["depot_lat"], route["depot_lon"])
+    geometry = await osrm.route_latlon(                      # v33: плечі склад→1 і остання→склад
+        [depot_pt] + [(s["lat"], s["lon"]) for s in stops if s["lat"] is not None] + [depot_pt])
     return {"trip": {
         "date": route["plan_date"].isoformat(), "route_id": route["id"],
         "vehicle": route["vehicle_name"], "plate": route["plate"],
         "depart": _hm(route["depart_time"]),
+        "depot": {"lat": route["depot_lat"], "lon": route["depot_lon"],
+                  "name": route["depot_name"]},
         "geometry": geometry,
         "stops": [{"seq": s["seq"], "client": s["client"], "kind": s["kind"],
                    "address": s["address"], "address_extra": s["address_extra"],

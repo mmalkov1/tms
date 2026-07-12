@@ -116,15 +116,16 @@
   </div>
 </header>
 <div id="list"></div>
+<div id="ptr" style="height:0;overflow:hidden;text-align:center;font-size:13px;color:#5F5E5A;background:#E7E5E0;line-height:44px;transition:height .15s"></div>
 <div id="tmap" style="display:none;position:fixed;inset:0;z-index:70;background:#EFEEEC">
   <div id="tmapCanvas" style="position:absolute;inset:0"></div>
-  <button onclick="closeTomorrowMap()" style="position:absolute;top:12px;right:12px;z-index:1000;border:none;border-radius:8px;background:#00356B;color:#fff;font:800 14px Manrope,sans-serif;padding:10px 16px;box-shadow:0 1px 5px rgba(0,0,0,.3)">✕ Закрити</button>
+  <button onclick="closeTomorrowMap()" style="position:absolute;top:12px;right:12px;z-index:1000;border:none;border-radius:8px;background:#00356B;color:#fff;font:800 14px Manrope,sans-serif;padding:10px 16px;box-shadow:0 1px 5px rgba(0,0,0,.3)"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" style="vertical-align:-2px"><path d="M5 5l14 14M19 5L5 19"/></svg> Закрити</button>
 </div>
 <div id="askDlg" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:60;align-items:center;justify-content:center;padding:24px">
   <div style="background:#fff;border-radius:12px;padding:18px;max-width:320px;width:100%">
     <div id="askTxt" style="font-size:15px;font-weight:700;color:#111;margin-bottom:14px"></div>
     <div style="display:flex;gap:8px">
-      <button onclick="askDone(false)" style="flex:1;padding:11px;border:none;border-radius:8px;font:inherit;background:#eee">Ні</button>
+      <button onclick="askDone(false)" style="flex:1;padding:11px;border:2px solid var(--navy);border-radius:8px;font:inherit;font-weight:800;background:#fff;color:var(--navy)">Ні</button>
       <button onclick="askDone(true)" style="flex:1;padding:11px;border:none;border-radius:8px;font:inherit;font-weight:800;background:var(--navy);color:#fff">Так</button>
     </div>
   </div>
@@ -284,7 +285,7 @@ function renderNext() {
     '<div class="empty">Рейс на наступний день ще не сформовано</div>'; return; }
   const groups = groupStops(nextTrip.stops.map(s=>({...s, items:undefined})));
   $('list').innerHTML =
-    `<button class="b-route fin" style="margin-bottom:0" onclick="openTomorrowMap()">🗺 Показати маршрут на карті</button>` +
+    `<button class="b-route fin" style="margin-bottom:0" onclick="openTomorrowMap()"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" style="vertical-align:-3px"><path d="M9 4 3 6v14l6-2 6 2 6-2V4l-6 2-6-2z"/><path d="M9 4v14M15 6v14"/></svg> Показати маршрут на карті</button>` +
     `<div class="preview-note">Перегляд рейсу на ${nextTrip.date.split('-').reverse().join('.')}` +
     ` · ${nextTrip.vehicle}${nextTrip.plate?' · '+nextTrip.plate:''}` +
     `${nextTrip.depart?' · виїзд ~'+nextTrip.depart:''}. Кнопки з'являться у день рейсу.</div>` +
@@ -295,7 +296,7 @@ function renderNext() {
       return `<div class="stop">
         <div><span class="num">${gi+1}</span><span class="client">${g.client}</span>${kindBadge}</div>
         <div class="addr">${g.address||''}</div>
-        ${g.address_extra ? `<div class="cmt">💬 ${g.address_extra}</div>` : ''}
+        ${g.address_extra ? `<div class="cmt"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><path d="M21 11a8 8 0 0 1-8 8H4l2.2-3A8 8 0 1 1 21 11z"/></svg> ${g.address_extra}</div>` : ''}
         <div class="meta"><span>План: <b>${g.items[0].eta||'—'}</b></span>
           <span><b>${w.toFixed(0)}</b> кг · ${g.items.length} завд.</span></div>
       </div>`;
@@ -348,10 +349,10 @@ function render() {
   const fmtDur = m => m==null ? '' : `${Math.floor(m/60)} год ${String(m%60).padStart(2,'0')} хв`;
   let head = '', tail = '';
   if (!rt.start_ts) {
-    head = `<button class="b-route go" onclick="routeEvent('start')">🚚 Виїхав на маршрут</button>`;
+    head = `<button class="b-route go" onclick="routeEvent('start')"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-3px"><rect x="1.5" y="6" width="13" height="9"/><path d="M14.5 9h4l3 3.5V15h-7z"/><circle cx="6" cy="18" r="1.8"/><circle cx="17.5" cy="18" r="1.8"/></svg> Виїхав на маршрут</button>`;
   } else if (!rt.finish_ts) {
     head = `<div class="onroute">У рейсі з <b>${hm(rt.start_ts)}</b></div>`;
-    tail = `<button class="b-route fin" onclick="routeEvent('finish')">🏁 Завершив маршрут</button>`;
+    tail = `<button class="b-route fin" onclick="routeEvent('finish')"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-3px"><path d="M5 21V4"/><path d="M5 4h13l-3 4 3 4H5"/></svg> Завершив маршрут</button>`;
   } else {
     const toM = t => { if(!t) return null; const [h,m]=t.split(':'); return (+h)*60 + (+m); };
     const planMin = (toM(rt['return'])!=null && toM(rt.depart)!=null)
@@ -399,7 +400,7 @@ function render() {
     return `<div class="stop ${departed?'done':''} ${failed?'failed':''} ${isCurrent?'current':''}">
       <div><span class="num">${gi+1}</span><span class="client">${g.client}</span>${kindBadge}</div>
       <div class="addr">${g.address||''}</div>
-      ${g.address_extra ? `<div class="cmt">💬 ${g.address_extra}</div>` : ''}
+      ${g.address_extra ? `<div class="cmt"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><path d="M21 11a8 8 0 0 1-8 8H4l2.2-3A8 8 0 1 1 21 11z"/></svg> ${g.address_extra}</div>` : ''}
       <div class="meta"><span>План: <b>${first.eta||'—'}</b></span><span>Вікно: <b>${win}</b></span>
         <span><b>${w.toFixed(0)}</b> кг${seats ? ` · <b>${seats}</b> міс.` : ''} · ${g.items.length} завд.</span></div>
       ${g.contact_person ? `<div class="person">${PERSON_ICO} <b>${g.contact_person}</b></div>` : ''}
@@ -485,6 +486,31 @@ setInterval(async () => {          // досилання пачкою кожні
 setInterval(load, 60000);          // автооновлення плану
 load();
 
+// ---------- v33: потягни вниз — онови ----------
+let _pt = {y0:null, ready:false};
+document.addEventListener('touchstart', e => {
+  if (window.scrollY === 0 && $('tmap').style.display !== 'block')
+    _pt.y0 = e.touches[0].clientY;
+}, {passive:true});
+document.addEventListener('touchmove', e => {
+  if (_pt.y0 == null || window.scrollY > 0) return;
+  const d = e.touches[0].clientY - _pt.y0;
+  if (d <= 0) return;
+  _pt.ready = d > 70;
+  $('ptr').style.height = Math.min(d/2, 46) + 'px';
+  $('ptr').textContent = _pt.ready ? 'Відпусти — оновлю' : '↓ Потягни, щоб оновити';
+}, {passive:true});
+document.addEventListener('touchend', async () => {
+  const doIt = _pt.ready;
+  _pt = {y0:null, ready:false};
+  if (doIt) {
+    $('ptr').textContent = 'Оновлюю…';
+    await load();
+    toast('Оновлено');
+  }
+  $('ptr').style.height = '0';
+});
+
 // ---------- v32: карта завтрашнього маршруту ----------
 let _leafletReady = null, _tMap = null;
 function loadLeaflet() {
@@ -517,6 +543,13 @@ async function openTomorrowMap() {
      .bindTooltip(`${gi+1}. ${g.client}<br>${g.items[0].eta||''}`)
      .addTo(_tMap);
   });
+  if (nextTrip.depot && nextTrip.depot.lat != null) {
+    pts.push([nextTrip.depot.lat, nextTrip.depot.lon]);
+    L.marker([nextTrip.depot.lat, nextTrip.depot.lon], {icon: L.divIcon({className:'',
+      html:`<div style="width:26px;height:26px;border-radius:6px;background:#E82A2C;color:#fff;display:flex;align-items:center;justify-content:center;font:800 13px Manrope,sans-serif;box-shadow:0 0 0 2px #fff">С</div>`,
+      iconSize:[26,26], iconAnchor:[13,13]})})
+     .bindTooltip(nextTrip.depot.name || 'Склад').addTo(_tMap);
+  }
   if (nextTrip.geometry && nextTrip.geometry.length > 1)
     L.polyline(nextTrip.geometry, {color:'#00356B', weight:3, opacity:.8}).addTo(_tMap);
   else if (pts.length > 1)

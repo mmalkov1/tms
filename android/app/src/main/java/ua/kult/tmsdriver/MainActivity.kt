@@ -155,9 +155,10 @@ class MainActivity : AppCompatActivity() {
                 // будь-який 401 від нашого API повертає на екран введення
                 override fun onReceivedHttpError(view: WebView?, req: WebResourceRequest?,
                                                  resp: WebResourceResponse?) {
+                    val u = req?.url ?: return
                     if (resp?.statusCode == 401 &&
-                        req?.url?.host == Uri.parse(BASE_URL).host &&
-                        req.url?.path?.startsWith("/api/driver/") == true)
+                        u.host == Uri.parse(BASE_URL).host &&
+                        u.path?.startsWith("/api/driver/") == true)
                         resetToken()
                 }
             }

@@ -3,6 +3,7 @@ import os
 from datetime import date, time
 
 import asyncpg
+import asyncio
 from fastapi import FastAPI, File, HTTPException, Query, UploadFile
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -14,6 +15,42 @@ ROUTE_COLORS = ["#E82A2C", "#00356B", "#2E8B57", "#B8860B", "#8B008B", "#FF6347"
                 "#1E90FF", "#FF8C00"]
 
 app = FastAPI(title="TMS Kultukr")
+
+
+async def _route_autoclose_loop():
+    """v32: страхувальне авто-закриття рейсів.
+
+    Кожні 10 хв: рейси з «виїхав» без «завершив» закриваються, якщо
+    (а) день рейсу вже минув, або (б) сьогодні і в Києві вже 23:30+.
+    ts завершення = остання GPS-точка водія за той день (не now(),
+    щоб не намотувати нічний простій у робочий час).
+    """
+    while True:
+        try:
+            rows = await pool.fetch("""
+                SELECT re.route_id, re.driver_id, r.plan_date
+                FROM route_events re
+                JOIN routes r ON r.id = re.route_id
+                WHERE re.event = 'start'
+                  AND NOT EXISTS (SELECT 1 FROM route_events f
+                                  WHERE f.route_id = re.route_id AND f.event='finish')
+                  AND (r.plan_date < (now() AT TIME ZONE 'Europe/Kyiv')::date
+                       OR (r.plan_date = (now() AT TIME ZONE 'Europe/Kyiv')::date
+                           AND (now() AT TIME ZONE 'Europe/Kyiv')::time >= '23:30'))""")
+            for row in rows:
+                last_ts = await pool.fetchval("""
+                    SELECT max(ts) FROM gps_points
+                    WHERE driver_id = $1
+                      AND (ts AT TIME ZONE 'Europe/Kyiv')::date = $2""",
+                    row["driver_id"], row["plan_date"])
+                await pool.execute("""
+                    INSERT INTO route_events (route_id, driver_id, event, ts)
+                    VALUES ($1, $2, 'finish', COALESCE($3, now()))
+                    ON CONFLICT (route_id, event) DO NOTHING""",
+                    row["route_id"], row["driver_id"], last_ts)
+        except Exception:
+            pass                                   # не валимо цикл через разову помилку
+        await asyncio.sleep(600)
 
 
 @app.middleware("http")
@@ -60,6 +97,7 @@ async def startup():
             lon       DOUBLE PRECISION,
             UNIQUE (route_id, event))""")
     appupd.init()                      # v27: каталог APK для оновлень застосунку
+    asyncio.create_task(_route_autoclose_loop())  # v32: нічне авто-закриття рейсів
     await integration_1c.init(pool)
     # v17 (migrate_011): мобильный кабинет водителя — токены, факты, GPS
     await driver.init(pool)

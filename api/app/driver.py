@@ -398,6 +398,7 @@ async def position(token: str, body: GpsBatch):
 async def facts(plan_date: date = Query(...)):
     routes = await pool.fetch("""
         SELECT r.id, r.color, r.plan_date, r.project_id,
+               r.total_km, r.depart_time, r.return_time,
                v.name AS vehicle_name, v.driver_id AS veh_driver_id,
                d.id AS driver_id, d.name AS driver_name
         FROM routes r JOIN vehicles v ON v.id=r.vehicle_id
@@ -428,6 +429,8 @@ async def facts(plan_date: date = Query(...)):
             "route_id": r["id"], "color": r["color"],
             "vehicle": r["vehicle_name"], "driver": r["driver_name"],
             "start_ts": w_start, "finish_ts": w_fin, "work_min": w_min, "gps_km": w_km,
+            "plan_km": float(r["total_km"] or 0),
+            "plan_depart": _hm(r["depart_time"]), "plan_return": _hm(r["return_time"]),
             "last_gps": ({"ts": _iso(last["ts"]), "lat": last["lat"], "lon": last["lon"],
                           "speed_kmh": last["speed_kmh"]} if last else None),
             "stops": [{
@@ -494,16 +497,21 @@ async def driver_next_trip(token: str):
     if not route:
         return {"trip": None}
     stops = await pool.fetch("""
-        SELECT s.seq, s.eta, o.client, o.kind, o.address, o.address_extra, o.weight_kg
+        SELECT s.seq, s.eta, o.client, o.kind, o.address, o.address_extra, o.weight_kg,
+               o.lat, o.lon
         FROM route_stops s JOIN orders o ON o.id = s.order_id
         WHERE s.route_id = $1 ORDER BY s.seq""", route["id"])
+    geometry = await osrm.route_latlon(
+        [(s["lat"], s["lon"]) for s in stops if s["lat"] is not None])
     return {"trip": {
         "date": route["plan_date"].isoformat(), "route_id": route["id"],
         "vehicle": route["vehicle_name"], "plate": route["plate"],
         "depart": _hm(route["depart_time"]),
+        "geometry": geometry,
         "stops": [{"seq": s["seq"], "client": s["client"], "kind": s["kind"],
                    "address": s["address"], "address_extra": s["address_extra"],
-                   "eta": _hm(s["eta"]), "weight_kg": float(s["weight_kg"] or 0)}
+                   "eta": _hm(s["eta"]), "weight_kg": float(s["weight_kg"] or 0),
+                   "lat": s["lat"], "lon": s["lon"]}
                   for s in stops]}}
 
 

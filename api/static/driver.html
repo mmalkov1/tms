@@ -116,6 +116,10 @@
   </div>
 </header>
 <div id="list"></div>
+<div id="tmap" style="display:none;position:fixed;inset:0;z-index:70;background:#EFEEEC">
+  <div id="tmapCanvas" style="position:absolute;inset:0"></div>
+  <button onclick="closeTomorrowMap()" style="position:absolute;top:12px;right:12px;z-index:1000;border:none;border-radius:8px;background:#00356B;color:#fff;font:800 14px Manrope,sans-serif;padding:10px 16px;box-shadow:0 1px 5px rgba(0,0,0,.3)">✕ Закрити</button>
+</div>
 <div id="askDlg" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:60;align-items:center;justify-content:center;padding:24px">
   <div style="background:#fff;border-radius:12px;padding:18px;max-width:320px;width:100%">
     <div id="askTxt" style="font-size:15px;font-weight:700;color:#111;margin-bottom:14px"></div>
@@ -280,6 +284,7 @@ function renderNext() {
     '<div class="empty">Рейс на наступний день ще не сформовано</div>'; return; }
   const groups = groupStops(nextTrip.stops.map(s=>({...s, items:undefined})));
   $('list').innerHTML =
+    `<button class="b-route fin" style="margin-bottom:0" onclick="openTomorrowMap()">🗺 Показати маршрут на карті</button>` +
     `<div class="preview-note">Перегляд рейсу на ${nextTrip.date.split('-').reverse().join('.')}` +
     ` · ${nextTrip.vehicle}${nextTrip.plate?' · '+nextTrip.plate:''}` +
     `${nextTrip.depart?' · виїзд ~'+nextTrip.depart:''}. Кнопки з'являться у день рейсу.</div>` +
@@ -348,8 +353,15 @@ function render() {
     head = `<div class="onroute">У рейсі з <b>${hm(rt.start_ts)}</b></div>`;
     tail = `<button class="b-route fin" onclick="routeEvent('finish')">🏁 Завершив маршрут</button>`;
   } else {
+    const toM = t => { if(!t) return null; const [h,m]=t.split(':'); return (+h)*60 + (+m); };
+    const planMin = (toM(rt['return'])!=null && toM(rt.depart)!=null)
+                  ? toM(rt['return'])-toM(rt.depart) : null;
+    const dMin = (planMin!=null && rt.work_min!=null) ? rt.work_min-planMin : null;
+    const dKm  = (rt.gps_km!=null && rt.total_km) ? +(rt.gps_km-rt.total_km).toFixed(1) : null;
+    const sig = v => (v>0?'+':'')+v;
     head = `<div class="routedone">Рейс завершено <b>${hm(rt.finish_ts)}</b><br>
-      <span style="color:#5F5E5A">У дорозі ${fmtDur(rt.work_min)}</span></div>`;
+      <span style="color:#5F5E5A">Час: <b>${fmtDur(rt.work_min)}</b>${planMin!=null?` · план ${fmtDur(planMin)}`:''}${dMin!=null?` <b style="color:${dMin>15?'var(--red)':'var(--green)'}">(${sig(dMin)} хв)</b>`:''}</span><br>
+      <span style="color:#5F5E5A">Шлях: <b>${rt.gps_km!=null?rt.gps_km+' км':'—'}</b>${rt.total_km?` · план ${rt.total_km.toFixed(1)} км`:''}${dKm!=null?` <b style="color:${dKm>10?'var(--red)':'var(--green)'}">(${sig(dKm)} км)</b>`:''}</span></div>`;
   }
   $('list').innerHTML = head + groups.map((g, gi) => {
     const arrived  = g.items.every(s => s.arrive_ts);
@@ -472,6 +484,46 @@ setInterval(async () => {          // досилання пачкою кожні
 
 setInterval(load, 60000);          // автооновлення плану
 load();
+
+// ---------- v32: карта завтрашнього маршруту ----------
+let _leafletReady = null, _tMap = null;
+function loadLeaflet() {
+  if (_leafletReady) return _leafletReady;
+  _leafletReady = new Promise(res => {
+    const css = document.createElement('link');
+    css.rel = 'stylesheet'; css.href = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';
+    document.head.appendChild(css);
+    const js = document.createElement('script');
+    js.src = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';
+    js.onload = res; document.head.appendChild(js);
+  });
+  return _leafletReady;
+}
+async function openTomorrowMap() {
+  if (!nextTrip) return;
+  $('tmap').style.display = 'block';
+  await loadLeaflet();
+  if (_tMap) { _tMap.remove(); _tMap = null; }
+  _tMap = L.map('tmapCanvas');
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(_tMap);
+  const pts = [];
+  const groups = groupStops(nextTrip.stops);
+  groups.forEach((g, gi) => {
+    if (g.lat == null) return;
+    pts.push([g.lat, g.lon]);
+    L.marker([g.lat, g.lon], {icon: L.divIcon({className:'',
+      html:`<div style="width:26px;height:26px;border-radius:50%;background:#00356B;color:#fff;display:flex;align-items:center;justify-content:center;font:800 13px Manrope,sans-serif;box-shadow:0 0 0 2px #fff">${gi+1}</div>`,
+      iconSize:[26,26], iconAnchor:[13,13]})})
+     .bindTooltip(`${gi+1}. ${g.client}<br>${g.items[0].eta||''}`)
+     .addTo(_tMap);
+  });
+  if (nextTrip.geometry && nextTrip.geometry.length > 1)
+    L.polyline(nextTrip.geometry, {color:'#00356B', weight:3, opacity:.8}).addTo(_tMap);
+  else if (pts.length > 1)
+    L.polyline(pts, {color:'#00356B', weight:2.5, dashArray:'6 5', opacity:.7}).addTo(_tMap);
+  if (pts.length) _tMap.fitBounds(pts, {padding:[30,30]});
+}
+function closeTomorrowMap() { $('tmap').style.display = 'none'; }
 </script>
 </body>
 </html>

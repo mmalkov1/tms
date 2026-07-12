@@ -81,3 +81,21 @@ async def match(points: list[tuple[float, float, int, int]]) -> list[list[float]
     except Exception:
         return None
     return out if len(out) >= 2 else None
+
+
+async def route_latlon(points: list[tuple[float, float]]) -> list[list[float]] | None:
+    """v32: маршрут через точки у заданому порядку як [[lat, lon], ...] —
+    без encoded polyline, щоб фронт малював без декодера."""
+    if len(points) < 2:
+        return None
+    coords = ";".join(f"{lon},{lat}" for lat, lon in points)
+    try:
+        async with httpx.AsyncClient(timeout=30) as c:
+            r = await c.get(
+                f"{OSRM_URL}/route/v1/driving/{coords}",
+                params={"overview": "full", "geometries": "geojson"})
+            r.raise_for_status()
+            g = r.json()["routes"][0]["geometry"]["coordinates"]
+        return [[lat, lon] for lon, lat in g]
+    except Exception:
+        return None

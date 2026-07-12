@@ -139,8 +139,14 @@ async function load() {
       ${rt.start_ts ? `<div style="background:#F7F6F2;padding:6px 12px;font-size:12px;color:#444;display:flex;gap:14px;flex-wrap:wrap">
         <span>Виїзд <b>${hm(rt.start_ts)}</b></span>
         <span>Повернення <b>${rt.finish_ts?hm(rt.finish_ts):'—'}</b></span>
-        ${rt.work_min!=null ? `<span><b>${Math.floor(rt.work_min/60)} год ${String(rt.work_min%60).padStart(2,'0')} хв</b></span>` : ''}
-        ${rt.gps_km!=null ? `<span><b>${rt.gps_km} км</b> по GPS</span>` : ''}
+        ${rt.work_min!=null ? (()=>{
+            const f=`${Math.floor(rt.work_min/60)} год ${String(rt.work_min%60).padStart(2,'0')} хв`;
+            const pm=toMin(rt.plan_return)!=null&&toMin(rt.plan_depart)!=null ? toMin(rt.plan_return)-toMin(rt.plan_depart) : null;
+            const d=pm!=null ? rt.work_min-pm : null;
+            return `<span>Час <b>${f}</b>${pm!=null?` / план ${Math.floor(pm/60)}:${String(pm%60).padStart(2,'0')}`:''}${d!=null?` <span class="${d>15?'late':'early'}">${d>0?'+':''}${d} хв</span>`:''}</span>`;})() : ''}
+        ${rt.gps_km!=null ? (()=>{
+            const d=rt.plan_km ? +(rt.gps_km-rt.plan_km).toFixed(1) : null;
+            return `<span>Шлях <b>${rt.gps_km} км</b>${rt.plan_km?` / план ${rt.plan_km.toFixed(1)}`:''}${d!=null?` <span class="${d>10?'late':'early'}">${d>0?'+':''}${d} км</span>`:''}</span>`;})() : ''}
       </div>` : ''}
       <table><tr><th>#</th><th>Клієнт</th><th>План</th><th>Прибув</th><th>Поїхав</th><th>Δ / Статус</th></tr>
       ${rt.stops.map(s=>`<tr class="${s.fail_ts?'failrow':s.depart_ts?'done':''}">

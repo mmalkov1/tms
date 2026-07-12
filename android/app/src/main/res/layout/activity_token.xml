@@ -34,4 +34,11 @@
         android:layout_marginTop="16dp" android:text="Увійти"
         android:textStyle="bold" android:textSize="16sp"
         android:backgroundTint="#00356B" android:textColor="#FFFFFF"/>
+
+    <Button
+        android:id="@+id/tokenScan"
+        android:layout_width="match_parent" android:layout_height="54dp"
+        android:layout_marginTop="10dp" android:text="Сканувати QR"
+        android:textStyle="bold" android:textSize="16sp"
+        android:backgroundTint="#FFFFFF" android:textColor="#00356B"/>
 </LinearLayout>

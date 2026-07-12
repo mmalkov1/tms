@@ -18,8 +18,8 @@ android {
         applicationId = "ua.kult.tmsdriver"
         minSdk = 26            // Android 8.0+
         targetSdk = 34
-        versionCode = 8        // ПІДНІМАТИ на кожну нову збірку APK
-        versionName = "1.7"
+        versionCode = 9        // ПІДНІМАТИ на кожну нову збірку APK
+        versionName = "1.8"
     }
 
     signingConfigs {
@@ -53,4 +53,6 @@ dependencies {
     implementation("androidx.core:core-ktx:1.13.1")
     implementation("androidx.appcompat:appcompat:1.7.0")
     implementation("com.google.android.gms:play-services-location:21.3.0")
+    // v37: сканер QR від Play Services — без дозволу на камеру і власного UI
+    implementation("com.google.android.gms:play-services-code-scanner:16.1.0")
 }

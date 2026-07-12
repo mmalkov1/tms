@@ -19,6 +19,9 @@ import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
+import com.google.mlkit.vision.barcode.common.Barcode
+import com.google.mlkit.vision.codescanner.GmsBarcodeScannerOptions
+import com.google.mlkit.vision.codescanner.GmsBarcodeScanning
 import java.net.HttpURLConnection
 import java.net.URL
 import java.util.concurrent.Executors
@@ -57,17 +60,37 @@ class MainActivity : AppCompatActivity() {
         setContentView(R.layout.activity_token)
         val input = findViewById<EditText>(R.id.tokenInput)
         findViewById<Button>(R.id.tokenSave).setOnClickListener {
-            var t = input.text.toString().trim()
-            // приймаємо і повне посилання, і голий токен
-            Uri.parse(t).getQueryParameter("token")?.let { t = it }
-            if (t.isBlank()) {
-                Toast.makeText(this, "Встав токен або посилання", Toast.LENGTH_SHORT).show()
-                return@setOnClickListener
-            }
-            prefs().edit().putString("token", t).apply()
-            tokenReset = false                                    // v35: новий токен — знову стежимо
-            showTrip(t)
+            applyToken(input.text.toString())
         }
+        // v37: сканер QR від Play Services — без дозволу на камеру
+        findViewById<Button>(R.id.tokenScan).setOnClickListener {
+            val opts = GmsBarcodeScannerOptions.Builder()
+                .setBarcodeFormats(Barcode.FORMAT_QR_CODE)
+                .build()
+            GmsBarcodeScanning.getClient(this, opts).startScan()
+                .addOnSuccessListener { code -> applyToken(code.rawValue ?: "") }
+                .addOnFailureListener { e ->
+                    // скасування скану — не помилка, мовчки лишаємось на екрані
+                    if (e.message?.contains("cancel", ignoreCase = true) != true)
+                        Toast.makeText(this,
+                            "Сканер недоступний — введи токен вручну",
+                            Toast.LENGTH_LONG).show()
+                }
+        }
+    }
+
+    /** Токен або посилання (введене чи зіскановане) -> зберегти і відкрити рейс. */
+    private fun applyToken(raw: String) {
+        var t = raw.trim()
+        // приймаємо і повне посилання, і голий токен
+        Uri.parse(t).getQueryParameter("token")?.let { t = it }
+        if (t.isBlank()) {
+            Toast.makeText(this, "Встав токен або посилання", Toast.LENGTH_SHORT).show()
+            return
+        }
+        prefs().edit().putString("token", t).apply()
+        tokenReset = false                                    // v35: новий токен — знову стежимо
+        showTrip(t)
     }
 
     // ---------- v35: недійсний токен -> назад на екран введення ----------

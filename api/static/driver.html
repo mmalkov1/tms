@@ -64,13 +64,20 @@
                display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
   .b-unfail { flex:0 0 auto; min-height:30px; padding:0 12px; font-size:12px;
               background:#fff; color:var(--navy); border:1.5px solid var(--navy); border-radius:7px; }
-  #failDlg { position:fixed; inset:0; background:rgba(0,0,0,.45); display:none;
+  #failDlg, #cardDlg { position:fixed; inset:0; background:rgba(0,0,0,.45); display:none;
              align-items:flex-end; justify-content:center; z-index:20; }
-  #failDlg.open { display:flex; }
-  #failBox { background:#fff; border-radius:14px 14px 0 0; padding:16px; width:100%;
+  #failDlg.open, #cardDlg.open { display:flex; }
+  #failBox, #cardBox { background:#fff; border-radius:14px 14px 0 0; padding:16px; width:100%;
              max-width:480px; max-height:80vh; overflow:auto; }
-  #failBox h3 { font-size:15px; font-weight:800; color:var(--navy); margin-bottom:2px; }
-  #failBox .sub { font-size:13px; color:#666; margin-bottom:12px; }
+  #failBox h3, #cardBox h3 { font-size:15px; font-weight:800; color:var(--navy); margin-bottom:2px; }
+  #failBox .sub, #cardBox .sub { font-size:13px; color:#666; margin-bottom:12px; }
+  .card-row { display:flex; gap:9px; align-items:flex-start; font-size:14px; margin-bottom:9px; }
+  .card-row svg { flex:none; margin-top:1px; }
+  .b-issue { display:flex; width:100%; min-height:48px; align-items:center; justify-content:center;
+             gap:8px; border:2px solid #D85A30; border-radius:9px; background:#fff; color:#993C1D;
+             font:inherit; font-size:14px; font-weight:800; margin-top:10px; }
+  #issueTxt { width:100%; box-sizing:border-box; min-height:56px; border:1.5px solid #ccc;
+              border-radius:9px; padding:10px 12px; font:inherit; font-size:14px; margin-bottom:10px; }
   .r-btn { display:block; width:100%; min-height:50px; border:none; border-radius:9px;
            background:var(--cream); color:var(--navy); font:inherit; font-size:15px;
            font-weight:800; margin-bottom:8px; }
@@ -142,12 +149,85 @@
     </div>
   </div>
 </div>
+<div id="cardDlg" onclick="if(event.target===this)closeCard()">
+  <div id="cardBox"></div>
+</div>
 <div id="toast"></div>
 <script>
 const qs = new URLSearchParams(location.search);
 const TOKEN = qs.get('token');
 const NATIVE = /TMSKultApp/.test(navigator.userAgent);   // v26: сторінка всередині APK
 const $ = id => document.getElementById(id);
+
+// ---------- v38: картка точки + «повідомити про помилку» ----------
+const CARD_ICO = {
+  pin:'<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#00356B" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 10c0 7-9 13-9 13S3 17 3 10a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>',
+  clock:'<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#00356B" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg>',
+  phone:'<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#00356B" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.13.96.36 1.9.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.9.34 1.85.57 2.81.7A2 2 0 0 1 22 16.92z"/></svg>',
+  user:'<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#00356B" stroke-width="2" stroke-linecap="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>',
+  box:'<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#00356B" stroke-width="2" stroke-linejoin="round"><path d="M21 8l-9-5-9 5v8l9 5 9-5V8z"/><path d="M3 8l9 5 9-5"/><path d="M12 13v8"/></svg>',
+  warn:'<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.3 3.9L1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>'
+};
+const ISSUE_NAMES = {phone:'Невірний номер телефону', contact:'Невірна контактна особа', address:'Невірна адреса'};
+let cardCtx = null;   // {gi, issueType}
+
+function openCard(gi) {
+  const g = (window._groups||[])[gi];
+  if (!g) return;
+  cardCtx = {gi, issueType:null};
+  const first = g.items[0];
+  const w = g.items.reduce((a,s)=>a+(s.weight_kg||0),0);
+  const seats = g.items.reduce((a,s)=>a+(s.seats||0),0);
+  const win = first.tw_from ? `${first.tw_from}–${first.tw_to||''}` : 'без вікна';
+  const docs = g.items.map(s=>s.doc_number).filter(Boolean).join(', ');
+  $('cardBox').innerHTML = `
+    <h3>${g.client}</h3>
+    <div class="sub">${g.kind==='pickup'?'Забір':'Доставка'} · точка ${gi+1}${docs?' · зам. '+docs:''}</div>
+    <div class="card-row">${CARD_ICO.pin}<span>${g.address||'—'}${g.address_extra?'<br><span style="color:#7a4a00">'+g.address_extra+'</span>':''}</span></div>
+    <div class="card-row">${CARD_ICO.clock}<span>Вікно <b>${win}</b> · план <b>${first.eta||'—'}</b></span></div>
+    <div class="card-row">${CARD_ICO.phone}<span>${g.phone||'—'}</span></div>
+    <div class="card-row">${CARD_ICO.user}<span>${g.contact_person||'—'}</span></div>
+    <div class="card-row">${CARD_ICO.box}<span><b>${w.toFixed(0)}</b> кг${seats?' · <b>'+seats+'</b> міс.':''} · ${g.items.length} завд.</span></div>
+    <button class="b-issue" onclick="openIssue()">${CARD_ICO.warn} Повідомити про помилку</button>
+    <button class="r-btn" style="margin-top:8px;margin-bottom:0" onclick="closeCard()">Закрити</button>`;
+  $('cardDlg').classList.add('open');
+}
+
+function closeCard() { $('cardDlg').classList.remove('open'); cardCtx = null; }
+
+function openIssue() {
+  const g = window._groups[cardCtx.gi];
+  $('cardBox').innerHTML = `
+    <h3>Що не так із точкою?</h3>
+    <div class="sub">${g.client}</div>
+    ${Object.entries(ISSUE_NAMES).map(([k,n]) =>
+      `<button class="r-btn" data-t="${k}" onclick="pickIssue(this)">${n}</button>`).join('')}
+    <textarea id="issueTxt" placeholder="Правильне значення, якщо знаєш (необовʼязково)"></textarea>
+    <div style="display:flex;gap:8px">
+      <button class="r-btn" style="margin-bottom:0" onclick="openCard(${cardCtx.gi})">Назад</button>
+      <button class="r-btn" style="margin-bottom:0;background:var(--navy);color:#fff" onclick="sendIssue()">Надіслати логісту</button>
+    </div>`;
+}
+
+function pickIssue(btn) {
+  document.querySelectorAll('#cardBox .r-btn[data-t]').forEach(b=>b.classList.remove('sel'));
+  btn.classList.add('sel');
+  cardCtx.issueType = btn.dataset.t;
+}
+
+async function sendIssue() {
+  if (!cardCtx || !cardCtx.issueType) { toast('Обери, що саме не так'); return; }
+  const g = window._groups[cardCtx.gi];
+  const note = $('issueTxt').value.trim();
+  try {
+    const r = await fetch(`/api/driver/${TOKEN}/stops/${g.items[0].order_id}/issue`, {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({issue_type: cardCtx.issueType, note: note || null})});
+    if (!r.ok) { toast('Помилка — спробуй ще раз'); return; }
+  } catch(e) { toast('Немає звʼязку — спробуй ще раз'); return; }
+  closeCard();
+  toast('Передано логісту');
+}
 
 const NAV_ARROW = '<svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11l18-8-8 18-2-8-8-2z"/></svg>';
 const NAV_PHONE = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.13.96.36 1.9.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.9.34 1.85.57 2.81.7A2 2 0 0 1 22 16.92z"/></svg>';
@@ -304,14 +384,17 @@ function renderNext() {
 }
 
 async function routeEvent(ev) {
-  const q = ev==='start' ? 'Позначити виїзд на маршрут?' : 'Завершити маршрут?';
-  if (!await askYes(q)) return;
+  const Q = {depot_arrive:'Позначити прибуття на склад?',
+             start:'Позначити виїзд на маршрут?', finish:'Завершити маршрут?'};
+  const OK = {depot_arrive:'Прибуття на склад зафіксовано',
+              start:'Гарної дороги!', finish:'Рейс завершено'};
+  if (!await askYes(Q[ev])) return;
   const last = (typeof lastPos !== 'undefined' && lastPos) ? lastPos
              : (typeof queue !== 'undefined' && queue.length ? queue[queue.length-1] : null);
   const r = await fetch(`/api/driver/${TOKEN}/route/${trip.route.id}/event`, {
     method:'POST', headers:{'Content-Type':'application/json'},
     body: JSON.stringify({event:ev, lat:last?.lat ?? null, lon:last?.lon ?? null})});
-  if (r.ok) { toast(ev==='start' ? 'Гарної дороги!' : 'Рейс завершено'); load(); }
+  if (r.ok) { toast(OK[ev]); load(); }
   else toast('Не вдалося, спробуй ще раз');
 }
 
@@ -341,6 +424,7 @@ function render() {
   $('hVeh').textContent = trip.route.vehicle + (trip.route.plate ? ' · '+trip.route.plate : '');
 
   const groups = groupStops(trip.stops);
+  window._groups = groups;                         // v38: для картки точки
   const now = new Date();
   const nowMin = now.getHours()*60 + now.getMinutes();
   let currentShown = false, delay = null;
@@ -348,8 +432,11 @@ function render() {
   const rt = trip.route;
   const fmtDur = m => m==null ? '' : `${Math.floor(m/60)} год ${String(m%60).padStart(2,'0')} хв`;
   let head = '', tail = '';
-  if (!rt.start_ts) {
-    head = `<button class="b-route go" onclick="routeEvent('start')"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-3px"><rect x="1.5" y="6" width="13" height="9"/><path d="M14.5 9h4l3 3.5V15h-7z"/><circle cx="6" cy="18" r="1.8"/><circle cx="17.5" cy="18" r="1.8"/></svg> Виїхав на маршрут</button>`;
+  if (!rt.depot_arrive_ts) {                       // v38: спершу — на склад
+    head = `<button class="b-route go" onclick="routeEvent('depot_arrive')"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-3px"><path d="M3 21V8l9-5 9 5v13"/><path d="M7 21v-8h10v8"/><path d="M7 17h10"/></svg> Прибув на склад</button>`;
+  } else if (!rt.start_ts) {
+    head = `<div class="onroute">На складі з <b>${hm(rt.depot_arrive_ts)}</b></div>
+      <button class="b-route go" onclick="routeEvent('start')"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-3px"><rect x="1.5" y="6" width="13" height="9"/><path d="M14.5 9h4l3 3.5V15h-7z"/><circle cx="6" cy="18" r="1.8"/><circle cx="17.5" cy="18" r="1.8"/></svg> Виїхав на маршрут</button>`;
   } else if (!rt.finish_ts) {
     head = `<div class="onroute">У рейсі з <b>${hm(rt.start_ts)}</b></div>`;
     tail = `<button class="b-route fin" onclick="routeEvent('finish')"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-3px"><path d="M5 21V4"/><path d="M5 4h13l-3 4 3 4H5"/></svg> Завершив маршрут</button>`;
@@ -398,7 +485,7 @@ function render() {
     const seats = g.items.reduce((a,s)=>a+(s.seats||0),0);
     const ids = g.items.map(s=>s.order_id).join(',');
     return `<div class="stop ${departed?'done':''} ${failed?'failed':''} ${isCurrent?'current':''}">
-      <div><span class="num">${gi+1}</span><span class="client">${g.client}</span>${kindBadge}</div>
+      <div onclick="openCard(${gi})" style="cursor:pointer"><span class="num">${gi+1}</span><span class="client">${g.client}</span>${kindBadge}<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#888780" stroke-width="2.2" stroke-linecap="round" style="vertical-align:-2px;margin-left:5px"><path d="M9 6l6 6-6 6"/></svg></div>
       <div class="addr">${g.address||''}</div>
       ${g.address_extra ? `<div class="cmt"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><path d="M21 11a8 8 0 0 1-8 8H4l2.2-3A8 8 0 1 1 21 11z"/></svg> ${g.address_extra}</div>` : ''}
       <div class="meta"><span>План: <b>${first.eta||'—'}</b></span><span>Вікно: <b>${win}</b></span>

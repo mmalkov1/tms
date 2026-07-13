@@ -30,6 +30,8 @@
   th, td { padding:4px 8px; border-bottom:1px solid #eee; text-align:left; }
   th { color:var(--navy); background:var(--cream); }
   .late { color:var(--red); font-weight:700; } .early { color:var(--green); font-weight:700; }
+  .fok { color:var(--green); font-weight:700; }
+  .fmv { color:#B8860B; font-weight:800; background:#FFF3D6; }
   .done td { opacity:.6; }
   .failrow { background:#FFF3D6; }
   .failtag { color:#B8860B; font-weight:800; }
@@ -148,11 +150,22 @@ async function load() {
             const d=rt.plan_km ? +(rt.gps_km-rt.plan_km).toFixed(1) : null;
             return `<span>Шлях <b>${rt.gps_km} км</b>${rt.plan_km?` / план ${rt.plan_km.toFixed(1)}`:''}${d!=null?` <span class="${d>10?'late':'early'}">${d>0?'+':''}${d} км</span>`:''}</span>`;})() : ''}
       </div>` : ''}
-      <table><tr><th>#</th><th>Клієнт</th><th>План</th><th>Прибув</th><th>Поїхав</th><th>Δ / Статус</th></tr>
-      ${rt.stops.map(s=>`<tr class="${s.fail_ts?'failrow':s.depart_ts?'done':''}">
-        <td>${s.seq}</td><td>${s.client}</td><td>${s.eta||'—'}</td>
+      <table><tr><th>#</th><th>Ф№</th><th>Клієнт</th><th>План</th><th>Прибув</th><th>Поїхав</th><th>Δ / Статус</th></tr>
+      ${(()=>{                                     // v38: фактична послідовність
+        const vis = rt.stops.filter(s=>s.arrive_ts||s.fail_ts)
+          .slice().sort((a,b)=>new Date(a.arrive_ts||a.fail_ts)-new Date(b.arrive_ts||b.fail_ts));
+        const fno = {}; vis.forEach((s,i)=>fno[s.order_id]=i+1);
+        return rt.stops.map((s,i)=>{
+          const f = fno[s.order_id];
+          const fcell = f==null ? '<td style="color:#999">—</td>'
+            : f===i+1 ? `<td class="fok">${f}</td>`
+            : `<td class="fmv">${f} ${f>i+1?'↓':'↑'}</td>`;
+          return `<tr class="${s.fail_ts?'failrow':s.depart_ts?'done':''}">
+        <td>${s.seq}</td>${fcell}<td>${s.client}</td><td>${s.eta||'—'}</td>
         <td>${hm(s.arrive_ts)||'—'}</td><td>${hm(s.depart_ts)||'—'}</td>
-        <td>${s.fail_ts ? '<span class="failtag">✗ '+(s.fail_reason||'відмова')+'</span>' : delta(s.eta, s.arrive_ts)}</td></tr>`).join('')}
+        <td>${s.fail_ts ? '<span class="failtag">✗ '+(s.fail_reason||'відмова')+'</span>' : delta(s.eta, s.arrive_ts)}</td></tr>`;
+        }).join('');
+      })()}
       </table></div>`;
   }).join('') || '<div style="padding:30px;color:#666">Немає активного проекту на цю дату.<br><small>Познач проект «У роботу» на головній сторінці — тут і у водіїв зʼявляться рейси.</small></div>';
   if (pts.length && !window._fitted) { map.fitBounds(pts, {padding:[30,30]}); window._fitted = true; }

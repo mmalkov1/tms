@@ -85,6 +85,31 @@ async def init(db_pool):
         "ALTER TABLE stop_events ADD COLUMN IF NOT EXISTS reason_id INT REFERENCES fail_reasons(id)")
     await pool.execute(
         "ALTER TABLE stop_events ADD COLUMN IF NOT EXISTS reason_text TEXT")
+    # v38 (migrate_017): «прибув на склад» перед виїздом
+    await pool.execute(
+        "ALTER TABLE route_events DROP CONSTRAINT IF EXISTS route_events_event_check")
+    await pool.execute("""
+        ALTER TABLE route_events ADD CONSTRAINT route_events_event_check
+            CHECK (event IN ('depot_arrive','start','finish'))""")
+    # v38 (migrate_017): повідомлення водіїв про помилки в даних точки.
+    # Дані точки денормалізовано — повідомлення переживає реімпорт/видалення заявки.
+    await pool.execute("""
+        CREATE TABLE IF NOT EXISTS stop_issues (
+            id          SERIAL PRIMARY KEY,
+            route_id    INT REFERENCES routes(id) ON DELETE SET NULL,
+            order_id    INT REFERENCES orders(id) ON DELETE SET NULL,
+            driver_id   INT,
+            driver_name TEXT,
+            client      TEXT,
+            address     TEXT,
+            doc_number  TEXT,
+            issue_type  TEXT NOT NULL CHECK (issue_type IN ('phone','contact','address')),
+            note        TEXT,
+            created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+            acked_at    TIMESTAMPTZ)""")
+    await pool.execute("""
+        CREATE INDEX IF NOT EXISTS idx_stop_issues_unacked
+            ON stop_issues(created_at DESC) WHERE acked_at IS NULL""")
 
 
 def kyiv_today() -> date:
@@ -189,6 +214,9 @@ async def driver_trip(token: str, d: date | None = Query(None)):
         "route": {"id": route["id"], "vehicle": route["vehicle_name"], "plate": route["plate"],
                   "color": route["color"], "total_km": float(route["total_km"] or 0),
                   "depart": _hm(route["depart_time"]), "return": _hm(route["return_time"]),
+                  "depot_arrive_ts": _iso(await pool.fetchval(          # v38
+                      "SELECT ts FROM route_events WHERE route_id=$1 AND event='depot_arrive'",
+                      route["id"])),
                   **dict(zip(("start_ts", "finish_ts", "work_min", "gps_km"),
                              await _route_worklog(route["id"], [drv["id"]])))},
         "stops": [{
@@ -299,6 +327,60 @@ async def stop_unfail(token: str, order_id: int):
         "DELETE FROM stop_events WHERE route_id=$1 AND order_id=$2 AND event='fail'",
         rs["route_id"], order_id)
     return {"ok": True}
+
+
+# ---------- v38: повідомлення про помилки в даних точки ----------
+
+ISSUE_TYPES = {"phone": "Невірний телефон",
+               "contact": "Невірна контактна особа",
+               "address": "Невірна адреса"}
+
+
+class IssueIn(BaseModel):
+    issue_type: str            # phone | contact | address
+    note: str | None = None    # правильне значення, якщо водій знає
+
+
+@router.post("/api/driver/{token}/stops/{order_id}/issue")
+async def stop_issue(token: str, order_id: int, body: IssueIn):
+    if body.issue_type not in ISSUE_TYPES:
+        raise HTTPException(400, "issue_type: phone|contact|address")
+    drv = await _driver_by_token(token)
+    rs = await _stop_route(order_id, drv["id"])
+    if not rs:
+        raise HTTPException(404, "Точка не на твоєму маршруті")
+    o = await pool.fetchrow(
+        "SELECT client, address, doc_number FROM orders WHERE id=$1", order_id)
+    iid = await pool.fetchval("""
+        INSERT INTO stop_issues (route_id, order_id, driver_id, driver_name,
+                                 client, address, doc_number, issue_type, note)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id""",
+        rs["route_id"], order_id, drv["id"], drv["name"],
+        o["client"] if o else None, o["address"] if o else None,
+        o["doc_number"] if o else None,
+        body.issue_type, (body.note or "").strip() or None)
+    return {"ok": True, "id": iid}
+
+
+@router.get("/api/issues")
+async def issues_list(all: bool = Query(False)):
+    """Повідомлення водіїв для логіста; за замовчуванням — лише неприйняті."""
+    rows = await pool.fetch(f"""
+        SELECT id, driver_name, client, address, doc_number, issue_type, note,
+               created_at, acked_at
+        FROM stop_issues
+        {'' if all else 'WHERE acked_at IS NULL'}
+        ORDER BY created_at DESC LIMIT 100""")
+    return [{**dict(r), "type_name": ISSUE_TYPES.get(r["issue_type"], r["issue_type"]),
+             "created_at": _iso(r["created_at"]), "acked_at": _iso(r["acked_at"])}
+            for r in rows]
+
+
+@router.post("/api/issues/{issue_id}/ack")
+async def issue_ack(issue_id: int):
+    n = await pool.execute(
+        "UPDATE stop_issues SET acked_at=now() WHERE id=$1 AND acked_at IS NULL", issue_id)
+    return {"ok": n.endswith("1")}
 
 
 # ---------- довідник причин відмов (налаштування) ----------
@@ -523,15 +605,15 @@ async def driver_next_trip(token: str):
 # ---------- v30: «виїхав / завершив маршрут» ----------
 
 class RouteEventIn(BaseModel):
-    event: str                     # start | finish
+    event: str                     # depot_arrive | start | finish
     lat: float | None = None
     lon: float | None = None
 
 
 @router.post("/api/driver/{token}/route/{route_id}/event")
 async def route_event(token: str, route_id: int, body: RouteEventIn):
-    if body.event not in ("start", "finish"):
-        raise HTTPException(400, "event: start|finish")
+    if body.event not in ("depot_arrive", "start", "finish"):
+        raise HTTPException(400, "event: depot_arrive|start|finish")
     drv = await _driver_by_token(token)
     ok = await pool.fetchval("""
         SELECT 1 FROM routes r
@@ -541,6 +623,11 @@ async def route_event(token: str, route_id: int, body: RouteEventIn):
         drv["id"], route_id)
     if not ok:
         raise HTTPException(404, "Не твій рейс")
+    if body.event == "start":                          # v38: спочатку — на склад
+        arrived = await pool.fetchval(
+            "SELECT 1 FROM route_events WHERE route_id=$1 AND event='depot_arrive'", route_id)
+        if not arrived:
+            raise HTTPException(400, "Спочатку познач прибуття на склад")
     if body.event == "finish":
         started = await pool.fetchval(
             "SELECT 1 FROM route_events WHERE route_id=$1 AND event='start'", route_id)

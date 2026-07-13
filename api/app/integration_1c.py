@@ -400,12 +400,13 @@ async def export_trips(key: str = Query(""),
         # статусов точек на стороне 1С (логика СтатусСоСклада)
         wcode = r["warehouse_code_1c"]
         if wcode:
+            dep_arr = r_ev.get("depot_arrive")     # v38: «прибув на склад»
             parts.append("<ORDER>")
             parts.append(f"<CODE>{_esc(wcode)}</CODE>")
             parts.append("<IN_TRIP_NUMBER>0</IN_TRIP_NUMBER>")
             parts.append("<PLAN_DIST>0</PLAN_DIST><FACT_DIST>0</FACT_DIST>")
             parts.append(f"<DELIVERY_DATE_PLAN>{_dt(r['plan_date'], r['depart_time'])}</DELIVERY_DATE_PLAN>")
-            parts.append(f"<DELIVERY_DATE_FACT>{_ft(started)}</DELIVERY_DATE_FACT>")
+            parts.append(f"<DELIVERY_DATE_FACT>{_ft(dep_arr or started)}</DELIVERY_DATE_FACT>")
             parts.append(f"<DELIVERY_OUTDATE_PLAN>{_dt(r['plan_date'], r['depart_time'])}</DELIVERY_OUTDATE_PLAN>")
             parts.append(f"<DELIVERY_OUTDATE_FACT>{_ft(started)}</DELIVERY_OUTDATE_FACT>")
             parts.append(f"<STATUS_POINT>{4 if started else 1}</STATUS_POINT>")

@@ -584,40 +584,53 @@ async def facts_tracks(plan_date: date = Query(...)):
 
 @router.get("/api/driver/{token}/next-trip")
 async def driver_next_trip(token: str):
-    """Найближчий майбутній рейс водія в активованому проекті (перегляд + пуш)."""
+    """Рейси найближчого майбутнього дня в активованому проекті (перегляд + пуш).
+
+    v40: днів з кількома рейсами теж стосується — віддаємо ВСІ рейси дати,
+    "trip" лишається першим для сумісності."""
     drv = await _driver_by_token(token)
-    route = await pool.fetchrow("""
+    nd = await pool.fetchval("""
+        SELECT min(r.plan_date) FROM routes r
+        WHERE r.plan_date > $2
+          AND r.project_id IN (SELECT id FROM projects WHERE is_released)
+          AND (r.driver_id = $1
+               OR r.vehicle_id IN (SELECT id FROM vehicles WHERE driver_id = $1 AND is_active))""",
+        drv["id"], kyiv_today())
+    if not nd:
+        return {"trip": None, "trips": []}
+    rr = await pool.fetch("""
         SELECT r.id, r.plan_date, r.depart_time, v.name AS vehicle_name, v.plate,
                d.lat AS depot_lat, d.lon AS depot_lon, d.name AS depot_name
         FROM routes r JOIN vehicles v ON v.id = r.vehicle_id
         JOIN depots d ON d.id = r.depot_id
-        WHERE r.plan_date > $2
+        WHERE r.plan_date = $2
           AND r.project_id IN (SELECT id FROM projects WHERE is_released)
           AND (r.driver_id = $1
                OR r.vehicle_id IN (SELECT id FROM vehicles WHERE driver_id = $1 AND is_active))
-        ORDER BY r.plan_date, r.id DESC LIMIT 1""", drv["id"], kyiv_today())
-    if not route:
-        return {"trip": None}
-    stops = await pool.fetch("""
-        SELECT s.seq, s.eta, o.client, o.kind, o.address, o.address_extra, o.weight_kg,
-               o.lat, o.lon
-        FROM route_stops s JOIN orders o ON o.id = s.order_id
-        WHERE s.route_id = $1 ORDER BY s.seq""", route["id"])
-    depot_pt = (route["depot_lat"], route["depot_lon"])
-    geometry = await osrm.route_latlon(                      # v33: плечі склад→1 і остання→склад
-        [depot_pt] + [(s["lat"], s["lon"]) for s in stops if s["lat"] is not None] + [depot_pt])
-    return {"trip": {
-        "date": route["plan_date"].isoformat(), "route_id": route["id"],
-        "vehicle": route["vehicle_name"], "plate": route["plate"],
-        "depart": _hm(route["depart_time"]),
-        "depot": {"lat": route["depot_lat"], "lon": route["depot_lon"],
-                  "name": route["depot_name"]},
-        "geometry": geometry,
-        "stops": [{"seq": s["seq"], "client": s["client"], "kind": s["kind"],
-                   "address": s["address"], "address_extra": s["address_extra"],
-                   "eta": _hm(s["eta"]), "weight_kg": float(s["weight_kg"] or 0),
-                   "lat": s["lat"], "lon": s["lon"]}
-                  for s in stops]}}
+        ORDER BY r.depart_time NULLS LAST, r.id""", drv["id"], nd)
+    trips = []
+    for route in rr:
+        stops = await pool.fetch("""
+            SELECT s.seq, s.eta, o.client, o.kind, o.address, o.address_extra, o.weight_kg,
+                   o.lat, o.lon
+            FROM route_stops s JOIN orders o ON o.id = s.order_id
+            WHERE s.route_id = $1 ORDER BY s.seq""", route["id"])
+        depot_pt = (route["depot_lat"], route["depot_lon"])
+        geometry = await osrm.route_latlon(                  # v33: плечі склад→1 і остання→склад
+            [depot_pt] + [(s["lat"], s["lon"]) for s in stops if s["lat"] is not None] + [depot_pt])
+        trips.append({
+            "date": route["plan_date"].isoformat(), "route_id": route["id"],
+            "vehicle": route["vehicle_name"], "plate": route["plate"],
+            "depart": _hm(route["depart_time"]),
+            "depot": {"lat": route["depot_lat"], "lon": route["depot_lon"],
+                      "name": route["depot_name"]},
+            "geometry": geometry,
+            "stops": [{"seq": s["seq"], "client": s["client"], "kind": s["kind"],
+                       "address": s["address"], "address_extra": s["address_extra"],
+                       "eta": _hm(s["eta"]), "weight_kg": float(s["weight_kg"] or 0),
+                       "lat": s["lat"], "lon": s["lon"]}
+                      for s in stops]})
+    return {"trip": trips[0], "trips": trips}
 
 
 # ---------- v30: «виїхав / завершив маршрут» ----------

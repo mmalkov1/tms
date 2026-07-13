@@ -357,13 +357,16 @@ function setMode(m) {
 async function loadNext() {                        // v28: рейс на наступний день
   try {
     const r = await fetch(`/api/driver/${TOKEN}/next-trip`);
-    nextTrip = (await r.json()).trip;
+    const j = await r.json();
+    nextTrips = j.trips || (j.trip ? [j.trip] : []);       // v40: кілька рейсів
+    if (selNextIdx >= nextTrips.length) selNextIdx = 0;
+    nextTrip = nextTrips[selNextIdx] || null;
   } catch(e) { return; }
   const c = $('nextCnt');
   if (nextTrip) {
     $('tabNext').childNodes[0].textContent = 'Завтра · ' +
       nextTrip.date.split('-').reverse().slice(0,2).join('.') + ' ';
-    c.textContent = nextTrip.stops.length; c.style.display='inline-block';
+    c.textContent = nextTrips.reduce((a,t)=>a+t.stops.length,0); c.style.display='inline-block';
   } else { $('tabNext').childNodes[0].textContent = 'Завтра '; c.style.display='none'; }
   if (MODE==='next') renderNext();
 }
@@ -372,7 +375,12 @@ function renderNext() {
   if (!nextTrip) { $('list').innerHTML =
     '<div class="empty">Рейс на наступний день ще не сформовано</div>'; return; }
   const groups = groupStops(nextTrip.stops.map(s=>({...s, items:undefined})));
-  $('list').innerHTML =
+  const sw = nextTrips.length > 1                      // v40: перемикач рейсів
+    ? `<div class="rswitch" style="margin:0 0 8px">` + nextTrips.map((x,i) =>
+        `<button class="rsw ${i===selNextIdx?'on':''}" onclick="switchNext(${i})">
+          Рейс ${i+1} · ${x.depart||'—'}<br><b>${x.stops.length} точок</b></button>`).join('') + `</div>`
+    : '';
+  $('list').innerHTML = sw +
     `<button class="b-route fin" style="margin-bottom:0" onclick="openTomorrowMap()"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" style="vertical-align:-3px"><path d="M9 4 3 6v14l6-2 6 2 6-2V4l-6 2-6-2z"/><path d="M9 4v14M15 6v14"/></svg> Показати маршрут на карті</button>` +
     `<div class="preview-note">Перегляд рейсу на ${nextTrip.date.split('-').reverse().join('.')}` +
     ` · ${nextTrip.vehicle}${nextTrip.plate?' · '+nextTrip.plate:''}` +
@@ -389,6 +397,13 @@ function renderNext() {
           <span><b>${w.toFixed(0)}</b> кг · ${g.items.length} завд.</span></div>
       </div>`;
     }).join('');
+}
+
+function switchNext(i) {                          // v40
+  if (i === selNextIdx) return;
+  selNextIdx = i;
+  nextTrip = nextTrips[i];
+  renderNext();
 }
 
 function switchRoute(id) {                        // v39
@@ -413,6 +428,7 @@ async function routeEvent(ev) {
 }
 
 let selRoute = null;                               // v39: обраний рейс (кілька на день)
+let nextTrips = [], selNextIdx = 0;                // v40: рейси завтрашнього дня
 async function load() {
   if (!TOKEN) { $('list').innerHTML='<div class="empty">Немає токена в посиланні</div>'; return; }
   let r;

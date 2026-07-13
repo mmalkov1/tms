@@ -13,6 +13,8 @@ class Stop:
     weight: float
     volume: float
     kind: str = "delivery"   # delivery: везем со склада (-), pickup: подбираем (+)
+    break_from: int | None = None   # v39: перерва точки (обід), минуты
+    break_to: int | None = None
 
 
 @dataclass
@@ -80,6 +82,13 @@ def solve(
     for i, s in enumerate(stops):
         idx = mgr.NodeToIndex(i + 1)
         time_dim.CumulVar(idx).SetRange(s.tw_from, max(s.tw_from, s.tw_to))
+        # v39: перерва (обід) — приезд так, чтобы визит закончился до перерыва
+        # или начался после нее: запрещаем прибытие в (bf - service, bt)
+        if s.break_from is not None and s.break_to is not None and s.break_to > s.break_from:
+            lo = s.break_from - s.service_min + 1
+            hi = s.break_to - 1
+            if hi >= lo:
+                time_dim.CumulVar(idx).RemoveInterval(lo, hi)
 
     for v, tr in enumerate(trucks):
         time_dim.CumulVar(routing.Start(v)).SetRange(tr.shift_start, tr.shift_end)
@@ -174,6 +183,10 @@ def eta_schedule(seq: list[Stop], durations, shift_start: int) -> list[tuple[int
         node = s.order_id  # здесь order_id = индекс узла в матрице
         t += durations[prev][node] // 60
         t = max(t, s.tw_from)
+        # v39: попали в перерву — чекаємо її кінця
+        if (s.break_from is not None and s.break_to is not None
+                and s.break_from - s.service_min < t < s.break_to):
+            t = s.break_to
         out.append((t, t + s.service_min))
         t += s.service_min
         prev = node

@@ -105,9 +105,16 @@
   .stop .eta { color:#333; white-space:nowrap; font-weight:600; }
   .stop .rm { cursor:pointer; color:#bbb; font-weight:700; } .stop .rm:hover { color:var(--red); }
   /* п.6: шкала 08:00-18:00 */
-  .tl { position:relative; height:14px; background:#eee; border-radius:2px; }
-  .tl .win { position:absolute; top:0; bottom:0; background:#d9c9ee; border-radius:2px; }
-  .tl .visit { position:absolute; top:0; bottom:0; background:var(--red); min-width:2px; border-radius:2px; }
+  .tl { position:relative; height:14px; background:#F0EFEB; border-radius:3px; overflow:hidden; }
+  .tl .win { position:absolute; top:0; bottom:0; background:#CFE3F5; border-radius:2px; }
+  .tl .brk { position:absolute; top:0; bottom:0;
+             background:repeating-linear-gradient(135deg,#E8B4A0 0 4px,#F7E0D6 4px 8px); }
+  .tl .visit { position:absolute; top:2px; bottom:2px; background:var(--navy); min-width:4px; border-radius:2px; }
+  .stop .lk { cursor:pointer; color:#B9B7B0; }
+  .stop .lk:hover { color:var(--navy); }
+  .stop.locked { background:#F5F4F0; }
+  .stop.locked .cli, .stop.locked .wv { opacity:.55; }
+  .stop.locked .lk { color:#993C1D; }
   .tl:hover::after { content:attr(data-tip); position:absolute; bottom:calc(100% + 5px); left:50%; transform:translateX(-50%);
     background:var(--navy); color:#fff; padding:4px 9px; border-radius:5px; font-size:11px; font-weight:600;
     white-space:nowrap; z-index:60; box-shadow:0 2px 8px rgba(0,0,0,.3); pointer-events:none; }
@@ -278,7 +285,7 @@
   <div class="dlg-head"><span>Автопарк · вибір машин для розрахунку</span><span onclick="vehDlg.close()">✕</span></div>
   <div class="dlg-body">
     <table class="vtable">
-      <thead><tr><th>Розрах.</th><th>Назва</th><th>Водій</th><th>Вантаж., кг</th><th>Об'єм, м³</th><th>Геозони</th><th title="Може забирати товар (pickup)">Забір</th><th title="Може доставляти товар (delivery)">Дост.</th><th>Найм</th><th></th></tr></thead>
+      <thead><tr><th>Розрах.</th><th>Назва</th><th>Водій</th><th title="Робоче вікно машини саме на обрану дату; пусто = графік водія">Вікно на дату</th><th>Вантаж., кг</th><th>Об'єм, м³</th><th>Геозони</th><th title="Може забирати товар (pickup)">Забір</th><th title="Може доставляти товар (delivery)">Дост.</th><th>Найм</th><th></th></tr></thead>
       <tbody id="vehRows"></tbody>
       <tfoot><tr><td colspan="10" style="font-size:11px;color:#888;padding:8px">
         додати авто, змінити назву, водія чи коди 1С — у Налаштуваннях (⚙ праворуч зверху)</td></tr></tfoot>
@@ -466,15 +473,19 @@ function tipHtml(client, address, w, v, extra='') {
 const TL0 = 8*60, TL1 = 18*60;
 const toMin = t => { if(!t) return null; const [h,m]=String(t).split(':'); return +h*60 + +m; };
 const pct = m => Math.max(0, Math.min(100, (m - TL0) / (TL1 - TL0) * 100));
-function tlHtml(twF, twT, eta, etd) {
+function tlHtml(twF, twT, eta, etd, bF, bT) {
   const wF = toMin(twF), wT = toMin(twT), a = toMin(eta), d = toMin(etd);
+  const kF = toMin(bF), kT = toMin(bT);            // v39: перерва
   const tip = [
     (wF != null && wT != null) ? `Вікно доставки: ${hm(twF)}–${hm(twT)}` : 'Вікно доставки: не задано',
+    (kF != null && kT != null) ? `Перерва: ${hm(bF)}–${hm(bT)}` : '',
     a != null ? `Візит: ${hm(eta)}–${hm(etd)}` : ''
   ].filter(Boolean).join(' · ');
   let h = `<div class="tl" data-tip="${tip}">`;
   if (wF != null && wT != null)
     h += `<div class="win" style="left:${pct(wF)}%;width:${pct(wT)-pct(wF)}%"></div>`;
+  if (kF != null && kT != null && kT > kF)
+    h += `<div class="brk" style="left:${pct(kF)}%;width:${pct(kT)-pct(kF)}%"></div>`;
   if (a != null)
     h += `<div class="visit" style="left:${pct(a)}%;width:${Math.max(1.5, pct(d??a+15)-pct(a))}%"></div>`;
   return h + '</div>';
@@ -506,10 +517,20 @@ async function openVehDlg() {
     try { dz[v.driver_id] = await (await fetch(`/api/drivers/${v.driver_id}/zones`)).json(); }
     catch(e) { dz[v.driver_id] = []; }
   }));
+  let dayWin = {};                                          // v39: вікна на дату
+  try { (await (await fetch(`/api/day-windows?plan_date=${$('planDate').value}`)).json())
+          .forEach(w => dayWin[w.vehicle_id] = w); } catch(e) {}
+  const wv = (w,k) => w && w[k] ? String(w[k]).slice(0,5) : '';
   $('vehRows').innerHTML = vehicles.map(v => `<tr data-vid="${v.id}">
     <td style="text-align:center"><input type="checkbox" class="vsel" value="${v.id}" ${selectedVeh.has(v.id)?'checked':''}></td>
     <td><b>${v.name}</b></td>
     <td>${v.driver_name || '—'}</td>
+    <td style="white-space:nowrap"><input type="time" class="dwf" value="${wv(dayWin[v.id],'work_from')}"
+        style="width:76px${dayWin[v.id]?';border:1.5px solid #D8A230;font-weight:700':''}"
+        onchange="saveDayWindow(${v.id}, this.closest('tr'))">–<input type="time" class="dwt"
+        value="${wv(dayWin[v.id],'work_to')}"
+        style="width:76px${dayWin[v.id]?';border:1.5px solid #D8A230;font-weight:700':''}"
+        onchange="saveDayWindow(${v.id}, this.closest('tr'))"></td>
     <td><input type="number" class="vw" value="${v.max_weight_kg}"></td>
     <td><input type="number" class="vv" value="${v.max_volume_m3}" step="0.1"></td>
     <td style="font-size:11px">${v.driver_id ? geozones.map(z =>
@@ -523,6 +544,13 @@ async function openVehDlg() {
     <td class="act" onclick="rowActions(this, ${v.id})" title="Зберегти зміни">💾</td>
   </tr>`).join('');
   $('vehDlg').showModal();
+}
+
+async function saveDayWindow(vid, tr) {                    // v39
+  const wf = tr.querySelector('.dwf').value, wt = tr.querySelector('.dwt').value;
+  await fetch('/api/day-windows', {method:'PUT', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({plan_date: $('planDate').value, vehicle_id: vid,
+                          work_from: wf || null, work_to: wt || null})});
 }
 
 async function rowActions(el, vid) {
@@ -890,13 +918,19 @@ function stopEl(o, seq, eta, etd, routeId) {
     <span class="cli">${o.client}<div class="addr" title="${o.address||''}">${o.address||''}</div>${o.seats?`<div class="addr2">📦 ${o.seats} міс.</div>`:''}${o.address_extra?`<div class="addr2" title="${o.address_extra}">📝 ${o.address_extra}</div>`:''}</span>
     <span class="wv">${sign}${(+o.weight_kg||0).toFixed(1)} кг<br>${sign}${(+o.volume_m3||0).toFixed(3)} м³</span>
     <span class="cum">${o.cum_weight!=null ? o.cum_weight.toFixed(1)+' кг<br>'+o.cum_volume.toFixed(2)+' м³' : ''}</span>
-    ${tlHtml(o.tw_from, o.tw_to, eta, etd)}
+    ${tlHtml(o.tw_from, o.tw_to, eta, etd, o.break_from, o.break_to)}
     <span class="eta">${eta ? hm(eta)+'&rarr;'+hm(etd)+'<br><small>простій '+dwellMin(eta,etd)+' хв</small>' : ''}</span>
     ${routeId ? `<span class="rm" onclick="removeStop(${routeId},${o.order_id})" title="У буфер">✕</span>`
-              : `<span class="edit" title="Редагувати адресу/координати">✎</span>`}`;
+              : `<span class="lk" title="${o.is_locked?'Замкнено: авторозрахунок пропустить':'Замкнути від авторозподілу'}">${o.is_locked?`<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>`:`<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 9.9-1"/></svg>`}</span><span class="edit" title="Редагувати адресу/координати">✎</span>`}`;
+  if (o.is_locked && !routeId) d.classList.add('locked');
   d.addEventListener('dblclick', () => highlightPoint(d.dataset.lat, d.dataset.lon, o.client));
   const ed = d.querySelector('.edit');
   if (ed) ed.addEventListener('click', () => openEdit(o));
+  const lk = d.querySelector('.lk');                       // v39: замок
+  if (lk) lk.addEventListener('click', async () => {
+    await fetch(`/api/orders/${o.order_id ?? o.id}/lock`, {method:'POST'});
+    loadAll();
+  });
   return d;
 }
 
@@ -1049,7 +1083,11 @@ async function loadAll() {
   });
 
   const un = $('stops-un'); un.innerHTML = '';
-  orders.filter(o => !routed.has(o.id)).forEach(o => {
+  const unassigned = orders.filter(o => !routed.has(o.id));
+  const nLocked = unassigned.filter(o => o.is_locked).length;
+  document.querySelector('#unassigned .route-head').textContent =
+    `Нерозподілені заявки (буфер) · ${unassigned.length}` + (nLocked ? ` · ${nLocked} замкнено` : '');
+  unassigned.forEach(o => {
     const el = stopEl(o);
     if (!o.lat) el.classList.add('nogeo');
     un.appendChild(el);

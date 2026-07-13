@@ -152,6 +152,14 @@ def _parse_order(el: ET.Element) -> dict | None:
         a, b = wt.split("-", 1)
         tw_from, tw_to = _parse_hhmm(a), _parse_hhmm(b)
 
+    break_from = break_to = None       # v39: перерва точки (обід)
+    dt_ = g("SHOP_DINNER_TIME")        # "13:00-14:00"
+    if "-" in dt_:
+        a, b = dt_.split("-", 1)
+        break_from, break_to = _parse_hhmm(a), _parse_hhmm(b)
+    if break_from and break_to and break_to <= break_from:
+        break_from = break_to = None   # сміття з 1С не пускаємо в модель
+
     lat = lon = None
     try:
         lat = float(g("GeoX").replace(",", ".")) or None   # GeoX = Широта
@@ -179,6 +187,7 @@ def _parse_order(el: ET.Element) -> dict | None:
         "contact_person": g_any("PERSON_NAME") or None,
         "lat": lat, "lon": lon,
         "tw_from": tw_from, "tw_to": tw_to,
+        "break_from": break_from, "break_to": break_to,
         "service_min": service or 15,
         "weight_kg": round(w, 2), "volume_m3": round(v, 3),
     }
@@ -267,8 +276,8 @@ async def import_orders(request: Request,
             res = await c.execute("""
                 INSERT INTO orders (plan_date, doc_number, doc_ref, kind, client, address,
                     address_extra, lat, lon, tw_from, tw_to, service_min, weight_kg, volume_m3,
-                    status_1c, project_id, phone, seats, contact_person)
-                VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)
+                    status_1c, project_id, phone, seats, contact_person, break_from, break_to)
+                VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21)
                 ON CONFLICT (project_id, doc_number) DO UPDATE SET
                     kind=EXCLUDED.kind, client=EXCLUDED.client, address=EXCLUDED.address,
                     address_extra=EXCLUDED.address_extra,
@@ -279,10 +288,12 @@ async def import_orders(request: Request,
                     weight_kg=EXCLUDED.weight_kg, volume_m3=EXCLUDED.volume_m3,
                     phone=COALESCE(EXCLUDED.phone, orders.phone),
                     seats=COALESCE(EXCLUDED.seats, orders.seats),
-                    contact_person=COALESCE(EXCLUDED.contact_person, orders.contact_person)
+                    contact_person=COALESCE(EXCLUDED.contact_person, orders.contact_person),
+                    break_from=EXCLUDED.break_from, break_to=EXCLUDED.break_to
             """, plan_date, r["doc_number"], r["doc_ref"], r["kind"], r["client"], r["address"],
                 extra, r["lat"], r["lon"], r["tw_from"], r["tw_to"], r["service_min"],
-                r["weight_kg"], r["volume_m3"], "1C", project_id, r["phone"], r["seats"], r["contact_person"])
+                r["weight_kg"], r["volume_m3"], "1C", project_id, r["phone"], r["seats"],
+                r["contact_person"], r["break_from"], r["break_to"])
             if res.startswith("INSERT"):
                 ins += 1
             else:

@@ -100,6 +100,12 @@
              border-radius:10px; font:inherit; font-size:15px; font-weight:800; }
   .b-route.go { background:var(--green); color:#fff; }
   .b-route.fin { background:#fff; color:var(--navy); border:2px solid var(--navy); }
+  .rswitch { display:flex; gap:7px; margin:10px 10px 0; }
+  .rsw { flex:1; border:1.5px solid #bbb; border-radius:9px; background:#fff; color:#555;
+         font:inherit; font-size:12px; padding:7px 4px; text-align:center; line-height:1.35; }
+  .rsw.on { border-color:var(--navy); background:var(--navy); color:#fff; }
+  .rsw.fin { border-color:#1D9E75; color:#085041; background:#E1F5EE; }
+  .rsw.fin.on { border-color:var(--navy); outline:2px solid var(--navy); }
   .onroute { background:#E1F5EE; border:1px solid #1D9E75; color:#085041; border-radius:8px;
              padding:8px 11px; margin:10px 10px 0; font-size:13px; }
   .routedone { background:#fff; border-radius:8px; padding:10px 12px; margin:10px 10px 0; font-size:13px; }
@@ -166,7 +172,8 @@ const CARD_ICO = {
   phone:'<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#00356B" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.13.96.36 1.9.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.9.34 1.85.57 2.81.7A2 2 0 0 1 22 16.92z"/></svg>',
   user:'<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#00356B" stroke-width="2" stroke-linecap="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>',
   box:'<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#00356B" stroke-width="2" stroke-linejoin="round"><path d="M21 8l-9-5-9 5v8l9 5 9-5V8z"/><path d="M3 8l9 5 9-5"/><path d="M12 13v8"/></svg>',
-  warn:'<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.3 3.9L1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>'
+  warn:'<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.3 3.9L1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>',
+  break_:'<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 8h1a4 4 0 1 1 0 8h-1"/><path d="M3 8h14v9a4 4 0 0 1-4 4H7a4 4 0 0 1-4-4z"/><path d="M6 2v2"/><path d="M10 2v2"/><path d="M14 2v2"/></svg>'
 };
 const ISSUE_NAMES = {phone:'Невірний номер телефону', contact:'Невірна контактна особа', address:'Невірна адреса'};
 let cardCtx = null;   // {gi, issueType}
@@ -185,6 +192,7 @@ function openCard(gi) {
     <div class="sub">${g.kind==='pickup'?'Забір':'Доставка'} · точка ${gi+1}${docs?' · зам. '+docs:''}</div>
     <div class="card-row">${CARD_ICO.pin}<span>${g.address||'—'}${g.address_extra?'<br><span style="color:#7a4a00">'+g.address_extra+'</span>':''}</span></div>
     <div class="card-row">${CARD_ICO.clock}<span>Вікно <b>${win}</b> · план <b>${first.eta||'—'}</b></span></div>
+    ${first.break_from ? `<div class="card-row" style="color:#993C1D">${CARD_ICO.break_}<span>Перерва <b>${first.break_from}–${first.break_to}</b> — не приїжджай у цей час</span></div>` : ''}
     <div class="card-row">${CARD_ICO.phone}<span>${g.phone||'—'}</span></div>
     <div class="card-row">${CARD_ICO.user}<span>${g.contact_person||'—'}</span></div>
     <div class="card-row">${CARD_ICO.box}<span><b>${w.toFixed(0)}</b> кг${seats?' · <b>'+seats+'</b> міс.':''} · ${g.items.length} завд.</span></div>
@@ -383,6 +391,12 @@ function renderNext() {
     }).join('');
 }
 
+function switchRoute(id) {                        // v39
+  if (id === selRoute) return;
+  selRoute = id;
+  load();
+}
+
 async function routeEvent(ev) {
   const Q = {depot_arrive:'Позначити прибуття на склад?',
              start:'Позначити виїзд на маршрут?', finish:'Завершити маршрут?'};
@@ -398,12 +412,15 @@ async function routeEvent(ev) {
   else toast('Не вдалося, спробуй ще раз');
 }
 
+let selRoute = null;                               // v39: обраний рейс (кілька на день)
 async function load() {
   if (!TOKEN) { $('list').innerHTML='<div class="empty">Немає токена в посиланні</div>'; return; }
   let r;
-  try { r = await fetch(`/api/driver/${TOKEN}/trip`); } catch(e) { toast('Немає зв’язку'); return; }
+  try { r = await fetch(`/api/driver/${TOKEN}/trip` + (selRoute ? `?route_id=${selRoute}` : '')); }
+  catch(e) { toast('Немає зв’язку'); return; }
   if (r.status===401) { $('list').innerHTML='<div class="empty">Токен недійсний — звернись до логіста</div>'; return; }
   trip = await r.json();
+  if (trip.route) selRoute = trip.route.id;        // v39: сервер міг обрати сам
   if (MODE==='today') render();
   loadNext();
 }
@@ -432,6 +449,14 @@ function render() {
   const rt = trip.route;
   const fmtDur = m => m==null ? '' : `${Math.floor(m/60)} год ${String(m%60).padStart(2,'0')} хв`;
   let head = '', tail = '';
+  if ((trip.routes||[]).length > 1) {              // v39: кілька рейсів на день
+    head += `<div class="rswitch">` + trip.routes.map((x,i) => {
+      const on = x.id === rt.id;
+      const st = x.finished ? 'завершено ✓' : x.started ? 'в дорозі' : x.stops + ' точок';
+      return `<button class="rsw ${on?'on':''} ${x.finished?'fin':''}"
+        onclick="switchRoute(${x.id})">Рейс ${i+1} · ${x.depart||'—'}<br><b>${st}</b></button>`;
+    }).join('') + `</div>`;
+  }
   if (!rt.depot_arrive_ts) {                       // v38: спершу — на склад
     head = `<button class="b-route go" onclick="routeEvent('depot_arrive')"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-3px"><path d="M3 21V8l9-5 9 5v13"/><path d="M7 21v-8h10v8"/><path d="M7 17h10"/></svg> Прибув на склад</button>`;
   } else if (!rt.start_ts) {

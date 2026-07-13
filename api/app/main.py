@@ -150,6 +150,20 @@ async def startup():
     await pool.execute("ALTER TABLE orders ADD COLUMN IF NOT EXISTS seats INT")
     # v24 (migrate_014): контактное лицо точки (PERSON_NAME из 1С)
     await pool.execute("ALTER TABLE orders ADD COLUMN IF NOT EXISTS contact_person TEXT")
+    # v39 (migrate_018): перерва точки (SHOP_DINNER_TIME из 1С) + ручная блокировка
+    await pool.execute("""
+        ALTER TABLE orders
+            ADD COLUMN IF NOT EXISTS break_from TIME,
+            ADD COLUMN IF NOT EXISTS break_to   TIME,
+            ADD COLUMN IF NOT EXISTS is_locked  BOOLEAN NOT NULL DEFAULT FALSE""")
+    # v39 (migrate_018): робоче вікно машини на конкретну дату (override зміни водія)
+    await pool.execute("""
+        CREATE TABLE IF NOT EXISTS vehicle_day_windows (
+            plan_date  DATE NOT NULL,
+            vehicle_id INT NOT NULL REFERENCES vehicles(id) ON DELETE CASCADE,
+            work_from  TIME,
+            work_to    TIME,
+            PRIMARY KEY (plan_date, vehicle_id))""")
     # v25 (migrate_015): активация проекта («У роботу»); бэкфилл — один раз при добавлении колонки
     had_rel = await pool.fetchval("""
         SELECT 1 FROM information_schema.columns
@@ -575,6 +589,55 @@ async def patch_order(order_id: int, b: OrderPatch):
     return {"ok": True}
 
 
+@app.post("/api/orders/{order_id}/lock")   # v39: замок від авторозподілу
+async def toggle_lock(order_id: int):
+    new = await pool.fetchval(
+        "UPDATE orders SET is_locked = NOT is_locked WHERE id=$1 RETURNING is_locked", order_id)
+    if new is None:
+        raise HTTPException(404, "Заявку не знайдено")
+    return {"is_locked": new}
+
+
+# v39: робочі вікна машин на дату
+@app.get("/api/day-windows")
+async def get_day_windows(plan_date: date = Query(...)):
+    rows = await pool.fetch(
+        "SELECT vehicle_id, work_from, work_to FROM vehicle_day_windows WHERE plan_date=$1",
+        plan_date)
+    return [dict(r) for r in rows]
+
+
+class DayWindowIn(BaseModel):
+    plan_date: date
+    vehicle_id: int
+    work_from: str | None = None    # "HH:MM"; обидва пусті = скинути до графіка
+    work_to: str | None = None
+
+
+@app.put("/api/day-windows")
+async def put_day_window(b: DayWindowIn):
+    def _t(s):
+        if not s:
+            return None
+        v = parse_hhmm(s, -1)
+        if v < 0:
+            raise HTTPException(400, "Формат часу HH:MM")
+        return m2t(v)
+    wf, wt = _t(b.work_from), _t(b.work_to)
+    if not wf and not wt:
+        await pool.execute(
+            "DELETE FROM vehicle_day_windows WHERE plan_date=$1 AND vehicle_id=$2",
+            b.plan_date, b.vehicle_id)
+        return {"ok": True, "cleared": True}
+    await pool.execute("""
+        INSERT INTO vehicle_day_windows (plan_date, vehicle_id, work_from, work_to)
+        VALUES ($1,$2,$3,$4)
+        ON CONFLICT (plan_date, vehicle_id) DO UPDATE
+            SET work_from=EXCLUDED.work_from, work_to=EXCLUDED.work_to""",
+        b.plan_date, b.vehicle_id, wf, wt)
+    return {"ok": True}
+
+
 @app.post("/api/orders/{order_id}/geocode")
 async def geocode_one(order_id: int):
     cur = await pool.fetchrow("SELECT address FROM orders WHERE id=$1", order_id)
@@ -634,11 +697,23 @@ async def plan(
     elif service_min:
         await pool.execute("UPDATE orders SET service_min=$1 WHERE project_id=$2", service_min, project_id)
 
+    # v39: рейси з замкненими точками переживають перерахунок
+    keep_routes = {r["route_id"] for r in await pool.fetch("""
+        SELECT DISTINCT s.route_id FROM route_stops s
+        JOIN routes r ON r.id = s.route_id
+        JOIN orders o ON o.id = s.order_id
+        WHERE r.project_id=$1 AND r.status='draft' AND o.is_locked""", project_id)}
+    placed_kept = {r["order_id"] for r in await pool.fetch(
+        "SELECT order_id FROM route_stops WHERE route_id = ANY($1::int[])", list(keep_routes))} \
+        if keep_routes else set()
+
     orows = await pool.fetch(
-        "SELECT * FROM orders WHERE project_id=$1 AND lat IS NOT NULL AND lon IS NOT NULL ORDER BY id",
+        "SELECT * FROM orders WHERE project_id=$1 AND lat IS NOT NULL AND lon IS NOT NULL"
+        " AND NOT is_locked ORDER BY id",
         project_id)
+    orows = [o for o in orows if o["id"] not in placed_kept]
     if not orows:
-        raise HTTPException(400, "Немає заявок з координатами на дату")
+        raise HTTPException(400, "Немає заявок з координатами на дату (не замкнених)")
 
     points = [(depot["lat"], depot["lon"])] + [(o["lat"], o["lon"]) for o in orows]
     durations, distances = await osrm.table(points)
@@ -651,16 +726,29 @@ async def plan(
         weight=float(o["weight_kg"] or 0),
         volume=float(o["volume_m3"] or 0),
         kind=o["kind"],
+        break_from=t2m(o["break_from"], None) if o["break_from"] else None,   # v39
+        break_to=t2m(o["break_to"], None) if o["break_to"] else None,
     ) for i, o in enumerate(orows)]
 
     # смена машины = пересечение смены водителя и окна склада (п.7)
+    # v39: + робоче вікно машини саме на цю дату (пріоритетніше за графік водія)
+    dw = {r["vehicle_id"]: r for r in await pool.fetch(
+        "SELECT * FROM vehicle_day_windows WHERE plan_date=$1", plan_date)}
+    def _shift(v):
+        o = dw.get(v["id"])
+        ss = t2m(o["work_from"], None) if o and o["work_from"] else t2m(v["ss"], 8 * 60)
+        se = t2m(o["work_to"], None) if o and o["work_to"] else t2m(v["se"], 18 * 60)
+        return max(ss, depart_m), min(se, return_m)
     trucks = [solver.Truck(
         vehicle_id=v["id"],
         max_weight=float(v["max_weight_kg"]),
         max_volume=float(v["max_volume_m3"]),
-        shift_start=max(t2m(v["ss"], 8 * 60), depart_m),
-        shift_end=min(t2m(v["se"], 18 * 60), return_m),
+        shift_start=_shift(v)[0],
+        shift_end=_shift(v)[1],
     ) for v in vrows]
+    if any(tr.shift_end <= tr.shift_start for tr in trucks):
+        bad = [v["name"] for v, tr in zip(vrows, trucks) if tr.shift_end <= tr.shift_start]
+        raise HTTPException(400, "Порожнє робоче вікно: " + ", ".join(bad))
 
     allowed = None
     zone_stats = {}
@@ -703,7 +791,10 @@ async def plan(
         raise HTTPException(422, "Рішення не знайдено — перевір вікна/ліміти")
 
     async with pool.acquire() as c:
-        await c.execute("DELETE FROM routes WHERE project_id=$1 AND status='draft'", project_id)
+        await c.execute(
+            "DELETE FROM routes WHERE project_id=$1 AND status='draft'"
+            " AND NOT (id = ANY($2::int[]))",             # v39: рейси з замками лишаються
+            project_id, list(keep_routes))
         out, dropped = [], set(range(len(orows)))
         for v_i, seq in enumerate(routes_idx):
             if not seq:
@@ -783,7 +874,8 @@ async def _rebuild_route(route_id: int):
         FROM routes r JOIN depots d ON d.id=r.depot_id
         LEFT JOIN drivers dr ON dr.id=r.driver_id WHERE r.id=$1""", route_id)
     ss = await pool.fetch("""
-        SELECT s.order_id, o.lat, o.lon, o.tw_from, o.service_min, o.weight_kg, o.volume_m3, o.kind
+        SELECT s.order_id, o.lat, o.lon, o.tw_from, o.break_from, o.break_to,
+               o.service_min, o.weight_kg, o.volume_m3, o.kind
         FROM route_stops s JOIN orders o ON o.id=s.order_id
         WHERE s.route_id=$1 ORDER BY s.seq""", route_id)
     if not ss:
@@ -798,6 +890,10 @@ async def _rebuild_route(route_id: int):
     for i, s in enumerate(ss):
         t += legs[i] // 60
         t = max(t, t2m(s["tw_from"], 0))
+        if s["break_from"] and s["break_to"]:              # v39: перерва
+            bf, bt = t2m(s["break_from"], 0), t2m(s["break_to"], 0)
+            if bf - s["service_min"] < t < bt:
+                t = bt
         await pool.execute(
             "UPDATE route_stops SET eta=$1, etd=$2 WHERE route_id=$3 AND order_id=$4",
             m2t(t), m2t(t + s["service_min"]), route_id, s["order_id"])

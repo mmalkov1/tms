@@ -165,19 +165,24 @@ async def new_token(driver_id: int):
 # ---------- рейс водителя ----------
 
 @router.get("/api/driver/{token}/trip")
-async def driver_trip(token: str, d: date | None = Query(None)):
+async def driver_trip(token: str, d: date | None = Query(None),
+                      route_id: int | None = Query(None)):
     drv = await _driver_by_token(token)
     day = d or kyiv_today()
-    route = await pool.fetchrow("""
+    # v39: у водія може бути кілька рейсів на день
+    rr = await pool.fetch("""
         SELECT r.id, r.plan_date, r.color, r.total_km, r.depart_time, r.return_time,
-               v.name AS vehicle_name, v.plate
+               v.name AS vehicle_name, v.plate,
+               (SELECT count(*) FROM route_stops s WHERE s.route_id = r.id) AS n_stops,
+               (SELECT ts FROM route_events e WHERE e.route_id=r.id AND e.event='start')  AS start_ts,
+               (SELECT ts FROM route_events e WHERE e.route_id=r.id AND e.event='finish') AS finish_ts
         FROM routes r JOIN vehicles v ON v.id = r.vehicle_id
         WHERE r.plan_date = $2
           AND r.project_id IN (SELECT id FROM projects WHERE is_released)
           AND (r.driver_id = $1
                OR r.vehicle_id IN (SELECT id FROM vehicles WHERE driver_id = $1 AND is_active))
-        ORDER BY r.id DESC LIMIT 1""", drv["id"], day)
-    if not route:
+        ORDER BY r.depart_time NULLS LAST, r.id""", drv["id"], day)
+    if not rr:
         # рейси є, але проект не активовано?
         pending = await pool.fetchval("""
             SELECT 1 FROM routes r
@@ -186,11 +191,18 @@ async def driver_trip(token: str, d: date | None = Query(None)):
                    OR r.vehicle_id IN (SELECT id FROM vehicles WHERE driver_id = $1 AND is_active))
             LIMIT 1""", drv["id"], day)
         return {"driver": drv["name"], "date": day.isoformat(),
-                "route": None, "stops": [], "not_released": bool(pending)}
+                "route": None, "routes": [], "stops": [], "not_released": bool(pending)}
+
+    # обраний рейс: явний route_id -> перший незавершений -> останній
+    route = None
+    if route_id:
+        route = next((r for r in rr if r["id"] == route_id), None)
+    if route is None:
+        route = next((r for r in rr if not r["finish_ts"]), rr[-1])
 
     stops = await pool.fetch("""
         SELECT s.seq, s.eta, s.etd, o.id AS order_id, o.client, o.kind, o.address,
-               o.address_extra, o.lat, o.lon, o.tw_from, o.tw_to,
+               o.address_extra, o.lat, o.lon, o.tw_from, o.tw_to, o.break_from, o.break_to,
                o.weight_kg, o.volume_m3, o.doc_number, o.phone, o.seats, o.contact_person,
                ea.ts AS arrive_ts, ed.ts AS depart_ts,
                ef.ts AS fail_ts, COALESCE(ef.reason_text, fr.name) AS fail_reason
@@ -211,6 +223,11 @@ async def driver_trip(token: str, d: date | None = Query(None)):
     return {
         "driver": drv["name"], "date": day.isoformat(),
         "fail_reasons": fail_reasons,
+        # v39: список усіх рейсів дня для перемикача
+        "routes": [{"id": r["id"], "depart": _hm(r["depart_time"]),
+                    "return": _hm(r["return_time"]), "stops": r["n_stops"],
+                    "started": bool(r["start_ts"]), "finished": bool(r["finish_ts"])}
+                   for r in rr],
         "route": {"id": route["id"], "vehicle": route["vehicle_name"], "plate": route["plate"],
                   "color": route["color"], "total_km": float(route["total_km"] or 0),
                   "depart": _hm(route["depart_time"]), "return": _hm(route["return_time"]),
@@ -226,6 +243,7 @@ async def driver_trip(token: str, d: date | None = Query(None)):
             "lat": s["lat"], "lon": s["lon"], "phone": s["phone"], "seats": s["seats"],
             "contact_person": s["contact_person"],
             "tw_from": _hm(s["tw_from"]), "tw_to": _hm(s["tw_to"]),
+            "break_from": _hm(s["break_from"]), "break_to": _hm(s["break_to"]),   # v39
             "eta": _hm(s["eta"]), "etd": _hm(s["etd"]),
             "weight_kg": float(s["weight_kg"] or 0), "volume_m3": float(s["volume_m3"] or 0),
             "arrive_ts": _iso(s["arrive_ts"]), "depart_ts": _iso(s["depart_ts"]),

@@ -683,7 +683,12 @@ def _haversine_km(lat1, lon1, lat2, lon2):
 
 
 async def _route_worklog(route_id: int, driver_ids: list[int]):
-    """(start_ts, finish_ts, хвилини, км по GPS) між подіями рейсу."""
+    """(start_ts, finish_ts, хвилини, км по GPS) між подіями рейсу.
+
+    v41: пробіг обрізається геозоною складу (300 м) — плечі дім→склад і
+    склад→дім не входять у факт. Межі кліпінгу прив'язані до подій по точках,
+    щоб проїзд повз склад посеред рейсу нічого не відрізав.
+    """
     evs = {e["event"]: e["ts"] for e in await pool.fetch(
         "SELECT event, ts FROM route_events WHERE route_id=$1", route_id)}
     start, fin = evs.get("start"), evs.get("finish")
@@ -691,10 +696,32 @@ async def _route_worklog(route_id: int, driver_ids: list[int]):
     km = None
     if start and driver_ids:
         pts = await pool.fetch("""
-            SELECT lat, lon FROM gps_points
+            SELECT ts, lat, lon FROM gps_points
             WHERE driver_id = ANY($1::int[]) AND ts >= $2 AND ts <= $3
               AND (accuracy_m IS NULL OR accuracy_m <= 60)
             ORDER BY ts""", driver_ids, start, fin or datetime.now(timezone.utc))
+        depot = await pool.fetchrow("SELECT lat, lon FROM depots WHERE id=1")
+        ev = await pool.fetchrow(
+            "SELECT min(ts) AS first_ev, max(ts) AS last_ev FROM stop_events WHERE route_id=$1",
+            route_id)
+        if depot and pts:
+            ing = [_haversine_km(p["lat"], p["lon"], depot["lat"], depot["lon"]) <= 0.3
+                   for p in pts]
+            i0, i1 = 0, len(pts) - 1
+            if ev and ev["first_ev"]:      # старт: остання точка на складі до 1-ї події
+                for i, p in enumerate(pts):
+                    if p["ts"] >= ev["first_ev"]:
+                        break
+                    if ing[i]:
+                        i0 = i
+            if ev and ev["last_ev"]:       # фініш: перша точка на складі після останньої події
+                for i in range(len(pts) - 1, -1, -1):
+                    if pts[i]["ts"] <= ev["last_ev"]:
+                        break
+                    if ing[i]:
+                        i1 = i
+            if i1 >= i0:
+                pts = pts[i0:i1 + 1]
         km = 0.0
         for a, b in zip(pts, pts[1:]):
             seg = _haversine_km(a["lat"], a["lon"], b["lat"], b["lon"])

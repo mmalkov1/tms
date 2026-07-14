@@ -139,6 +139,11 @@ async def startup():
             lat       DOUBLE PRECISION,
             lon       DOUBLE PRECISION,
             UNIQUE (route_id, event))""")
+    # v41 (migrate_019): типовий графік водія 09:00–16:00 (для нових водіїв)
+    await pool.execute("""
+        ALTER TABLE drivers
+            ALTER COLUMN shift_start SET DEFAULT '09:00',
+            ALTER COLUMN shift_end   SET DEFAULT '16:00'""")
     appupd.init()                      # v27: каталог APK для оновлень застосунку
     asyncio.create_task(_route_autoclose_loop())  # v32: нічне авто-закриття рейсів
     await integration_1c.init(pool)
@@ -340,14 +345,15 @@ class VehicleIn(BaseModel):
     can_delivery: bool = True
     driver_id: int | None = None        # існуючий водій (пріоритет)
     driver_name: str | None = None      # новий водій (створюється, якщо ПІБ не знайдено)
-    shift_start: str = "08:00"
-    shift_end: str = "18:00"
+    shift_start: str = "09:00"
+    shift_end: str = "16:00"
 
 
 @app.get("/api/drivers")
 async def get_drivers():
     rows = await pool.fetch("""
-        SELECT d.id, d.name, d.code_1c, d.phone, t.created_at AS token_created
+        SELECT d.id, d.name, d.code_1c, d.phone, d.shift_start, d.shift_end,
+               t.created_at AS token_created
         FROM drivers d
         LEFT JOIN driver_tokens t ON t.driver_id = d.id AND t.is_active
         WHERE d.is_active ORDER BY d.name""")
@@ -368,7 +374,8 @@ async def create_driver(d: DriverIn):
     if ex:
         raise HTTPException(409, "Такий водій вже є")
     did = await pool.fetchval(
-        "INSERT INTO drivers (name) VALUES ($1) RETURNING id", name)
+        "INSERT INTO drivers (name, shift_start, shift_end) VALUES ($1,$2,$3) RETURNING id",
+        name, m2t(9 * 60), m2t(16 * 60))
     return {"driver_id": did}
 
 
@@ -376,6 +383,8 @@ class DriverPatch(BaseModel):
     name: str | None = None
     phone: str | None = None
     code_1c: str | None = None
+    shift_start: str | None = None      # v41: постійний графік водія "HH:MM"
+    shift_end: str | None = None
     is_active: bool | None = None
 
 
@@ -392,6 +401,12 @@ async def patch_driver(driver_id: int, d: DriverPatch):
     if d.code_1c is not None:
         await pool.execute("UPDATE drivers SET code_1c=$1 WHERE id=$2",
                            d.code_1c.strip() or None, driver_id)
+    if d.shift_start is not None and d.shift_end is not None:            # v41
+        ss, se = parse_hhmm(d.shift_start, -1), parse_hhmm(d.shift_end, -1)
+        if ss < 0 or se < 0 or se <= ss:
+            raise HTTPException(400, "Графік: формат HH:MM, кінець пізніше початку")
+        await pool.execute("UPDATE drivers SET shift_start=$1, shift_end=$2 WHERE id=$3",
+                           m2t(ss), m2t(se), driver_id)
     if d.is_active is not None:
         await pool.execute("UPDATE drivers SET is_active=$1 WHERE id=$2",
                            d.is_active, driver_id)
@@ -674,7 +689,7 @@ async def plan(
 
     depot = await pool.fetchrow("SELECT * FROM depots WHERE id=1")
     vrows = await pool.fetch("""
-        SELECT v.*, COALESCE(d.shift_start,'08:00'::time) ss, COALESCE(d.shift_end,'18:00'::time) se
+        SELECT v.*, COALESCE(d.shift_start,'09:00'::time) ss, COALESCE(d.shift_end,'16:00'::time) se
         FROM vehicles v LEFT JOIN drivers d ON d.id=v.driver_id WHERE v.is_active ORDER BY v.id""")
     if vehicle_ids:
         want = {int(x) for x in vehicle_ids.split(",")}
@@ -835,6 +850,7 @@ class NewRoute(BaseModel):
     project_id: int
     vehicle_id: int
     depot_depart: str = "09:00"
+    depot_return: str | None = None     # v41: кінець роботи маршруту
 
 
 @app.post("/api/routes")   # п.4: добавить машину в день вручную
@@ -845,12 +861,16 @@ async def create_route(body: NewRoute):
     used = await pool.fetch("SELECT color FROM routes WHERE project_id=$1", body.project_id)
     used_colors = {u["color"] for u in used}
     color = next((c for c in ROUTE_COLORS if c not in used_colors), ROUTE_COLORS[0])
+    dep_m = parse_hhmm(body.depot_depart, 9 * 60)                        # v41
+    ret_m = parse_hhmm(body.depot_return, 16 * 60) if body.depot_return else 16 * 60
+    if ret_m <= dep_m:
+        raise HTTPException(400, "Кінець роботи має бути пізніше початку")
     rid = await pool.fetchval("""
         INSERT INTO routes (plan_date, vehicle_id, driver_id, color, total_km,
-            load_weight, load_volume, depart_time, project_id)
-        VALUES ($1,$2,$3,$4,0,0,0,$5,$6) RETURNING id""",
+            load_weight, load_volume, depart_time, return_time, project_id)
+        VALUES ($1,$2,$3,$4,0,0,0,$5,$6,$7) RETURNING id""",
         body.plan_date, veh["id"], veh["driver_id"], color,
-        m2t(parse_hhmm(body.depot_depart, 9 * 60)), body.project_id)
+        m2t(dep_m), m2t(ret_m), body.project_id)
     return {"route_id": rid}
 
 

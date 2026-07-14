@@ -61,6 +61,7 @@ L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {attribution:'
 let layers = L.layerGroup().addTo(map);
 let trackLayer = L.layerGroup().addTo(map);
 let tracks = {};                                    // route_id -> polyline
+let markers = {};                                   // v41: route-order -> маркер точки
 let focusRoute = null;                              // підсвічений рейс
 let showTrack = localStorage.getItem('tmsTrack') === '1';
 const hm = ts => ts ? new Date(ts).toLocaleTimeString('uk-UA',{hour:'2-digit',minute:'2-digit'}) : '';
@@ -89,6 +90,17 @@ function focus(rid) {                               // клік по шапці 
     pl.setStyle({opacity: (focusRoute===null || +id===focusRoute) ? .85 : .12}));
 }
 
+function focusStop(rid, oid) {                      // v41: dblclick по рядку таблиці
+  const m = markers[rid + '-' + oid];
+  if (!m) return;
+  map.setView(m.getLatLng(), Math.max(map.getZoom(), 15));
+  m.setStyle({radius: 13, weight: 4});
+  m.openTooltip();
+  clearTimeout(m._pulse);
+  m._pulse = setTimeout(() => m.setStyle({radius: 8, weight: 2}), 1800);
+  if (focusRoute !== rid) focus(rid);
+}
+
 async function loadTracks() {
   if (!showTrack) return;
   const r = await fetch(`/api/facts/tracks?plan_date=${$('d').value}`);
@@ -106,7 +118,7 @@ async function loadTracks() {
 async function load() {
   const r = await fetch(`/api/facts?plan_date=${$('d').value}`);
   const routes = await r.json();
-  layers.clearLayers();
+  layers.clearLayers(); markers = {};
   const pts = [];
   $('panel').innerHTML = routes.map(rt => {
     const done = rt.stops.filter(s=>s.depart_ts).length;
@@ -116,7 +128,8 @@ async function load() {
       pts.push([s.lat, s.lon]);
       const fill = s.fail_ts ? '#E8890C'
                  : s.depart_ts ? '#2E8B57' : s.arrive_ts ? '#B8860B' : '#bbb';
-      L.circleMarker([s.lat, s.lon], {radius:8, color:rt.color, weight:2, fillColor:fill, fillOpacity:1})
+      markers[rt.route_id + '-' + s.order_id] =
+        L.circleMarker([s.lat, s.lon], {radius:8, color:rt.color, weight:2, fillColor:fill, fillOpacity:1})
        .bindTooltip(`<b>${s.client}</b><br>${s.address||''}<br>` +
          (s.fail_ts ? `<b style="color:#B8860B">✗ ${s.fail_reason||'відмова'}</b> · ${hm(s.fail_ts)}`
                     : `План ${s.eta||'—'} · Факт ${hm(s.arrive_ts)||'—'}`))
@@ -160,7 +173,7 @@ async function load() {
           const fcell = f==null ? '<td style="color:#999">—</td>'
             : f===i+1 ? `<td class="fok">${f}</td>`
             : `<td class="fmv">${f} ${f>i+1?'↓':'↑'}</td>`;
-          return `<tr class="${s.fail_ts?'failrow':s.depart_ts?'done':''}">
+          return `<tr class="${s.fail_ts?'failrow':s.depart_ts?'done':''}" style="cursor:pointer" title="Подвійний клік — показати точку на карті" ondblclick="focusStop(${rt.route_id},${s.order_id})">
         <td>${s.seq}</td>${fcell}<td>${s.client}</td><td>${s.eta||'—'}</td>
         <td>${hm(s.arrive_ts)||'—'}</td><td>${hm(s.depart_ts)||'—'}</td>
         <td>${s.fail_ts ? '<span class="failtag">✗ '+(s.fail_reason||'відмова')+'</span>' : delta(s.eta, s.arrive_ts)}</td></tr>`;

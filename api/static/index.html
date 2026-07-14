@@ -217,6 +217,10 @@
         <label>Виїзд <input type="time" id="depDepart" value="09:00" style="width:90px"></label>
         <label>Повернення <input type="time" id="depReturn" value="16:00" style="width:90px"></label>
       </div>
+      <div style="font-size:11.5px;color:#888;margin-top:8px;line-height:1.5">
+        Це загальна рамка складу на день. Робочий час кожної машини:
+        <b>вікно на дату</b> («Авто», жовті поля) → інакше <b>графік водія</b> (Налаштування → Водії)
+        → результат обрізається цією рамкою.</div>
     </div>
 
     <div class="tool-block">
@@ -281,11 +285,29 @@
     <button class="pri" onclick="edSave()">Зберегти</button>
   </div>
 </dialog>
+<dialog id="addRtDlg">
+  <div class="dlg-head"><span>Додати авто в день</span><span onclick="addRtDlg.close()">✕</span></div>
+  <div class="dlg-body">
+    <div style="font-size:12px;color:#5F5E5A;margin-bottom:3px">Авто</div>
+    <div id="addRtVeh" style="font-weight:700;margin-bottom:14px"></div>
+    <div style="display:flex;gap:18px">
+      <label style="font-size:12px;color:#5F5E5A">Початок роботи<br>
+        <input type="time" id="addRtFrom" style="width:100px;margin-top:3px"></label>
+      <label style="font-size:12px;color:#5F5E5A">Кінець роботи<br>
+        <input type="time" id="addRtTo" style="width:100px;margin-top:3px"></label>
+    </div>
+    <div id="addRtHint" style="font-size:11px;color:#888;margin-top:10px"></div>
+  </div>
+  <div class="dlg-foot">
+    <button onclick="addRtDlg.close()">Скасувати</button>
+    <button class="pri" onclick="addRouteGo()">Додати маршрут</button>
+  </div>
+</dialog>
 <dialog id="vehDlg">
   <div class="dlg-head"><span>Автопарк · вибір машин для розрахунку</span><span onclick="vehDlg.close()">✕</span></div>
   <div class="dlg-body">
     <table class="vtable">
-      <thead><tr><th>Розрах.</th><th>Назва</th><th>Водій</th><th title="Робоче вікно машини саме на обрану дату; пусто = графік водія">Вікно на дату</th><th>Вантаж., кг</th><th>Об'єм, м³</th><th>Геозони</th><th title="Може забирати товар (pickup)">Забір</th><th title="Може доставляти товар (delivery)">Дост.</th><th>Найм</th><th></th></tr></thead>
+      <thead><tr><th>Розрах.</th><th>Назва</th><th>Водій</th><th title="Пріоритет 1: разове вікно машини саме на обрану дату. Пусто = графік водія (Налаштування → Водії), обрізаний часом роботи депо">Вікно на дату</th><th>Вантаж., кг</th><th>Об'єм, м³</th><th>Геозони</th><th title="Може забирати товар (pickup)">Забір</th><th title="Може доставляти товар (delivery)">Дост.</th><th>Найм</th><th></th></tr></thead>
       <tbody id="vehRows"></tbody>
       <tfoot><tr><td colspan="10" style="font-size:11px;color:#888;padding:8px">
         додати авто, змінити назву, водія чи коди 1С — у Налаштуваннях (⚙ праворуч зверху)</td></tr></tfoot>
@@ -312,11 +334,14 @@
             <a id="tokQrLink" target="_blank"></a><br>
             <small style="color:#888">водій сканує QR або відкриває посилання в Chrome</small></div></div>
         <h4>Водії</h4>
-        <table><thead><tr><th>ПІБ</th><th>Телефон</th><th>Код 1С</th><th>Кабінет водія</th><th></th></tr></thead>
+        <table><thead><tr><th>ПІБ</th><th>Телефон</th><th>Код 1С</th><th title="Пріоритет 2: постійний графік водія. Діє, коли немає вікна на дату; обрізається часом роботи депо">Графік</th><th>Кабінет водія</th><th></th></tr></thead>
           <tbody id="setDrvRows"></tbody>
           <tfoot><tr><td><input id="ndName" placeholder="ПІБ нового водія" style="width:140px"></td>
-            <td colspan="3"></td><td class="act" onclick="addDriverSet()" title="Додати">➕</td></tr></tfoot>
+            <td colspan="4"></td><td class="act" onclick="addDriverSet()" title="Додати">➕</td></tr></tfoot>
         </table>
+        <small style="color:#888;display:block;margin:4px 0 12px">графік — постійний робочий час водія
+        (типово 09:00–16:00, жовта рамка = інший); пріоритет розрахунку:
+        вікно на дату → графік водія → рамка «Час роботи депо»</small>
         <h4>Авто</h4>
         <table><thead><tr><th>Назва</th><th>Код 1С авто</th><th>Водій</th><th></th></tr></thead>
           <tbody id="setVehRows"></tbody>
@@ -592,10 +617,12 @@ async function loadSetDrivers() {
 
 function renderSetDA() {
   const dd = n => n ? new Date(n).toLocaleDateString('uk-UA', {day:'2-digit',month:'2-digit'}) : '';
+  const ns = d => String(d.shift_start||'').slice(0,5) !== '09:00' || String(d.shift_end||'').slice(0,5) !== '16:00';   // v41: нетиповий графік
   $('setDrvRows').innerHTML = setDrivers.map(d => `<tr data-did="${d.id}">
     <td><input class="sdn" value="${d.name}" style="width:140px"></td>
     <td><input class="sdp" value="${d.phone||''}" placeholder="—" style="width:110px"></td>
     <td><input class="sdc" value="${d.code_1c||''}" placeholder="—" style="width:95px" title="Код водія в 1С (ФизическиеЛица)"></td>
+    <td style="white-space:nowrap"><input type="time" class="sds" value="${String(d.shift_start||'09:00').slice(0,5)}" style="width:76px${ns(d)?';border:1.5px solid #D8A230;font-weight:700':''}">–<input type="time" class="sde" value="${String(d.shift_end||'16:00').slice(0,5)}" style="width:76px${ns(d)?';border:1.5px solid #D8A230;font-weight:700':''}"></td>
     <td>${d.token_created
         ? `<span class="tok-ok">✓ від ${dd(d.token_created)}</span>`
         : `<span class="tok-no">немає токена</span>`}
@@ -619,7 +646,8 @@ async function saveDriverSet(el, did) {
   const r = await fetch(`/api/drivers/${did}`, {method:'PATCH',
     headers:{'Content-Type':'application/json'},
     body: JSON.stringify({ name: tr.querySelector('.sdn').value,
-      phone: tr.querySelector('.sdp').value, code_1c: tr.querySelector('.sdc').value })});
+      phone: tr.querySelector('.sdp').value, code_1c: tr.querySelector('.sdc').value,
+      shift_start: tr.querySelector('.sds').value, shift_end: tr.querySelector('.sde').value })});
   if (!r.ok) { st('Помилка збереження водія'); return; }
   st('Водія збережено');
   await loadSetDrivers(); await loadVehicles(true); renderSetDA();
@@ -862,13 +890,42 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 });
 
-async function addRoute() {   // п.4
+async function addRoute() {   // п.4 · v41: спершу питаємо час роботи маршруту
   if (!curProject()) return st('Немає проекту');
+  const vid = +$('addVehSel').value;
+  const v = vehicles.find(x => x.id === vid);
+  $('addRtVeh').textContent = v ? `${v.name} · ${v.driver_name || 'без водія'}` : '#' + vid;
+  let wf = '', wt = '', src = 'часу роботи депо';    // пріоритет: вікно на дату → графік водія → депо
+  try {
+    const dw = await (await fetch(`/api/day-windows?plan_date=${$('planDate').value}`)).json();
+    const w = dw.find(x => x.vehicle_id === vid);
+    if (w && (w.work_from || w.work_to)) {
+      wf = String(w.work_from || '').slice(0,5); wt = String(w.work_to || '').slice(0,5);
+      src = 'вікна машини на дату';
+    }
+    if ((!wf || !wt) && v && v.driver_id) {
+      const dr = (await (await fetch('/api/drivers')).json()).find(x => x.id === v.driver_id);
+      if (dr && (dr.shift_start || dr.shift_end)) {
+        wf = wf || String(dr.shift_start || '').slice(0,5);
+        wt = wt || String(dr.shift_end || '').slice(0,5);
+        if (src === 'часу роботи депо') src = 'графіка водія';
+      }
+    }
+  } catch(e) {}
+  $('addRtFrom').value = wf || $('depDepart').value || '09:00';
+  $('addRtTo').value   = wt || $('depReturn').value || '16:00';
+  $('addRtHint').textContent = 'підставлено з ' + src + ' — можна змінити';
+  addRtDlg.showModal();
+}
+
+async function addRouteGo() {                      // v41
   const r = await fetch('/api/routes', {method:'POST', headers:{'Content-Type':'application/json'},
     body: JSON.stringify({plan_date: $('planDate').value, project_id: curProject(),
                           vehicle_id: +$('addVehSel').value,
-                          depot_depart: $('depDepart').value})});
+                          depot_depart: $('addRtFrom').value || '09:00',
+                          depot_return: $('addRtTo').value || '16:00'})});
   if (!r.ok) { st('Помилка: '+(await r.json()).detail); return; }
+  addRtDlg.close();
   loadAll();
 }
 

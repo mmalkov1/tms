@@ -29,8 +29,18 @@
   .tabs a.on { background:#fff; color:var(--navy); font-weight:700; box-shadow:0 1px 4px rgba(0,0,0,.25); }
   #relBtn { background:#fff; color:var(--navy); font-weight:800; box-shadow:var(--sh-1); }
   #relBtn.rel { background:var(--green); color:#fff; }
+  #gearBtn { width:36px; height:36px; padding:0; display:inline-flex; align-items:center; justify-content:center;
+             background:transparent; color:#fff; border:1.5px solid rgba(246,244,245,.32); border-radius:10px;
+             box-shadow:none; transition:background .15s,border-color .15s,box-shadow .15s; }
+  #gearBtn:hover { background:rgba(246,244,245,.10); border-color:#fff; box-shadow:0 1px 3px rgba(0,20,50,.18); }
+  #gearBtn:focus-visible { outline:none; border-color:#fff; box-shadow:0 0 0 3px rgba(255,255,255,.22); }
+  #gearBtn svg { width:20px; height:20px; }
   /* налаштування */
+  #setDlg { width:760px; height:640px; min-width:560px; min-height:420px; max-width:calc(100vw - 32px);
+            max-height:calc(100vh - 32px); resize:both; }
   #setDlg .dlg-body { display:flex; padding:0; min-height:420px; }
+  #setDlg[open] { display:flex; flex-direction:column; }
+  #setDlg .dlg-body { flex:1; min-height:0; max-height:none; }
   #setSide { width:178px; background:var(--cream); flex:none; padding:10px 8px; display:flex; flex-direction:column; gap:2px; }
   #setSide div { padding:9px 12px; font-size:13px; font-weight:600; color:var(--blue); cursor:pointer; border-radius:9px; }
   #setSide div.on { background:var(--navy); color:#fff; font-weight:700; box-shadow:0 2px 8px rgba(0,53,107,.3); }
@@ -194,10 +204,10 @@
     </svg>
     <span id="bellCnt" style="display:none;position:absolute;top:-4px;right:-4px;background:var(--red);color:#fff;font-size:10px;font-weight:800;border-radius:8px;padding:1px 5px;min-width:16px"></span>
   </button>
-  <button id="gearBtn" onclick="openSettings()" title="Налаштування" style="background:transparent;padding:2px 6px">
-    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="1.8" stroke-linecap="round">
-      <path d="M12 2.5l1.2 2.6 2.8-.6 1 2.7 2.7 1-.6 2.8 2.6 1.2-2.6 1.2.6 2.8-2.7 1-1 2.7-2.8-.6L12 21.5l-1.2-2.6-2.8.6-1-2.7-2.7-1 .6-2.8L2.3 12l2.6-1.2-.6-2.8 2.7-1 1-2.7 2.8.6z"/>
-      <circle cx="12" cy="12" r="3.2" stroke="#E8A33D" stroke-width="2.2"/>
+  <button id="gearBtn" onclick="openSettings()" title="Налаштування" aria-label="Відкрити налаштування">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <circle cx="12" cy="12" r="3"/>
+      <path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06-2.83 2.83-.06-.06A1.7 1.7 0 0 0 15 19.4a1.7 1.7 0 0 0-1 .6 1.7 1.7 0 0 0-.4 1.1V21h-4v-.09A1.7 1.7 0 0 0 8.6 19.4a1.7 1.7 0 0 0-1.88.34l-.06.06-2.83-2.83.06-.06A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-.6-1 1.7 1.7 0 0 0-1.1-.4H3v-4h.09A1.7 1.7 0 0 0 4.6 8.6a1.7 1.7 0 0 0-.34-1.88l-.06-.06 2.83-2.83.06.06A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-.6 1.7 1.7 0 0 0 .4-1.1V3h4v.09A1.7 1.7 0 0 0 15.4 4.6a1.7 1.7 0 0 0 1.88-.34l.06-.06 2.83 2.83-.06.06A1.7 1.7 0 0 0 19.4 9c.14.37.35.7.6 1 .3.28.68.42 1.1.4h.09v4h-.09c-.42-.02-.8.12-1.1.4-.25.3-.46.63-.6 1z"/>
     </svg>
   </button>
 </header>
@@ -620,11 +630,38 @@ async function rowActions(el, vid) {
 
 // ================== НАЛАШТУВАННЯ ==================
 let setDrivers = [], setReasons = [], frKind = 'delivery';
+const SET_DLG_SIZE_KEY = 'tms.settingsDialogSize.v1';
+
+function restoreSettingsSize() {
+  let saved;
+  try { saved = JSON.parse(localStorage.getItem(SET_DLG_SIZE_KEY)); } catch(e) { return; }
+  if (!saved || !Number.isFinite(saved.width) || !Number.isFinite(saved.height)) return;
+  const dlg = $('setDlg');
+  dlg.style.width = Math.min(Math.max(saved.width, 560), window.innerWidth - 32) + 'px';
+  dlg.style.height = Math.min(Math.max(saved.height, 420), window.innerHeight - 32) + 'px';
+}
+
+function saveSettingsSize() {
+  const r = $('setDlg').getBoundingClientRect();
+  localStorage.setItem(SET_DLG_SIZE_KEY, JSON.stringify({width:Math.round(r.width), height:Math.round(r.height)}));
+}
+
+const settingsSizeObserver = new ResizeObserver(() => {
+  if ($('setDlg').open) saveSettingsSize();
+});
+settingsSizeObserver.observe($('setDlg'));
+window.addEventListener('resize', () => {
+  if (!$('setDlg').open) return;
+  const r = $('setDlg').getBoundingClientRect();
+  $('setDlg').style.width = Math.min(r.width, window.innerWidth - 32) + 'px';
+  $('setDlg').style.height = Math.min(r.height, window.innerHeight - 32) + 'px';
+});
 
 async function openSettings() {
   await Promise.all([loadVehicles(true), loadSetDrivers(), loadReasons()]);
   renderSetDA(); renderReasons();
   $('tokQr').classList.remove('show');
+  restoreSettingsSize();
   $('setDlg').showModal();
 }
 

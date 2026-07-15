@@ -305,6 +305,8 @@ function askDone(v) {
   $('askDlg').style.display = 'none';
   if (_askResolve) { _askResolve(v); _askResolve = null; }
 }
+const fmtDist = m => m >= 950 ? (m/1000).toFixed(1).replace('.', ',') + ' км'
+                              : Math.max(50, Math.round(m/50)*50) + ' м';   // v44
 
 async function unfail(ids) {
   if (!await askYes('Повернути точку в роботу?')) return;
@@ -419,19 +421,27 @@ function switchRoute(id) {                        // v39
   load();
 }
 
-async function routeEvent(ev) {
+async function routeEvent(ev, force = false) {
   const Q = {depot_arrive:'Позначити прибуття на склад?',
              start:'Позначити виїзд на маршрут?', finish:'Завершити маршрут?'};
   const OK = {depot_arrive:'Прибуття на склад зафіксовано',
               start:'Гарної дороги!', finish:'Рейс завершено'};
-  if (!await askYes(Q[ev])) return;
+  if (!force && !await askYes(Q[ev])) return;
   const last = (typeof lastPos !== 'undefined' && lastPos) ? lastPos
              : (typeof queue !== 'undefined' && queue.length ? queue[queue.length-1] : null);
   const r = await fetch(`/api/driver/${TOKEN}/route/${trip.route.id}/event`, {
     method:'POST', headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({event:ev, lat:last?.lat ?? null, lon:last?.lon ?? null})});
-  if (r.ok) { toast(OK[ev]); load(); }
-  else toast('Не вдалося, спробуй ще раз');
+    body: JSON.stringify({event:ev, force, lat:last?.lat ?? null, lon:last?.lon ?? null})});
+  if (!r.ok) { toast('Не вдалося, спробуй ще раз'); return; }
+  const j = await r.json().catch(() => ({}));
+  if (j.confirm_required) {                            // v44: далеко від складу
+    const T = {depot_arrive:`Ти за ${fmtDist(j.dist_m)} від складу. Точно прибув на склад?`,
+               start:`Ти за ${fmtDist(j.dist_m)} від складу. Точно виїжджаєш на маршрут?`,
+               finish:`Ти за ${fmtDist(j.dist_m)} від складу. Точно завершити маршрут тут?`};
+    if (await askYes(T[ev])) return routeEvent(ev, true);
+    return;
+  }
+  toast(OK[ev]); load();
 }
 
 let selRoute = null;                               // v39: обраний рейс (кілька на день)
@@ -563,13 +573,20 @@ function render() {
   else d.innerHTML = `<span class="badge ok">за графіком</span>`;
 }
 
-async function mark(ids, event) {
+async function mark(ids, event, force = false) {
   const pos = lastPos ? {lat:lastPos.lat, lon:lastPos.lon} : {};
   for (const id of ids.split(',')) {
     try {
       const r = await fetch(`/api/driver/${TOKEN}/stops/${id}/event`, {method:'POST',
-        headers:{'Content-Type':'application/json'}, body: JSON.stringify({event, ...pos})});
+        headers:{'Content-Type':'application/json'}, body: JSON.stringify({event, force, ...pos})});
       if (!r.ok) { toast('Помилка — спробуй ще раз'); return; }
+      const j = await r.json().catch(() => ({}));
+      if (j.confirm_required) {                        // v44: натискання здалеку
+        const what = event === 'arrive' ? 'Точно прибув?' : 'Точно поїхав звідти?';
+        if (await askYes(`Ти за ${fmtDist(j.dist_m)} від точки. ${what}`))
+          return mark(ids, event, true);
+        return;
+      }
     } catch(e) { toast('Немає зв’язку — спробуй ще раз'); return; }
   }
   toast(event==='arrive' ? 'Прибуття зафіксовано' : 'Виїзд зафіксовано');

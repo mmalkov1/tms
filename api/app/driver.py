@@ -85,6 +85,11 @@ async def init(db_pool):
         "ALTER TABLE stop_events ADD COLUMN IF NOT EXISTS reason_id INT REFERENCES fail_reasons(id)")
     await pool.execute(
         "ALTER TABLE stop_events ADD COLUMN IF NOT EXISTS reason_text TEXT")
+    # v44 (migrate_021): відстань водія до цілі в момент натискання (аудит)
+    await pool.execute(
+        "ALTER TABLE stop_events ADD COLUMN IF NOT EXISTS dist_m INT")
+    await pool.execute(
+        "ALTER TABLE route_events ADD COLUMN IF NOT EXISTS dist_m INT")
     # v38 (migrate_017): «прибув на склад» перед виїздом
     await pool.execute(
         "ALTER TABLE route_events DROP CONSTRAINT IF EXISTS route_events_event_check")
@@ -252,12 +257,38 @@ async def driver_trip(token: str, d: date | None = Query(None),
     }
 
 
+GEO_CONFIRM_M = 500      # v44: поріг м'якого підтвердження натискань здалеку
+
+
+async def _press_distance_m(driver_id: int, tgt_lat, tgt_lon,
+                            body_lat=None, body_lon=None):
+    """Відстань водія до цілі в момент натискання, м.
+
+    Джерело позиції: найсвіжіша GPS-точка водія (≤3 хв, точність ≤100 м) —
+    в APK web-геолокація вимкнена і координати в тілі запиту порожні;
+    fallback — координати з запиту (web-режим). Немає ні того, ні того — None.
+    """
+    if tgt_lat is None or tgt_lon is None:
+        return None
+    fix = await pool.fetchrow("""
+        SELECT lat, lon FROM gps_points
+        WHERE driver_id = $1 AND ts > now() - interval '3 minutes'
+          AND (accuracy_m IS NULL OR accuracy_m <= 100)
+        ORDER BY ts DESC LIMIT 1""", driver_id)
+    lat = fix["lat"] if fix else body_lat
+    lon = fix["lon"] if fix else body_lon
+    if lat is None or lon is None:
+        return None
+    return int(round(_haversine_km(lat, lon, tgt_lat, tgt_lon) * 1000))
+
+
 # ---------- факты «прибув / поїхав» ----------
 
 class StopEvent(BaseModel):
     event: str                 # arrive | depart
     lat: float | None = None
     lon: float | None = None
+    force: bool = False        # v44: водій підтвердив натискання здалеку
 
 
 @router.post("/api/driver/{token}/stops/{order_id}/event")
@@ -274,12 +305,17 @@ async def stop_event(token: str, order_id: int, body: StopEvent):
         ORDER BY r.plan_date DESC, r.id DESC LIMIT 1""", order_id, drv["id"])
     if not rs:
         raise HTTPException(404, "Точка не на твоєму маршруті")
+    tgt = await pool.fetchrow("SELECT lat, lon FROM orders WHERE id=$1", order_id)  # v44
+    dist = await _press_distance_m(drv["id"], tgt["lat"] if tgt else None,
+                                   tgt["lon"] if tgt else None, body.lat, body.lon)
+    if dist is not None and dist > GEO_CONFIRM_M and not body.force:
+        return {"ok": False, "confirm_required": True, "dist_m": dist}
     # первый зафиксированный факт — истина; повторная отправка идемпотентна
     row = await pool.fetchrow("""
-        INSERT INTO stop_events (route_id, order_id, event, lat, lon)
-        VALUES ($1,$2,$3,$4,$5)
+        INSERT INTO stop_events (route_id, order_id, event, lat, lon, dist_m)
+        VALUES ($1,$2,$3,$4,$5,$6)
         ON CONFLICT (route_id, order_id, event) DO NOTHING
-        RETURNING ts""", rs["route_id"], order_id, body.event, body.lat, body.lon)
+        RETURNING ts""", rs["route_id"], order_id, body.event, body.lat, body.lon, dist)
     if row is None:
         row = await pool.fetchrow(
             "SELECT ts FROM stop_events WHERE route_id=$1 AND order_id=$2 AND event=$3",
@@ -321,11 +357,14 @@ async def stop_fail(token: str, order_id: int, body: FailIn):
     txt = (body.reason_text or "").strip() or None
     if not body.reason_id and not txt:
         raise HTTPException(400, "Вкажи причину")
+    tgt = await pool.fetchrow("SELECT lat, lon FROM orders WHERE id=$1", order_id)  # v44
+    dist = await _press_distance_m(drv["id"], tgt["lat"] if tgt else None,
+                                   tgt["lon"] if tgt else None, body.lat, body.lon)
     row = await pool.fetchrow("""
-        INSERT INTO stop_events (route_id, order_id, event, lat, lon, reason_id, reason_text)
-        VALUES ($1,$2,'fail',$3,$4,$5,$6)
+        INSERT INTO stop_events (route_id, order_id, event, lat, lon, reason_id, reason_text, dist_m)
+        VALUES ($1,$2,'fail',$3,$4,$5,$6,$7)
         ON CONFLICT (route_id, order_id, event) DO NOTHING
-        RETURNING ts""", rs["route_id"], order_id, body.lat, body.lon, body.reason_id, txt)
+        RETURNING ts""", rs["route_id"], order_id, body.lat, body.lon, body.reason_id, txt, dist)
     if row is None:
         row = await pool.fetchrow(
             "SELECT ts FROM stop_events WHERE route_id=$1 AND order_id=$2 AND event='fail'",
@@ -639,6 +678,7 @@ class RouteEventIn(BaseModel):
     event: str                     # depot_arrive | start | finish
     lat: float | None = None
     lon: float | None = None
+    force: bool = False            # v44: водій підтвердив натискання здалеку
 
 
 @router.post("/api/driver/{token}/route/{route_id}/event")
@@ -664,11 +704,16 @@ async def route_event(token: str, route_id: int, body: RouteEventIn):
             "SELECT 1 FROM route_events WHERE route_id=$1 AND event='start'", route_id)
         if not started:
             raise HTTPException(400, "Спочатку познач виїзд")
+    dep = await pool.fetchrow("SELECT lat, lon FROM depots WHERE id=1")             # v44
+    dist = await _press_distance_m(drv["id"], dep["lat"] if dep else None,
+                                   dep["lon"] if dep else None, body.lat, body.lon)
+    if dist is not None and dist > GEO_CONFIRM_M and not body.force:
+        return {"confirm_required": True, "dist_m": dist}
     # перше натискання перемагає, повторне — ігнорується
     await pool.execute("""
-        INSERT INTO route_events (route_id, driver_id, event, lat, lon)
-        VALUES ($1,$2,$3,$4,$5) ON CONFLICT (route_id, event) DO NOTHING""",
-        route_id, drv["id"], body.event, body.lat, body.lon)
+        INSERT INTO route_events (route_id, driver_id, event, lat, lon, dist_m)
+        VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT (route_id, event) DO NOTHING""",
+        route_id, drv["id"], body.event, body.lat, body.lon, dist)
     evs = await pool.fetch(
         "SELECT event, ts FROM route_events WHERE route_id=$1", route_id)
     return {e["event"]: _iso(e["ts"]) for e in evs}

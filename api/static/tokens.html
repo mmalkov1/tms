@@ -4,23 +4,28 @@
 <meta charset="utf-8">
 <title>Доступ водіїв · TMS Культтовари</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Open+Sans:wght@400;600;700;800&display=swap" rel="stylesheet">
 <style>
-  :root { --navy:#00356B; --red:#E82A2C; --cream:#EFEEEC; }
+  :root { --navy:#00356B; --blue:#285E96; --red:#E82A2C; --red-dark:#C92123; --cream:#F3F1EF;
+          --cream-300:#E2DFDA; --text:#1D2B3A; --muted:#9A948A; }
   * { box-sizing:border-box; margin:0; }
-  body { font-family:Manrope,system-ui,sans-serif; background:var(--cream); }
-  header { background:var(--navy); color:#fff; padding:10px 16px; font-size:15px; font-weight:700; }
+  body { font-family:'Open Sans',system-ui,sans-serif; color:var(--text); background:var(--cream); }
+  header { background:var(--navy); color:#fff; padding:12px 16px; font-size:15px; font-weight:700; }
   #list { max-width:760px; margin:16px auto; padding:0 12px; }
-  .card { background:#fff; border-radius:8px; padding:14px 16px; margin-bottom:12px;
-          box-shadow:0 1px 3px rgba(0,0,0,.1); display:flex; gap:16px; align-items:center; flex-wrap:wrap; }
+  .card { background:#fff; border-radius:13px; padding:16px 18px; margin-bottom:12px;
+          box-shadow:0 2px 12px rgba(0,53,107,.08); display:flex; gap:16px; align-items:center; flex-wrap:wrap; }
   .info { flex:1; min-width:220px; }
   .name { font-weight:800; color:var(--navy); font-size:15px; }
-  .veh { font-size:13px; color:#666; margin-top:2px; }
+  .veh { font-size:13px; color:var(--muted); margin-top:2px; }
   .link { font-size:12px; margin-top:8px; word-break:break-all; }
   .link a { color:var(--navy); }
-  button { padding:9px 14px; border:none; border-radius:6px; background:var(--red);
-           color:#fff; font:inherit; font-size:13px; font-weight:700; cursor:pointer; }
+  button { padding:10px 16px; border:none; border-radius:10px; background:var(--red);
+           color:#fff; font:inherit; font-size:13px; font-weight:700; cursor:pointer; box-shadow:0 2px 8px rgba(232,42,44,.3); }
+  button:hover { background:var(--red-dark); }
   .qr { width:110px; height:110px; }
-  .hint { max-width:760px; margin:0 auto 20px; padding:0 12px; font-size:12px; color:#666; }
+  .hint { max-width:760px; margin:0 auto 20px; padding:0 12px; font-size:12px; color:var(--muted); }
 </style>
 </head>
 <body>

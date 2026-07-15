@@ -4,57 +4,62 @@
 <meta charset="utf-8">
 <title>Рейс · TMS Культтовари</title>
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Open+Sans:wght@400;600;700;800&display=swap" rel="stylesheet">
 <style>
-  :root { --navy:#00356B; --red:#E82A2C; --cream:#EFEEEC; --green:#2E8B57; --amber:#B8860B; }
+  :root { --navy:#00356B; --blue:#285E96; --red:#E82A2C; --red-dark:#C92123; --cream:#F3F1EF;
+          --cream-50:#F6F4F5; --cream-200:#EFEEEC; --cream-300:#E2DFDA; --cream-400:#D7D4D0;
+          --text:#1D2B3A; --muted:#9A948A; --green:#2E8B57; --amber:#B8860B; }
   * { box-sizing:border-box; margin:0; -webkit-tap-highlight-color:transparent; }
-  body { font-family:Manrope,system-ui,sans-serif; background:var(--cream); padding-bottom:40px; }
+  body { font-family:'Open Sans',system-ui,sans-serif; color:var(--text); background:var(--cream); padding-bottom:40px; }
   header { background:var(--navy); color:#fff; padding:12px 14px; position:sticky; top:0; z-index:5; }
   header .veh { font-size:17px; font-weight:800; }
-  header .sub { font-size:13px; opacity:.85; margin-top:2px; display:flex; gap:10px; flex-wrap:wrap; }
-  .badge { display:inline-block; padding:2px 8px; border-radius:10px; font-size:12px; font-weight:700; }
+  header .sub { font-size:13px; opacity:.9; margin-top:2px; display:flex; gap:10px; flex-wrap:wrap; }
+  .badge { display:inline-block; padding:2px 10px; border-radius:999px; font-size:12px; font-weight:700; }
   .badge.late { background:var(--red); } .badge.ok { background:var(--green); }
-  .gps { font-size:11px; opacity:.85; display:inline-flex; align-items:center; gap:5px; }
+  .gps { font-size:11px; opacity:.9; display:inline-flex; align-items:center; gap:5px; }
   .gps .bars { display:inline-flex; align-items:flex-end; gap:2px; height:13px; }
   .gps .bars i { width:3px; background:rgba(255,255,255,.35); border-radius:1px; }
   .gps .bars i.on { background:#fff; }
   .gps .bars i:nth-child(1){height:4px} .gps .bars i:nth-child(2){height:7px}
   .gps .bars i:nth-child(3){height:10px} .gps .bars i:nth-child(4){height:13px}
-  .stop { background:#fff; margin:10px 10px 0; border-radius:10px; padding:12px;
-          border-left:6px solid var(--navy); box-shadow:0 1px 3px rgba(0,0,0,.08); }
+  .stop { background:#fff; margin:10px 10px 0; border-radius:12px; padding:12px;
+          border-left:5px solid var(--navy); box-shadow:0 2px 10px rgba(0,53,107,.08); }
   .stop.done { opacity:.55; border-left-color:var(--green); }
-  .stop.current { border-left-color:var(--red); box-shadow:0 2px 8px rgba(232,42,44,.25); }
+  .stop.current { border-left-color:var(--red); box-shadow:0 3px 12px rgba(232,42,44,.22); }
   .num { display:inline-flex; min-width:26px; height:26px; align-items:center; justify-content:center;
          background:var(--navy); color:#fff; border-radius:50%; font-weight:800; font-size:13px; margin-right:8px; }
-  .kind { display:inline-block; font-size:11px; font-weight:800; padding:2px 8px; border-radius:6px;
+  .kind { display:inline-block; font-size:11px; font-weight:800; padding:2px 10px; border-radius:999px;
           margin-left:6px; vertical-align:middle; }
-  .kind.del { background:#E8F1FF; color:var(--navy); }
+  .kind.del { background:rgba(40,94,150,.12); color:var(--blue); }
   .kind.pick { background:#FFF3D6; color:var(--amber); }
   .client { font-size:16px; font-weight:800; color:var(--navy); }
   .addr { font-size:14px; margin:4px 0 6px; }
   .cmt { font-size:13.5px; font-weight:600; color:#7a4a00; background:#FFF3D6;
-         border-left:3px solid var(--amber); border-radius:6px; padding:7px 10px; margin:6px 0; }
-  .meta { font-size:13px; color:#555; display:flex; gap:12px; flex-wrap:wrap; }
-  .meta b { color:#222; }
+         border-left:3px solid var(--amber); border-radius:8px; padding:7px 10px; margin:6px 0; }
+  .meta { font-size:13px; color:#4d5866; display:flex; gap:12px; flex-wrap:wrap; }
+  .meta b { color:var(--text); }
   .fact { font-size:13px; color:var(--green); font-weight:700; margin-top:4px; }
   .btns { display:flex; gap:8px; margin-top:10px; }
   .actions { display:flex; gap:8px; margin-top:10px; }
   .b-nav { flex:0 0 54px; min-height:48px; display:flex; align-items:center; justify-content:center;
-           border:none; border-radius:9px; background:var(--navy); cursor:pointer; padding:0; }
+           border:none; border-radius:11px; background:var(--navy); cursor:pointer; padding:0; box-shadow:0 2px 8px rgba(0,53,107,.3); }
   .b-nav svg { width:26px; height:26px; }
   .b-nav.open { box-shadow:0 0 0 3px rgba(0,53,107,.25); }
   .b-call { flex:1 1 auto; min-width:0; min-height:48px; display:flex; align-items:center;
-            justify-content:center; gap:7px; border-radius:9px; font-size:15px; font-weight:800;
+            justify-content:center; gap:7px; border-radius:11px; font-size:15px; font-weight:800;
             text-decoration:none; }
-  .b-call.on  { background:var(--green); color:#fff; }
-  .b-call.off { background:#EEE; color:#999; pointer-events:none; }
+  .b-call.on  { background:var(--green); color:#fff; box-shadow:0 2px 8px rgba(46,139,87,.3); }
+  .b-call.off { background:var(--cream-200); color:var(--muted); pointer-events:none; }
   .b-map { flex:1; min-height:48px; display:flex; align-items:center; justify-content:center;
-           border-radius:9px; font-size:14px; font-weight:800; text-decoration:none; }
+           border-radius:11px; font-size:14px; font-weight:800; text-decoration:none; }
   .b-map.gmap { background:#1A73E8; color:#fff; } .b-map.waze { background:#33CCFF; color:#062B45; }
-  button { flex:1; min-height:54px; border:none; border-radius:9px; font:inherit;
+  button { flex:1; min-height:54px; border:none; border-radius:11px; font:inherit;
            font-size:16px; font-weight:800; color:#fff; cursor:pointer; }
   button:disabled { opacity:.4; }
-  .b-arr { background:var(--red); }
-  .b-dep { background:var(--green); }
+  .b-arr { background:var(--red); box-shadow:0 2px 8px rgba(232,42,44,.3); }
+  .b-dep { background:var(--green); box-shadow:0 2px 8px rgba(46,139,87,.3); }
   .b-fail { flex:0 0 54px; background:#fff; color:var(--red); border:2px solid var(--red);
             font-size:20px; }
   .stop.failed { opacity:.75; border-left-color:var(--amber); }
@@ -63,53 +68,55 @@
   .fail-line { font-size:13px; color:var(--amber); font-weight:800; margin-top:6px;
                display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
   .b-unfail { flex:0 0 auto; min-height:30px; padding:0 12px; font-size:12px;
-              background:#fff; color:var(--navy); border:1.5px solid var(--navy); border-radius:7px; }
-  #failDlg, #cardDlg { position:fixed; inset:0; background:rgba(0,0,0,.45); display:none;
+              background:#fff; color:var(--navy); border:1.5px solid var(--navy); border-radius:8px; }
+  #failDlg, #cardDlg { position:fixed; inset:0; background:rgba(0,20,50,.5); display:none;
              align-items:flex-end; justify-content:center; z-index:20; }
   #failDlg.open, #cardDlg.open { display:flex; }
-  #failBox, #cardBox { background:#fff; border-radius:14px 14px 0 0; padding:16px; width:100%;
+  #failBox, #cardBox { background:#fff; border-radius:16px 16px 0 0; padding:16px; width:100%;
              max-width:480px; max-height:80vh; overflow:auto; }
   #failBox h3, #cardBox h3 { font-size:15px; font-weight:800; color:var(--navy); margin-bottom:2px; }
-  #failBox .sub, #cardBox .sub { font-size:13px; color:#666; margin-bottom:12px; }
+  #failBox .sub, #cardBox .sub { font-size:13px; color:var(--muted); margin-bottom:12px; }
   .card-row { display:flex; gap:9px; align-items:flex-start; font-size:14px; margin-bottom:9px; }
   .card-row svg { flex:none; margin-top:1px; }
   .b-issue { display:flex; width:100%; min-height:48px; align-items:center; justify-content:center;
-             gap:8px; border:2px solid #D85A30; border-radius:9px; background:#fff; color:#993C1D;
+             gap:8px; border:2px solid #D85A30; border-radius:11px; background:#fff; color:#993C1D;
              font:inherit; font-size:14px; font-weight:800; margin-top:10px; }
-  #issueTxt { width:100%; box-sizing:border-box; min-height:56px; border:1.5px solid #ccc;
-              border-radius:9px; padding:10px 12px; font:inherit; font-size:14px; margin-bottom:10px; }
-  .r-btn { display:block; width:100%; min-height:50px; border:none; border-radius:9px;
+  #issueTxt { width:100%; box-sizing:border-box; min-height:56px; border:1.5px solid var(--cream-300);
+              border-radius:11px; padding:10px 12px; font:inherit; font-size:14px; margin-bottom:10px; }
+  #issueTxt:focus { outline:none; border-color:var(--navy); box-shadow:0 0 0 3px rgba(0,53,107,.12); }
+  .r-btn { display:block; width:100%; min-height:50px; border:none; border-radius:11px;
            background:var(--cream); color:var(--navy); font:inherit; font-size:15px;
            font-weight:800; margin-bottom:8px; }
-  .r-btn.sel { background:var(--navy); color:#fff; }
-  #failTxt { width:100%; box-sizing:border-box; min-height:44px; border:1.5px solid #ccc;
-             border-radius:9px; padding:10px 12px; font:inherit; font-size:14px;
+  .r-btn.sel { background:var(--navy); color:#fff; box-shadow:0 2px 8px rgba(0,53,107,.3); }
+  #failTxt { width:100%; box-sizing:border-box; min-height:44px; border:1.5px solid var(--cream-300);
+             border-radius:11px; padding:10px 12px; font:inherit; font-size:14px;
              margin-bottom:10px; display:none; }
+  #failTxt:focus { outline:none; border-color:var(--navy); box-shadow:0 0 0 3px rgba(0,53,107,.12); }
   #failActions { display:flex; gap:8px; }
-  #failActions .cancel { background:#ccc; color:#333; }
-  #failActions .confirm { background:var(--red); }
-  .empty { text-align:center; padding:50px 20px; color:#666; font-size:15px; }
-  #toast { position:fixed; bottom:14px; left:50%; transform:translateX(-50%); background:#222; color:#fff;
-           padding:10px 18px; border-radius:8px; font-size:14px; display:none; z-index:10; }
-  .daytabs { display:flex; gap:6px; margin-top:9px; }
-  .dt { flex:1; padding:6px; border:none; border-radius:6px; font:inherit; font-size:13px;
-        background:rgba(255,255,255,.15); color:#cfd9e6; }
-  .dt.on { background:#fff; color:var(--navy); font-weight:700; }
-  .cnt { background:var(--red); color:#fff; border-radius:8px; padding:0 6px; font-size:11px; font-weight:800; }
+  #failActions .cancel { background:var(--cream-300); color:var(--text); }
+  #failActions .confirm { background:var(--red); box-shadow:0 2px 8px rgba(232,42,44,.3); }
+  .empty { text-align:center; padding:50px 20px; color:var(--muted); font-size:15px; }
+  #toast { position:fixed; bottom:14px; left:50%; transform:translateX(-50%); background:var(--navy); color:#fff;
+           padding:11px 18px; border-radius:11px; font-size:14px; display:none; z-index:10; box-shadow:0 4px 18px rgba(0,20,50,.35); }
+  .daytabs { display:flex; gap:4px; margin-top:9px; background:rgba(246,244,245,.12); border-radius:11px; padding:3px; }
+  .dt { flex:1; padding:6px; border:none; border-radius:8px; font:inherit; font-size:13px;
+        background:transparent; color:#E8EDF4; font-weight:600; }
+  .dt.on { background:#fff; color:var(--navy); font-weight:700; box-shadow:0 1px 4px rgba(0,0,0,.25); }
+  .cnt { background:var(--red); color:#fff; border-radius:999px; padding:0 6px; font-size:11px; font-weight:800; }
   .b-route { display:block; width:calc(100% - 20px); margin:10px; padding:14px; border:none;
-             border-radius:10px; font:inherit; font-size:15px; font-weight:800; }
-  .b-route.go { background:var(--green); color:#fff; }
+             border-radius:12px; font:inherit; font-size:15px; font-weight:800; }
+  .b-route.go { background:var(--green); color:#fff; box-shadow:0 2px 8px rgba(46,139,87,.3); }
   .b-route.fin { background:#fff; color:var(--navy); border:2px solid var(--navy); }
   .rswitch { display:flex; gap:7px; margin:10px 10px 0; }
-  .rsw { flex:1; border:1.5px solid #bbb; border-radius:9px; background:#fff; color:#555;
+  .rsw { flex:1; border:1.5px solid var(--cream-400); border-radius:10px; background:#fff; color:#4d5866;
          font:inherit; font-size:12px; padding:7px 4px; text-align:center; line-height:1.35; }
   .rsw.on { border-color:var(--navy); background:var(--navy); color:#fff; }
   .rsw.fin { border-color:#1D9E75; color:#085041; background:#E1F5EE; }
   .rsw.fin.on { border-color:var(--navy); outline:2px solid var(--navy); }
-  .onroute { background:#E1F5EE; border:1px solid #1D9E75; color:#085041; border-radius:8px;
+  .onroute { background:#E1F5EE; border:1px solid #1D9E75; color:#085041; border-radius:10px;
              padding:8px 11px; margin:10px 10px 0; font-size:13px; }
-  .routedone { background:#fff; border-radius:8px; padding:10px 12px; margin:10px 10px 0; font-size:13px; }
-  .preview-note { background:#FFF7E6; border:1px solid #EF9F27; border-radius:8px;
+  .routedone { background:#fff; border-radius:10px; padding:10px 12px; margin:10px 10px 0; font-size:13px; box-shadow:0 1px 3px rgba(0,53,107,.08); }
+  .preview-note { background:#FFF7E6; border:1px solid #EF9F27; border-radius:10px;
                   padding:8px 11px; font-size:12px; color:#854F0B; margin:10px 10px 0; }
 </style>
 </head>
@@ -132,7 +139,7 @@
 <div id="ptr" style="height:0;overflow:hidden;text-align:center;font-size:13px;color:#5F5E5A;background:#E7E5E0;line-height:44px;transition:height .15s"></div>
 <div id="tmap" style="display:none;position:fixed;inset:0;z-index:70;background:#EFEEEC">
   <div id="tmapCanvas" style="position:absolute;inset:0"></div>
-  <button onclick="closeTomorrowMap()" style="position:absolute;top:12px;right:12px;z-index:1000;border:none;border-radius:8px;background:#00356B;color:#fff;font:800 14px Manrope,sans-serif;padding:10px 16px;box-shadow:0 1px 5px rgba(0,0,0,.3)"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" style="vertical-align:-2px"><path d="M5 5l14 14M19 5L5 19"/></svg> Закрити</button>
+  <button onclick="closeTomorrowMap()" style="position:absolute;top:12px;right:12px;z-index:1000;border:none;border-radius:8px;background:#00356B;color:#fff;font:800 14px 'Open Sans',sans-serif;padding:10px 16px;box-shadow:0 1px 5px rgba(0,0,0,.3)"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" style="vertical-align:-2px"><path d="M5 5l14 14M19 5L5 19"/></svg> Закрити</button>
 </div>
 <div id="askDlg" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:60;align-items:center;justify-content:center;padding:24px">
   <div style="background:#fff;border-radius:12px;padding:18px;max-width:320px;width:100%">
@@ -666,7 +673,7 @@ async function openTomorrowMap() {
     if (g.lat == null) return;
     pts.push([g.lat, g.lon]);
     L.marker([g.lat, g.lon], {icon: L.divIcon({className:'',
-      html:`<div style="width:26px;height:26px;border-radius:50%;background:#00356B;color:#fff;display:flex;align-items:center;justify-content:center;font:800 13px Manrope,sans-serif;box-shadow:0 0 0 2px #fff">${gi+1}</div>`,
+      html:`<div style="width:26px;height:26px;border-radius:50%;background:#00356B;color:#fff;display:flex;align-items:center;justify-content:center;font:800 13px 'Open Sans',sans-serif;box-shadow:0 0 0 2px #fff">${gi+1}</div>`,
       iconSize:[26,26], iconAnchor:[13,13]})})
      .bindTooltip(`${gi+1}. ${g.client}<br>${g.items[0].eta||''}`)
      .addTo(_tMap);
@@ -674,7 +681,7 @@ async function openTomorrowMap() {
   if (nextTrip.depot && nextTrip.depot.lat != null) {
     pts.push([nextTrip.depot.lat, nextTrip.depot.lon]);
     L.marker([nextTrip.depot.lat, nextTrip.depot.lon], {icon: L.divIcon({className:'',
-      html:`<div style="width:26px;height:26px;border-radius:6px;background:#E82A2C;color:#fff;display:flex;align-items:center;justify-content:center;font:800 13px Manrope,sans-serif;box-shadow:0 0 0 2px #fff">С</div>`,
+      html:`<div style="width:26px;height:26px;border-radius:6px;background:#E82A2C;color:#fff;display:flex;align-items:center;justify-content:center;font:800 13px 'Open Sans',sans-serif;box-shadow:0 0 0 2px #fff">С</div>`,
       iconSize:[26,26], iconAnchor:[13,13]})})
      .bindTooltip(nextTrip.depot.name || 'Склад').addTo(_tMap);
   }

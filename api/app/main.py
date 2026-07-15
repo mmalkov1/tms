@@ -1000,7 +1000,8 @@ async def get_routes(project_id: int = Query(...)):
     for r in rr:
         ss = await pool.fetch("""
             SELECT s.seq, s.eta, s.etd, o.id order_id, o.client, o.kind, o.address, o.address_extra, o.seats,
-                   o.lat, o.lon, o.tw_from, o.tw_to, o.weight_kg, o.volume_m3, o.service_min
+                   o.lat, o.lon, o.tw_from, o.tw_to, o.break_from, o.break_to,
+                   o.weight_kg, o.volume_m3, o.service_min
             FROM route_stops s JOIN orders o ON o.id=s.order_id
             WHERE s.route_id=$1 ORDER BY s.seq""", r["id"])
         stops_list = [dict(x) for x in ss]

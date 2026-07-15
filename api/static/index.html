@@ -5,149 +5,173 @@
 <title>TMS · Культтовари Глобал</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Open+Sans:wght@400;600;700;800&display=swap" rel="stylesheet">
 <style>
-  :root { --navy:#00356B; --red:#E82A2C; --cream:#EFEEEC; }
+  :root { --navy:#00356B; --navy-dark:#012F5E; --blue:#285E96; --red:#E82A2C; --red-dark:#C92123;
+          --cream:#F3F1EF; --cream-50:#F6F4F5; --cream-200:#EFEEEC; --cream-300:#E2DFDA; --cream-400:#D7D4D0;
+          --text:#1D2B3A; --muted:#9A948A; --green:#2E8B57; --amber:#B8860B;
+          --sh-1:0 1px 3px rgba(0,53,107,.08); --sh-2:0 2px 12px rgba(0,53,107,.08); }
   * { box-sizing:border-box; margin:0; }
-  body { font-family:Manrope,system-ui,sans-serif; background:var(--cream); height:100vh; display:flex; flex-direction:column; }
-  header { background:var(--navy); color:#fff; padding:8px 16px; display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
-  header h1 { font-size:15px; margin-right:6px; }
-  header input, header select, header button { padding:5px 9px; border:none; border-radius:4px; font:inherit; font-size:13px; }
-  header button { background:var(--red); color:#fff; cursor:pointer; font-weight:600; }
-  header button.sec { background:#fff; color:var(--navy); }
-  .tabs { display:flex; border:1px solid rgba(255,255,255,.4); border-radius:6px; overflow:hidden; font-size:13px; }
-  .tabs a { padding:5px 12px; color:#cfd9e6; text-decoration:none; cursor:pointer; }
-  .tabs a.on { background:#fff; color:var(--navy); font-weight:700; }
-  #relBtn { background:#fff; color:var(--navy); font-weight:800; }
-  #relBtn.rel { background:#2E8B57; color:#fff; }
+  body { font-family:'Open Sans',system-ui,sans-serif; color:var(--text); background:var(--cream); height:100vh; display:flex; flex-direction:column; }
+  header { background:var(--navy); color:#fff; padding:9px 16px; display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
+  header h1 { font-size:15px; font-weight:800; margin-right:6px; }
+  header input, header select, header button { padding:7px 11px; border:none; border-radius:9px; font:inherit; font-size:13px; }
+  header input, header select { background:rgba(246,244,245,.14); color:#fff; border:1.5px solid rgba(246,244,245,.28); }
+  header input::-webkit-calendar-picker-indicator { filter:invert(1); }
+  header select option { color:var(--text); background:#fff; }
+  header button { background:var(--red); color:#fff; cursor:pointer; font-weight:700; box-shadow:0 2px 8px rgba(232,42,44,.3); }
+  header button:hover { background:var(--red-dark); }
+  header button.sec { background:#fff; color:var(--navy); box-shadow:var(--sh-1); }
+  .tabs { display:flex; gap:4px; background:rgba(246,244,245,.12); border-radius:11px; padding:3px; font-size:13px; }
+  .tabs a { padding:5px 14px; border-radius:8px; color:#E8EDF4; text-decoration:none; cursor:pointer; font-weight:600; }
+  .tabs a.on { background:#fff; color:var(--navy); font-weight:700; box-shadow:0 1px 4px rgba(0,0,0,.25); }
+  #relBtn { background:#fff; color:var(--navy); font-weight:800; box-shadow:var(--sh-1); }
+  #relBtn.rel { background:var(--green); color:#fff; }
   /* налаштування */
   #setDlg .dlg-body { display:flex; padding:0; min-height:420px; }
-  #setSide { width:170px; background:var(--cream); flex:none; padding:8px 0; }
-  #setSide div { padding:9px 14px; font-size:13px; font-weight:600; color:var(--navy); cursor:pointer; }
-  #setSide div.on { background:var(--navy); color:#fff; font-weight:800; }
-  #setSide div.dis { color:#aaa; cursor:default; }
-  #setMain { flex:1; padding:14px 16px; overflow:auto; }
+  #setSide { width:178px; background:var(--cream); flex:none; padding:10px 8px; display:flex; flex-direction:column; gap:2px; }
+  #setSide div { padding:9px 12px; font-size:13px; font-weight:600; color:var(--blue); cursor:pointer; border-radius:9px; }
+  #setSide div.on { background:var(--navy); color:#fff; font-weight:700; box-shadow:0 2px 8px rgba(0,53,107,.3); }
+  #setSide div.dis { color:var(--muted); cursor:default; }
+  #setMain { flex:1; padding:16px 18px; overflow:auto; }
   #setMain h4 { font-size:13px; font-weight:800; color:var(--navy); margin:0 0 8px; }
   #setMain table { width:100%; border-collapse:collapse; font-size:12px; margin-bottom:16px; }
-  #setMain th { background:var(--cream); color:var(--navy); padding:5px 8px; text-align:left; }
-  #setMain td { padding:4px 8px; border-bottom:1px solid #eee; }
-  #setMain td input { padding:3px 6px; border:1px solid #ddd; border-radius:4px; font:inherit; font-size:12px; }
-  #setMain td select { padding:3px 6px; border:1px solid #ddd; border-radius:4px; font:inherit; font-size:12px; }
-  #setMain .act { cursor:pointer; }
-  .tok-ok { color:#2E8B57; font-weight:700; white-space:nowrap; }
-  .tok-no { color:#B8860B; font-weight:700; white-space:nowrap; }
-  .tok-btn { border:none; background:var(--navy); color:#fff; border-radius:4px; padding:3px 8px; font-size:11px; font-weight:700; cursor:pointer; }
-  #tokQr { display:none; background:var(--cream); border-radius:8px; padding:12px; margin-bottom:14px;
-           gap:14px; align-items:center; }
+  #setMain th { background:var(--cream); color:var(--navy); padding:6px 8px; text-align:left; }
+  #setMain th:first-child { border-radius:8px 0 0 8px; } #setMain th:last-child { border-radius:0 8px 8px 0; }
+  #setMain td { padding:5px 8px; border-bottom:1px solid var(--cream-200); }
+  #setMain td input, #setMain td select { padding:5px 8px; border:1.5px solid var(--cream-300); border-radius:8px; font:inherit; font-size:12px; background:#fff; }
+  #setMain td input:focus, #setMain td select:focus { outline:none; border-color:var(--navy); box-shadow:0 0 0 3px rgba(0,53,107,.12); }
+  #setMain .act { cursor:pointer; color:var(--blue); }
+  #setMain .act:hover { color:var(--navy); }
+  #setMain .act.danger, #setMain .act:has(svg.tr) { color:var(--muted); }
+  .tok-ok { color:var(--green); font-weight:700; white-space:nowrap; }
+  .tok-no { color:var(--amber); font-weight:700; white-space:nowrap; }
+  .tok-btn { border:none; background:var(--navy); color:#fff; border-radius:7px; padding:4px 9px; font-size:11px; font-weight:700; cursor:pointer; box-shadow:0 2px 6px rgba(0,53,107,.25); }
+  #tokQr { display:none; background:var(--cream); border-radius:12px; padding:12px; margin-bottom:14px; gap:14px; align-items:center; }
   #tokQr.show { display:flex; }
   #tokQr a { font-size:12px; word-break:break-all; color:var(--navy); }
-  .rtab { display:inline-block; padding:4px 12px; border-radius:6px; font-size:12px; font-weight:700;
-          cursor:pointer; background:var(--cream); color:var(--navy); margin-right:6px; }
-  .rtab.on { background:var(--navy); color:#fff; }
-  .rrow { display:flex; justify-content:space-between; align-items:center; padding:6px 4px;
-          border-bottom:1px solid #eee; font-size:13px; }
-  .rrow button { border:none; background:var(--cream); border-radius:4px; padding:2px 8px;
-                 font-size:11px; cursor:pointer; }
+  .rtab { display:inline-block; padding:5px 14px; border-radius:999px; font-size:12px; font-weight:700;
+          cursor:pointer; background:#fff; color:var(--blue); margin-right:6px; border:1.5px solid var(--cream-300); }
+  .rtab.on { background:var(--navy); color:#fff; border-color:var(--navy); box-shadow:0 2px 8px rgba(0,53,107,.3); }
+  .rrow { display:flex; justify-content:space-between; align-items:center; padding:7px 4px;
+          border-bottom:1px solid var(--cream-200); font-size:13px; }
+  .rrow button { border:1px solid var(--cream-300); background:#fff; border-radius:7px; padding:3px 10px;
+                 font-size:11px; cursor:pointer; color:var(--blue); font-weight:600; }
+  .rrow button:hover { border-color:var(--navy); color:var(--navy); }
   header label { font-size:12px; display:flex; align-items:center; gap:4px; }
-  dialog { border:none; border-radius:8px; padding:0; max-width:760px; width:92%; box-shadow:0 8px 40px rgba(0,0,0,.3); margin:auto; resize:both; overflow:auto; max-height:92vh; }
+  dialog { border:none; border-radius:14px; padding:0; max-width:760px; width:92%; box-shadow:0 12px 48px rgba(0,20,50,.35); margin:auto; resize:both; overflow:auto; max-height:92vh; background:#fff; color:var(--text); font-family:'Open Sans',system-ui,sans-serif; }
   .dlg-head { cursor:move; user-select:none; }
-  /* затемнение + спиннер на время расчета */
-  #busy { position:fixed; inset:0; background:rgba(15,25,45,.5); display:none; z-index:2000;
+  #busy { position:fixed; inset:0; background:rgba(0,27,54,.55); display:none; z-index:2000;
           align-items:center; justify-content:center; flex-direction:column; gap:14px; color:#fff; font-weight:700; font-size:15px; }
   #busy.on { display:flex; }
   #busy .spin { width:48px; height:48px; border:5px solid rgba(255,255,255,.25); border-top-color:#fff; border-radius:50%; animation:bspin 1s linear infinite; }
   @keyframes bspin { to { transform:rotate(360deg); } }
   dialog::backdrop { background:rgba(0,20,50,.45); }
-  .dlg-head { background:var(--navy); color:#fff; padding:10px 16px; font-weight:700; display:flex; justify-content:space-between; }
+  .dlg-head { background:var(--navy); color:#fff; padding:11px 16px; font-weight:700; display:flex; justify-content:space-between; }
   .dlg-head span:last-child { cursor:pointer; }
-  .dlg-body { padding:12px 16px; max-height:70vh; overflow:auto; }
+  .dlg-body { padding:14px 16px; max-height:70vh; overflow:auto; }
   .vtable { width:100%; border-collapse:collapse; font-size:12.5px; }
-  .vtable th, .vtable td { border:1px solid #ddd; padding:5px 7px; }
+  .vtable th, .vtable td { border:1px solid var(--cream-300); padding:6px 8px; }
   .vtable th { background:var(--cream); color:var(--navy); }
-  .vtable input[type=text], .vtable input[type=number] { width:100%; border:1px solid #ccc; border-radius:3px; padding:3px 5px; font:inherit; }
+  .vtable input[type=text], .vtable input[type=number] { width:100%; border:1.5px solid var(--cream-300); border-radius:7px; padding:4px 6px; font:inherit; }
+  .vtable input:focus { outline:none; border-color:var(--navy); box-shadow:0 0 0 3px rgba(0,53,107,.12); }
   .vtable input[type=number] { width:76px; }
-  .vtable .act { cursor:pointer; text-align:center; }
-  .dlg-foot { padding:10px 16px; border-top:1px solid #eee; display:flex; justify-content:flex-end; gap:8px; }
-  .dlg-foot button { padding:6px 14px; border:none; border-radius:4px; cursor:pointer; font-weight:600; }
-  .dlg-foot .pri { background:var(--red); color:#fff; }
+  .vtable .act { cursor:pointer; text-align:center; color:var(--blue); }
+  .vtable .act:hover { color:var(--navy); }
+  .dlg-foot { padding:11px 16px; border-top:1px solid var(--cream-200); display:flex; justify-content:flex-end; gap:8px; }
+  .dlg-foot button { padding:8px 16px; border:1.5px solid var(--cream-300); background:#fff; color:var(--navy); border-radius:9px; cursor:pointer; font-weight:600; font:inherit; font-size:13px; }
+  .dlg-foot button:hover { border-color:var(--navy); }
+  .dlg-foot .pri { background:var(--red); color:#fff; border-color:transparent; box-shadow:0 2px 8px rgba(232,42,44,.3); }
+  .dlg-foot .pri:hover { background:var(--red-dark); border-color:transparent; }
   #layout { flex:1; display:grid; grid-template-columns: 1fr 6px 560px; min-height:0; }
   #map { height:100%; }
-  #panel { overflow:auto; padding:10px; background:#fff; }
-  .route-card { border:1px solid #ddd; border-radius:6px; margin-bottom:10px; overflow:hidden; }
-  .route-head { color:#fff; padding:6px 10px; font-size:12.5px; font-weight:700; display:flex; justify-content:space-between; gap:6px; flex-wrap:wrap; }
-  .route-head .over { background:#fff; color:var(--red); border-radius:3px; padding:0 5px; }
-  .route-head .del { cursor:pointer; opacity:.8; }
-  .stops { min-height:26px; padding:4px; }
-  .stop { background:#f7f7f7; border:1px solid #e2e2e2; border-radius:4px; padding:3px 6px; margin:3px 0;
+  #panel { overflow:auto; padding:10px; background:var(--cream); }
+  .route-card { background:#fff; border-radius:13px; margin-bottom:10px; overflow:hidden; box-shadow:var(--sh-2); border-left:5px solid var(--rc, var(--cream-400)); }
+  .route-head { color:var(--navy); padding:8px 12px; font-size:12.5px; font-weight:700; display:flex; justify-content:space-between; gap:6px; flex-wrap:wrap; cursor:pointer; user-select:none; }
+  .route-head > span:last-child { color:var(--blue); font-weight:600; }
+  .route-head .over { background:var(--red); color:#fff; border-radius:999px; padding:0 9px; font-weight:800; }
+  .route-head .del { cursor:pointer; color:var(--blue); opacity:.8; }
+  .route-head .del:hover { opacity:1; color:var(--red); }
+  .rdot { display:inline-block; width:10px; height:10px; border-radius:50%; margin-right:7px; }
+  .stops { min-height:26px; padding:5px; }
+  .stop { background:var(--cream-50); border:1px solid var(--cream-200); border-radius:9px; padding:4px 7px; margin:4px 0;
           font-size:11.5px; cursor:grab; display:grid; grid-template-columns: 20px 16px 1fr 70px 76px 120px 78px 14px; gap:5px; align-items:center; }
-  .stop.depot { background:#e8edf5; cursor:default; grid-template-columns: 20px 16px 1fr 76px 120px 78px; font-weight:600; }
+  .stop.depot { background:#E9EFF7; border-color:#DCE5F1; cursor:default; grid-template-columns: 20px 16px 1fr 76px 120px 78px; font-weight:600; }
   .stop .cli { min-width:0; }
-  .stop .cli .addr { color:#888; font-size:10px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-  .stop .cli .addr2 { display:none; color:#7b3fa0; font-size:10px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .stop .cli .addr { color:var(--muted); font-size:10px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .stop .cli .addr2 { display:none; color:var(--blue); font-size:10px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   #panel.wide .stop .cli .addr2 { display:block; }
-  .stop .eta small { color:#888; font-weight:400; }
-  .route-head { cursor:pointer; user-select:none; }
+  .stop .eta small { color:var(--muted); font-weight:400; }
   .route-card.folded .stops { display:none; }
-  #dragbar { cursor:col-resize; background:#c9d3e0; width:6px; }
+  #dragbar { cursor:col-resize; background:var(--cream-400); width:6px; }
   #dragbar:hover { background:var(--red); }
-  .stop.nogeo { border-color:var(--red); background:#fdf0f0; }
+  .stop.nogeo { border-color:var(--red); background:#FDF1F1; }
   .stop.nogeo .cli::before { content:'⚠ без гео · '; color:var(--red); font-weight:700; }
-  .stop .edit { cursor:pointer; color:#888; } .stop .edit:hover { color:var(--navy); }
-  #editDlg .dlg-body label { display:block; margin:8px 0 2px; font-size:12px; color:var(--navy); font-weight:600; }
-  #editDlg input { width:100%; padding:6px; border:1px solid #ccc; border-radius:4px; font:inherit; }
+  .stop .edit { cursor:pointer; color:var(--muted); } .stop .edit:hover { color:var(--navy); }
+  #editDlg .dlg-body label { display:block; margin:8px 0 3px; font-size:12px; color:var(--navy); font-weight:600; }
+  #editDlg input { width:100%; padding:8px 10px; border:1.5px solid var(--cream-300); border-radius:9px; font:inherit; }
+  #editDlg input:focus { outline:none; border-color:var(--navy); box-shadow:0 0 0 3px rgba(0,53,107,.12); }
   .pulse { animation: pulse 0.8s ease-out 3; }
   @keyframes pulse { 0%{transform:scale(1);opacity:1} 100%{transform:scale(3);opacity:0} }
   .stop .cum { color:var(--navy); font-weight:700; white-space:nowrap; text-align:right; }
   .stop:active { cursor:grabbing; }
   .stop .seq { font-weight:700; color:var(--navy); }
-  .stop .kind { font-size:10px; padding:0 4px; border-radius:3px; color:#fff; text-align:center; }
-  .kind.pickup { background:#B8860B; } .kind.delivery { background:#2E8B57; } .kind.depot { background:var(--navy); }
-  .stop .wv { color:#555; white-space:nowrap; text-align:right; }
-  .stop .eta { color:#333; white-space:nowrap; font-weight:600; }
-  .stop .rm { cursor:pointer; color:#bbb; font-weight:700; } .stop .rm:hover { color:var(--red); }
-  /* п.6: шкала 08:00-18:00 */
-  .tl { position:relative; height:14px; background:#F0EFEB; border-radius:3px; overflow:hidden; }
-  .tl .win { position:absolute; top:0; bottom:0; background:#CFE3F5; border-radius:2px; }
-  .tl .brk { position:absolute; top:0; bottom:0;
-             background:repeating-linear-gradient(135deg,#E8B4A0 0 4px,#F7E0D6 4px 8px); }
-  .tl .visit { position:absolute; top:2px; bottom:2px; background:var(--navy); min-width:4px; border-radius:2px; }
-  .stop .lk { cursor:pointer; color:#B9B7B0; }
+  .stop .kind { font-size:10px; padding:0 4px; border-radius:5px; color:#fff; text-align:center; }
+  .kind.pickup { background:var(--amber); } .kind.delivery { background:var(--green); } .kind.depot { background:var(--navy); }
+  .stop .wv { color:#5c6672; white-space:nowrap; text-align:right; }
+  .stop .eta { color:var(--text); white-space:nowrap; font-weight:600; }
+  .stop .rm { cursor:pointer; color:var(--cream-400); font-weight:700; } .stop .rm:hover { color:var(--red); }
+  .stop .lk { cursor:pointer; color:var(--cream-400); }
   .stop .lk:hover { color:var(--navy); }
-  .stop.locked { background:#F5F4F0; }
+  .stop.locked { background:var(--cream-200); }
   .stop.locked .cli, .stop.locked .wv { opacity:.55; }
   .stop.locked .lk { color:#993C1D; }
+  /* шкала 08:00-18:00 */
+  .tl { position:relative; height:13px; background:var(--cream-200); border-radius:99px; overflow:hidden; }
+  .tl .win { position:absolute; top:0; bottom:0; background:#CFE3F5; }
+  .tl .brk { position:absolute; top:0; bottom:0;
+             background:repeating-linear-gradient(135deg,#E8B4A0 0 4px,#F7E0D6 4px 8px); }
+  .tl .visit { position:absolute; top:2.5px; bottom:2.5px; background:var(--navy); min-width:5px; border-radius:99px; }
   .tl:hover::after { content:attr(data-tip); position:absolute; bottom:calc(100% + 5px); left:50%; transform:translateX(-50%);
-    background:var(--navy); color:#fff; padding:4px 9px; border-radius:5px; font-size:11px; font-weight:600;
-    white-space:nowrap; z-index:60; box-shadow:0 2px 8px rgba(0,0,0,.3); pointer-events:none; }
-  .sortable-ghost { opacity:.4; background:#dbe6f5; }
-  #unassigned .route-head { background:#777; }
+    background:var(--navy); color:#fff; padding:5px 10px; border-radius:8px; font-size:11px; font-weight:600;
+    white-space:nowrap; z-index:60; box-shadow:0 4px 14px rgba(0,20,50,.3); pointer-events:none; }
+  .sortable-ghost { opacity:.4; background:#DBE6F5; }
+  #unassigned { border-left-color:var(--cream-400); }
+  #unassigned .route-head { color:var(--blue); }
   #status { font-size:13px; color:#fff; opacity:.9; }
   #addRouteBar { display:flex; gap:6px; margin-bottom:10px; }
-  #addRouteBar select { flex:1; padding:5px; }
-  #addRouteBar button { background:var(--navy); color:#fff; border:none; border-radius:4px; padding:5px 12px; cursor:pointer; }
-  /* верхнє меню → модалка «Планування» */
+  #addRouteBar select { flex:1; padding:7px 10px; border:1.5px solid var(--cream-300); border-radius:9px; background:#fff; font:inherit; font-size:12.5px; color:var(--text); box-shadow:var(--sh-1); }
+  #addRouteBar button { background:var(--navy); color:#fff; border:none; border-radius:9px; padding:7px 14px; cursor:pointer; font:inherit; font-size:12.5px; font-weight:600; box-shadow:0 2px 8px rgba(0,53,107,.3); }
+  #addRouteBar button:hover { background:var(--blue); }
+  /* модалка «Планування» */
   #planDlg { max-width:640px; }
-  #planDlg .dlg-body { display:flex; flex-direction:column; gap:14px; }
-  .tool-block { border:1px solid #e3e3e3; border-radius:8px; padding:12px 14px; background:#fafbfc; }
-  .tool-block h3 { font-size:12px; text-transform:uppercase; letter-spacing:.04em; color:var(--navy); margin-bottom:10px; font-weight:800; }
+  #planDlg .dlg-body { display:flex; flex-direction:column; gap:12px; background:var(--cream); }
+  .tool-block { border:none; border-radius:12px; padding:13px 15px; background:#fff; box-shadow:var(--sh-1); }
+  .tool-block h3 { font-size:12px; text-transform:uppercase; letter-spacing:.05em; color:var(--navy); margin-bottom:10px; font-weight:800; }
   .tool-row { display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
-  .tool-row label { font-size:12px; display:flex; align-items:center; gap:5px; color:#333; }
-  .tool-row input[type=time], .tool-row input[type=number], .tool-row select { padding:5px 8px; border:1px solid #ccc; border-radius:5px; font:inherit; font-size:13px; }
-  #planDlg button { padding:7px 13px; border:none; border-radius:6px; font:inherit; font-size:13px; font-weight:600; cursor:pointer; }
-  #planDlg button.sec { background:#fff; color:var(--navy); border:1px solid var(--navy); }
-  #planDlg button.pri { background:var(--red); color:#fff; }
-  #planDlg button.zones { background:#7b3fa0; color:#fff; }
-  /* сучасна зона завантаження файлу */
-  .dropzone { border:2px dashed #b7c2d4; border-radius:10px; padding:22px 16px; text-align:center; cursor:pointer;
-              background:#fff; transition:border-color .15s, background .15s; color:#5b6b82; }
-  .dropzone:hover, .dropzone.drag { border-color:var(--red); background:#fef6f6; color:var(--navy); }
-  .dropzone .dz-icon { font-size:26px; line-height:1; margin-bottom:6px; }
+  .tool-row label { font-size:12px; display:flex; align-items:center; gap:5px; color:var(--text); }
+  .tool-row input[type=time], .tool-row input[type=number], .tool-row select { padding:6px 9px; border:1.5px solid var(--cream-300); border-radius:8px; font:inherit; font-size:13px; background:#fff; }
+  .tool-row input:focus, .tool-row select:focus { outline:none; border-color:var(--navy); box-shadow:0 0 0 3px rgba(0,53,107,.12); }
+  #planDlg button { padding:8px 15px; border:none; border-radius:9px; font:inherit; font-size:13px; font-weight:600; cursor:pointer; }
+  #planDlg button.sec { background:#fff; color:var(--navy); border:1.5px solid var(--cream-300); }
+  #planDlg button.sec:hover { border-color:var(--navy); }
+  #planDlg button.pri { background:var(--red); color:#fff; box-shadow:0 2px 8px rgba(232,42,44,.3); }
+  #planDlg button.pri:hover { background:var(--red-dark); }
+  #planDlg button.zones { background:var(--blue); color:#fff; box-shadow:0 2px 8px rgba(40,94,150,.3); }
+  /* зона завантаження файлу */
+  .dropzone { border:2px dashed var(--cream-400); border-radius:12px; padding:22px 16px; text-align:center; cursor:pointer;
+              background:var(--cream-50); transition:border-color .15s, background .15s; color:var(--muted); }
+  .dropzone:hover, .dropzone.drag { border-color:var(--red); background:#FDF4F4; color:var(--navy); }
+  .dropzone .dz-icon { line-height:1; margin-bottom:7px; }
   .dropzone .dz-main { font-size:13.5px; font-weight:700; color:var(--navy); }
   .dropzone .dz-sub { font-size:11.5px; margin-top:3px; }
-  .dropzone.has-file { border-style:solid; border-color:#2E8B57; background:#f2fbf5; color:#2E8B57; }
-  /* маркери на карті — м'які краплі/кружечки з тінню, без білого квадрата */
+  .dropzone.has-file { border-style:solid; border-color:var(--green); background:#F1FAF5; color:var(--green); }
+  /* маркери на карті */
   .pin-wrap { width:28px; height:28px; }
   .pin { width:28px; height:28px; background:var(--pc); color:#fff; display:flex; align-items:center; justify-content:center;
-         font:700 11px/1 Manrope,system-ui,sans-serif; box-shadow:0 2px 5px rgba(0,0,0,.35); border:1.5px solid rgba(255,255,255,.9); }
+         font:700 11px/1 'Open Sans',system-ui,sans-serif; box-shadow:0 2px 5px rgba(0,0,0,.35); border:1.5px solid rgba(255,255,255,.9); }
   .pin span { display:block; }
   .buf-dot { filter:drop-shadow(0 1px 2px rgba(0,0,0,.35)); }
 </style>
@@ -200,7 +224,7 @@
     <div class="tool-block">
       <h3>Заявки</h3>
       <div class="dropzone" id="dropzone" onclick="$('file').click()">
-        <div class="dz-icon">📄</div>
+        <div class="dz-icon"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#285E96" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M8 13h8"/><path d="M8 17h5"/></svg></div>
         <div class="dz-main" id="dzMain">Перетягніть XLSX-файл або натисніть, щоб обрати</div>
         <div class="dz-sub">Заявки з 1С · формат .xlsx</div>
       </div>
@@ -233,7 +257,7 @@
         </select></label>
         <label>Хвилин <input type="number" id="svcMin" value="15" min="1" max="120" style="width:60px" title="Вручну / для клієнтів без історії"></label>
         <input type="file" id="statsFile" accept=".xlsx,.csv" style="display:none" onchange="uploadStats()">
-        <button class="sec" onclick="$('statsFile').click()" title="Оновити нормативи простою з Cars_report">↻ Нормативи з Cars_report</button>
+        <button class="sec" onclick="$('statsFile').click()" title="Оновити нормативи простою з Cars_report"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 3v6h-6"/></svg> Нормативи з Cars_report</button>
       </div>
     </div>
 
@@ -310,7 +334,7 @@
       <thead><tr><th>Розрах.</th><th>Назва</th><th>Водій</th><th title="Пріоритет 1: разове вікно машини саме на обрану дату. Пусто = графік водія (Налаштування → Водії), обрізаний часом роботи депо">Вікно на дату</th><th>Вантаж., кг</th><th>Об'єм, м³</th><th>Геозони</th><th title="Може забирати товар (pickup)">Забір</th><th title="Може доставляти товар (delivery)">Дост.</th><th>Найм</th><th></th></tr></thead>
       <tbody id="vehRows"></tbody>
       <tfoot><tr><td colspan="10" style="font-size:11px;color:#888;padding:8px">
-        додати авто, змінити назву, водія чи коди 1С — у Налаштуваннях (⚙ праворуч зверху)</td></tr></tfoot>
+        додати авто, змінити назву, водія чи коди 1С — у Налаштуваннях (кнопка з шестернею праворуч зверху)</td></tr></tfoot>
     </table>
   </div>
   <div class="dlg-foot">
@@ -337,7 +361,7 @@
         <table><thead><tr><th>ПІБ</th><th>Телефон</th><th>Код 1С</th><th title="Пріоритет 2: постійний графік водія. Діє, коли немає вікна на дату; обрізається часом роботи депо">Графік</th><th>Кабінет водія</th><th></th></tr></thead>
           <tbody id="setDrvRows"></tbody>
           <tfoot><tr><td><input id="ndName" placeholder="ПІБ нового водія" style="width:140px"></td>
-            <td colspan="4"></td><td class="act" onclick="addDriverSet()" title="Додати">➕</td></tr></tfoot>
+            <td colspan="4"></td><td class="act" onclick="addDriverSet()" title="Додати"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14"/><path d="M5 12h14"/></svg></td></tr></tfoot>
         </table>
         <small style="color:#888;display:block;margin:4px 0 12px">графік — постійний робочий час водія
         (типово 09:00–16:00, жовта рамка = інший); пріоритет розрахунку:
@@ -347,7 +371,7 @@
           <tbody id="setVehRows"></tbody>
           <tfoot><tr><td><input id="nsvName" placeholder="Газель АА1234ВВ" style="width:150px"></td>
             <td></td><td><select id="nsvDrv"></select></td>
-            <td class="act" onclick="addVehicleSet()" title="Додати">➕</td></tr></tfoot>
+            <td class="act" onclick="addVehicleSet()" title="Додати"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14"/><path d="M5 12h14"/></svg></td></tr></tfoot>
         </table>
         <small style="color:#888">вага/обʼєм, найм, забір/доставка, геозони — в модалці «Планування → Авто» (оперативні параметри)</small>
       </div>
@@ -566,7 +590,7 @@ async function openVehDlg() {
     <td style="text-align:center"><input type="checkbox" class="vpk" ${v.can_pickup!==false?'checked':''}></td>
     <td style="text-align:center"><input type="checkbox" class="vdl" ${v.can_delivery!==false?'checked':''}></td>
     <td style="text-align:center"><input type="checkbox" class="vhired" ${v.is_hired?'checked':''}></td>
-    <td class="act" onclick="rowActions(this, ${v.id})" title="Зберегти зміни">💾</td>
+    <td class="act" onclick="rowActions(this, ${v.id})" title="Зберегти зміни"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><path d="M17 21v-8H7v8"/><path d="M7 3v5h8"/></svg></td>
   </tr>`).join('');
   $('vehDlg').showModal();
 }
@@ -627,16 +651,16 @@ function renderSetDA() {
         ? `<span class="tok-ok">✓ від ${dd(d.token_created)}</span>`
         : `<span class="tok-no">немає токена</span>`}
       <button class="tok-btn" onclick="genTokenSet(${d.id}, ${!!d.token_created})">QR</button></td>
-    <td class="act" onclick="saveDriverSet(this, ${d.id})" title="Зберегти">💾</td>
-    <td class="act" onclick="deactDriverSet(${d.id}, '${d.name.replace(/'/g,"\\'")}')" title="Деактивувати">🗑</td>
+    <td class="act" onclick="saveDriverSet(this, ${d.id})" title="Зберегти"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><path d="M17 21v-8H7v8"/><path d="M7 3v5h8"/></svg></td>
+    <td class="act" onclick="deactDriverSet(${d.id}, '${d.name.replace(/'/g,"\\'")}')" title="Деактивувати"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/></svg></td>
   </tr>`).join('');
 
   $('setVehRows').innerHTML = vehicles.map(v => `<tr data-vid="${v.id}">
     <td><input class="svn" value="${v.name}" style="width:150px"></td>
     <td><input class="svc" value="${v.code_1c||''}" placeholder="—" style="width:95px" title="Код авто в 1С (Kult_Транспорт)"></td>
     <td><select class="svd">${drvOptions(v.driver_id)}</select></td>
-    <td class="act" onclick="saveVehicleSet(this, ${v.id})" title="Зберегти">💾</td>
-    <td class="act" onclick="deactVehicleSet(${v.id}, '${v.name.replace(/'/g,"\\'")}')" title="Деактивувати">🗑</td>
+    <td class="act" onclick="saveVehicleSet(this, ${v.id})" title="Зберегти"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><path d="M17 21v-8H7v8"/><path d="M7 3v5h8"/></svg></td>
+    <td class="act" onclick="deactVehicleSet(${v.id}, '${v.name.replace(/'/g,"\\'")}')" title="Деактивувати"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/></svg></td>
   </tr>`).join('');
   $('nsvDrv').innerHTML = drvOptions(null);
 }
@@ -972,13 +996,13 @@ function stopEl(o, seq, eta, etd, routeId) {
   if (o.lat) { d.dataset.lat = o.lat; d.dataset.lon = o.lon; }
   d.innerHTML = `<span class="seq">${seq ?? ''}</span>
     <span class="kind ${o.kind}">${o.kind==='pickup'?'З':'Д'}</span>
-    <span class="cli">${o.client}<div class="addr" title="${o.address||''}">${o.address||''}</div>${o.seats?`<div class="addr2">📦 ${o.seats} міс.</div>`:''}${o.address_extra?`<div class="addr2" title="${o.address_extra}">📝 ${o.address_extra}</div>`:''}</span>
+    <span class="cli">${o.client}<div class="addr" title="${o.address||''}">${o.address||''}</div>${o.seats?`<div class="addr2"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" style="vertical-align:-1px"><path d="M21 8l-9-5-9 5v8l9 5 9-5V8z"/><path d="M3 8l9 5 9-5"/><path d="M12 13v8"/></svg> ${o.seats} міс.</div>`:''}${o.address_extra?`<div class="addr2" title="${o.address_extra}"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-1px"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></svg> ${o.address_extra}</div>`:''}</span>
     <span class="wv">${sign}${(+o.weight_kg||0).toFixed(1)} кг<br>${sign}${(+o.volume_m3||0).toFixed(3)} м³</span>
     <span class="cum">${o.cum_weight!=null ? o.cum_weight.toFixed(1)+' кг<br>'+o.cum_volume.toFixed(2)+' м³' : ''}</span>
     ${tlHtml(o.tw_from, o.tw_to, eta, etd, o.break_from, o.break_to)}
     <span class="eta">${eta ? hm(eta)+'&rarr;'+hm(etd)+'<br><small>простій '+dwellMin(eta,etd)+' хв</small>' : ''}</span>
     ${routeId ? `<span class="rm" onclick="removeStop(${routeId},${o.order_id})" title="У буфер">✕</span>`
-              : `<span class="lk" title="${o.is_locked?'Замкнено: авторозрахунок пропустить':'Замкнути від авторозподілу'}">${o.is_locked?`<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>`:`<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 9.9-1"/></svg>`}</span><span class="edit" title="Редагувати адресу/координати">✎</span>`}`;
+              : `<span class="lk" title="${o.is_locked?'Замкнено: авторозрахунок пропустить':'Замкнути від авторозподілу'}">${o.is_locked?`<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>`:`<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 9.9-1"/></svg>`}</span><span class="edit" title="Редагувати адресу/координати"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></svg></span>`}`;
   if (o.is_locked && !routeId) d.classList.add('locked');
   d.addEventListener('dblclick', () => highlightPoint(d.dataset.lat, d.dataset.lon, o.client));
   const ed = d.querySelector('.edit');
@@ -1114,8 +1138,9 @@ async function loadAll() {
     const vPct = r.max_volume_m3 ? (r.peak_volume / r.max_volume_m3 * 100) : 0;
     const over = wPct > 100 || vPct > 100;
     const card = document.createElement('div'); card.className = 'route-card';
-    card.innerHTML = `<div class="route-head" style="background:${r.color}">
-      <span>${r.vehicle_name} · ${r.driver_name||'—'} ${r.stops.length?'<span class="del" title="Розвернути маршрут у зворотному порядку" onclick="event.stopPropagation();reverseRoute('+r.id+')">⇆</span>':'<span class="del" onclick="delRoute('+r.id+')">🗑</span>'}</span>
+    card.style.setProperty('--rc', r.color);
+    card.innerHTML = `<div class="route-head">
+      <span><i class="rdot" style="background:${r.color}"></i>${r.vehicle_name} · ${r.driver_name||'—'} ${r.stops.length?'<span class="del" title="Розвернути маршрут у зворотному порядку" onclick="event.stopPropagation();reverseRoute('+r.id+')"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><path d="M17 3l4 4-4 4"/><path d="M21 7H7"/><path d="M7 21l-4-4 4-4"/><path d="M3 17h14"/></svg></span>':'<span class="del" onclick="delRoute('+r.id+')"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/></svg></span>'}</span>
       <span>${uniq} точок (${r.stops.length} завд.) · ${r.total_km||0} км ·
       пік ${(+r.peak_weight||0).toFixed(0)}/${(+r.max_weight_kg||0).toFixed(0)} кг (${wPct.toFixed(0)}%) ·
       ${(+r.peak_volume||0).toFixed(2)}/${(+r.max_volume_m3||0).toFixed(1)} м³ (${vPct.toFixed(0)}%)
@@ -1175,7 +1200,7 @@ async function loadAll() {
   loadAll();
 })();
 </script>
-<div id="issuesPanel" style="display:none;position:fixed;top:46px;right:52px;z-index:80;width:340px;max-height:70vh;overflow:auto;background:#fff;border-radius:10px;box-shadow:0 4px 18px rgba(0,0,0,.25)">
+<div id="issuesPanel" style="display:none;position:fixed;top:54px;right:52px;z-index:80;width:340px;max-height:70vh;overflow:auto;background:#fff;border-radius:10px;box-shadow:0 4px 18px rgba(0,0,0,.25)">
   <div style="padding:9px 13px;border-bottom:1px solid #eee;font-size:12px;font-weight:700;color:var(--navy)">Повідомлення від водіїв</div>
   <div id="issuesList"></div>
 </div>

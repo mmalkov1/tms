@@ -293,6 +293,14 @@ class StopEvent(BaseModel):
     force: bool = False        # v44: водій підтвердив натискання здалеку
 
 
+async def _require_route_started(route_id: int):
+    """Не дозволяти факти точки до фактичного виїзду зі складу."""
+    started = await pool.fetchval(
+        "SELECT 1 FROM route_events WHERE route_id=$1 AND event='start'", route_id)
+    if not started:
+        raise HTTPException(409, "Спочатку натисни «Виїхав на маршрут»")
+
+
 @router.post("/api/driver/{token}/stops/{order_id}/event")
 async def stop_event(token: str, order_id: int, body: StopEvent):
     if body.event not in ("arrive", "depart"):
@@ -307,6 +315,7 @@ async def stop_event(token: str, order_id: int, body: StopEvent):
         ORDER BY r.plan_date DESC, r.id DESC LIMIT 1""", order_id, drv["id"])
     if not rs:
         raise HTTPException(404, "Точка не на твоєму маршруті")
+    await _require_route_started(rs["route_id"])
     tgt = await pool.fetchrow("SELECT lat, lon FROM orders WHERE id=$1", order_id)  # v44
     dist = await _press_distance_m(drv["id"], tgt["lat"] if tgt else None,
                                    tgt["lon"] if tgt else None, body.lat, body.lon)
@@ -350,6 +359,7 @@ async def stop_fail(token: str, order_id: int, body: FailIn):
     rs = await _stop_route(order_id, drv["id"])
     if not rs:
         raise HTTPException(404, "Точка не на твоєму маршруті")
+    await _require_route_started(rs["route_id"])
     reason_name = None
     if body.reason_id:
         reason_name = await pool.fetchval(
@@ -575,11 +585,34 @@ async def facts(plan_date: date = Query(...)):
         w_start, w_fin, w_min, raw_km = await _route_worklog(r["id"], driver_ids)
         track = tracks_by_route[r["id"]]
         w_km = track["km"] if track else raw_km
+        stop_times = [ts for s in stops for ts in
+                      (s["arrive_ts"], s["depart_ts"], s["fail_ts"]) if ts]
+        start_dt = datetime.fromisoformat(w_start) if w_start else None
+        finish_dt = datetime.fromisoformat(w_fin) if w_fin else None
+        bad_event_order = bool(
+            (start_dt and finish_dt and start_dt >= finish_dt)
+            or (start_dt and stop_times and min(stop_times) < start_dt)
+            or (finish_dt and stop_times and max(stop_times) > finish_dt))
+        if not w_fin:
+            gps_issue = "route_open"
+        elif bad_event_order:
+            gps_issue = "event_order"
+        elif not track:
+            gps_issue = "insufficient_gps"
+        elif not track.get("boundary_ok"):
+            gps_issue = "depot_boundary"
+        elif track["source"] != "osrm":
+            gps_issue = "partial_match"
+        else:
+            gps_issue = None
         out.append({
             "route_id": r["id"], "color": r["color"],
             "vehicle": r["vehicle_name"], "driver": r["driver_name"],
             "start_ts": w_start, "finish_ts": w_fin, "work_min": w_min, "gps_km": w_km,
             "gps_source": track["source"] if track else "gps_raw",
+            "gps_coverage": track.get("coverage", 0) if track else 0,
+            "gps_boundary_ok": track.get("boundary_ok", False) if track else False,
+            "gps_complete": gps_issue is None, "gps_issue": gps_issue,
             "plan_km": float(r["total_km"] or 0),
             "plan_depart": _hm(r["depart_time"]), "plan_return": _hm(r["return_time"]),
             "last_gps": ({"ts": _iso(last["ts"]), "lat": last["lat"], "lon": last["lon"],
@@ -614,6 +647,8 @@ async def facts_tracks(plan_date: date = Query(...)):
                     "matched": bool(track and track["source"] == "osrm"),
                     "gps_km": track["km"] if track else None,
                     "source": track["source"] if track else None,
+                    "coverage": track.get("coverage", 0) if track else 0,
+                    "boundary_ok": track.get("boundary_ok", False) if track else False,
                     "points": track["points"] if track else []})
     return out
 
@@ -703,7 +738,9 @@ async def route_event(token: str, route_id: int, body: RouteEventIn):
             "SELECT 1 FROM route_events WHERE route_id=$1 AND event='start'", route_id)
         if not started:
             raise HTTPException(400, "Спочатку познач виїзд")
-    dep = await pool.fetchrow("SELECT lat, lon FROM depots WHERE id=1")             # v44
+    dep = await pool.fetchrow("""
+        SELECT d.lat, d.lon FROM routes r JOIN depots d ON d.id=r.depot_id
+        WHERE r.id=$1""", route_id)                                                # v47
     dist = await _press_distance_m(drv["id"], dep["lat"] if dep else None,
                                    dep["lon"] if dep else None, body.lat, body.lon)
     if dist is not None and dist > GEO_CONFIRM_M and not body.force:
@@ -774,16 +811,16 @@ async def _route_gps_points(route_id: int, driver_ids: list[int]):
     evs = {e["event"]: e["ts"] for e in await pool.fetch(
         "SELECT event, ts FROM route_events WHERE route_id=$1", route_id)}
     start, fin = evs.get("start"), evs.get("finish")
+    depot = await pool.fetchrow("""
+        SELECT d.lat, d.lon FROM routes r JOIN depots d ON d.id=r.depot_id
+        WHERE r.id=$1""", route_id)
     if not start or not driver_ids:
-        return start, fin, []
+        return start, fin, [], depot
     pts = list(await pool.fetch("""
         SELECT id, ts, lat, lon, speed_kmh, accuracy_m FROM gps_points
         WHERE driver_id = ANY($1::int[]) AND ts >= $2 AND ts <= $3
           AND (accuracy_m IS NULL OR accuracy_m <= 60)
         ORDER BY ts""", driver_ids, start, fin or datetime.now(timezone.utc)))
-    depot = await pool.fetchrow("""
-        SELECT d.lat, d.lon FROM routes r JOIN depots d ON d.id=r.depot_id
-        WHERE r.id=$1""", route_id)
     stop_range = await pool.fetchrow(
         "SELECT min(ts) AS first_ev, max(ts) AS last_ev FROM stop_events WHERE route_id=$1",
         route_id)
@@ -805,15 +842,15 @@ async def _route_gps_points(route_id: int, driver_ids: list[int]):
                     i1 = i
         if i1 >= i0:
             pts = pts[i0:i1 + 1]
-    return start, fin, pts
+    return start, fin, pts, depot
 
 
 async def _route_actual_track(route_id: int, driver_ids: list[int]):
     """Фактичний дорожній трек і км; очищений GPS — резерв при збої OSRM."""
-    _, _, raw = await _route_gps_points(route_id, driver_ids)
+    _, fin, raw, depot = await _route_gps_points(route_id, driver_ids)
     if len(raw) < 2:
         return None
-    signature = (raw[0]["id"], raw[-1]["id"], len(raw))
+    signature = (raw[0]["id"], raw[-1]["id"], len(raw), fin)
     cached = _track_cache.get(route_id)
     if cached and cached[0] == signature:
         return cached[1]
@@ -824,18 +861,27 @@ async def _route_actual_track(route_id: int, driver_ids: list[int]):
     thin = clean[::step]
     if thin[-1]["id"] != clean[-1]["id"]:
         thin.append(clean[-1])
+    boundary_ok = bool(
+        depot
+        and _haversine_km(raw[0]["lat"], raw[0]["lon"], depot["lat"], depot["lon"]) <= 0.5
+        and (not fin or _haversine_km(
+            raw[-1]["lat"], raw[-1]["lon"], depot["lat"], depot["lon"]) <= 0.5))
     matched = await osrm.match_with_distance([
         (p["lat"], p["lon"], int(p["ts"].timestamp()),
          min(50, max(10, int(p["accuracy_m"] or 25))))
         for p in thin])
-    if matched:
-        geometry, km = matched
-        result = {"points": geometry, "km": round(km, 1), "source": "osrm"}
+    if matched and matched[2] >= 0.9:
+        geometry, km, coverage = matched
+        result = {"points": geometry, "km": round(km, 1), "source": "osrm",
+                  "coverage": round(coverage, 3), "boundary_ok": boundary_ok}
     else:
         km = sum(seg for a, b in zip(clean, clean[1:])
                  if (seg := _haversine_km(a["lat"], a["lon"], b["lat"], b["lon"])) < 2)
         result = {"points": [[p["lat"], p["lon"]] for p in thin],
-                  "km": round(km, 1), "source": "gps_fallback"}
+                  "km": round(km, 1),
+                  "source": "gps_fallback_partial" if matched else "gps_fallback",
+                  "coverage": round(matched[2], 3) if matched else 0,
+                  "boundary_ok": boundary_ok}
     _track_cache[route_id] = (signature, result)
     return result
 

@@ -50,6 +50,7 @@
   .done td { opacity:.6; }
   .failrow { background:#FFF3D6; } .failrow:hover td { background:transparent; }
   .failtag { color:var(--amber); font-weight:800; }
+  .gps-note { color:var(--amber); font-weight:700; }
 </style>
 </head>
 <body>
@@ -187,6 +188,10 @@ async function load() {
             const d=pm!=null ? rt.work_min-pm : null;
             return `<span>Час <b>${f}</b>${pm!=null?` / план ${Math.floor(pm/60)}:${String(pm%60).padStart(2,'0')}`:''}${d!=null?` <span class="${d>15?'late':'early'}">${d>0?'+':''}${d} хв</span>`:''}</span>`;})() : ''}
         ${rt.gps_km!=null ? (()=>{
+            if (!rt.gps_complete) {
+              const note=rt.gps_issue==='route_open'?'Рейс триває':'Неповний GPS';
+              return `<span>Шлях <b>${rt.gps_km} км</b> <span class="gps-note">· ${note}</span></span>`;
+            }
             const d=rt.plan_km ? +(rt.gps_km-rt.plan_km).toFixed(1) : null;
             return `<span>Шлях <b>${rt.gps_km} км</b>${rt.plan_km?` / план ${rt.plan_km.toFixed(1)}`:''}${d!=null?` <span class="${d>10?'late':'early'}">${d>0?'+':''}${d} км</span>`:''}</span>`;})() : ''}
       </div>` : ''}

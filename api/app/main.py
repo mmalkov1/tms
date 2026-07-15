@@ -1,6 +1,6 @@
 """TMS Культтовари Глобал — API v2."""
 import os
-from datetime import date, time
+from datetime import date, datetime, time, timezone
 
 import asyncpg
 import asyncio
@@ -15,6 +15,26 @@ ROUTE_COLORS = ["#E82A2C", "#00356B", "#2E8B57", "#B8860B", "#8B008B", "#FF6347"
                 "#1E90FF", "#FF8C00"]
 
 app = FastAPI(title="TMS Kultukr")
+
+
+def _stable_geofence_entry(points, depot_lat, depot_lon, distance_km, now=None):
+    """Повернути час входу у складську геозону, стійкий до GPS-викидів."""
+    if len(points) < 4:
+        return None
+    now = now or datetime.now(timezone.utc)
+    if (now - points[0]["ts"]).total_seconds() > 180:
+        return None
+    cutoff = points[0]["ts"].timestamp() - 12 * 60
+    window = [p for p in points if p["ts"].timestamp() >= cutoff]
+    flags = [distance_km(p["lat"], p["lon"], depot_lat, depot_lon) <= 0.3
+             for p in window]
+    recent = flags[:min(3, len(flags))]
+    span_s = (window[0]["ts"] - window[-1]["ts"]).total_seconds()
+    stable_recent = sum(recent) >= (len(recent) + 1) // 2
+    stable_window = sum(flags) / len(flags) >= 0.7
+    if span_s < 600 or not stable_recent or not stable_window:
+        return None
+    return next(p for p, inside in zip(reversed(window), reversed(flags)) if inside)
 
 
 async def _route_autoclose_loop():
@@ -45,31 +65,21 @@ async def _route_autoclose_loop():
                                         WHERE e.route_id = s.route_id AND e.order_id = s.order_id
                                           AND e.event IN ('depart','fail')))""")
             for cd in cand:
-                pts = await pool.fetch("""
+                pts = list(await pool.fetch("""
                     SELECT ts, lat, lon FROM gps_points
-                    WHERE driver_id = $1 AND ts > now() - interval '40 minutes'
+                    WHERE driver_id = $1 AND ts > now() - interval '15 minutes'
                       AND (accuracy_m IS NULL OR accuracy_m <= 80)
-                    ORDER BY ts DESC""", cd["driver_id"])
-                inside = [p for p in pts if _haversine_km(
-                    p["lat"], p["lon"], cd["dlat"], cd["dlon"]) <= 0.3]
-                if len(pts) < 2 or not inside:
-                    continue
-                # свіжа точка в геозоні і пробув там >= 10 хв
-                if pts[0] not in inside:
-                    continue
-                streak = []
-                for p in pts:                      # від свіжих назад, поки в геозоні
-                    if p in inside:
-                        streak.append(p)
-                    else:
-                        break
-                if streak and (streak[0]["ts"] - streak[-1]["ts"]).total_seconds() >= 600:
+                    ORDER BY ts DESC""", cd["driver_id"]))
+                entry = _stable_geofence_entry(
+                    pts, cd["dlat"], cd["dlon"], _haversine_km)
+                if entry:
+                    # Найраніша коректна точка у стабільному вікні — час повернення.
                     await pool.execute("""
                         INSERT INTO route_events (route_id, driver_id, event, ts, lat, lon)
                         VALUES ($1,$2,'finish',$3,$4,$5)
                         ON CONFLICT (route_id, event) DO NOTHING""",
-                        cd["route_id"], cd["driver_id"], streak[-1]["ts"],
-                        streak[-1]["lat"], streak[-1]["lon"])
+                        cd["route_id"], cd["driver_id"], entry["ts"],
+                        entry["lat"], entry["lon"])
             rows = await pool.fetch("""
                 SELECT re.route_id, re.driver_id, r.plan_date
                 FROM route_events re
@@ -110,6 +120,10 @@ pool: asyncpg.Pool = None
 async def startup():
     global pool
     pool = await asyncpg.create_pool(DB_DSN)
+    # v47: фактична координата складу; важливо для геозони та меж пробігу.
+    await pool.execute("""
+        UPDATE depots SET lat=50.423507841149004, lon=30.450054761494783
+        WHERE name='Склад Киев'""")
     # v11 (migrate_007): идемпотентно — возможности авто
     await pool.execute("""
         ALTER TABLE vehicles

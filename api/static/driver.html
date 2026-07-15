@@ -287,7 +287,10 @@ async function doFail() {
       const r = await fetch(`/api/driver/${TOKEN}/stops/${id}/fail`, {method:'POST',
         headers:{'Content-Type':'application/json'},
         body: JSON.stringify({reason_id: failCtx.reasonId, reason_text: txt || null, ...pos})});
-      if (!r.ok) { toast('Помилка — спробуй ще раз'); return; }
+      if (!r.ok) {
+        const j = await r.json().catch(() => ({}));
+        toast(j.detail || 'Помилка — спробуй ще раз'); return;
+      }
     } catch(e) { toast('Немає зв’язку — спробуй ще раз'); return; }
   }
   closeFail();
@@ -579,8 +582,8 @@ async function mark(ids, event, force = false) {
     try {
       const r = await fetch(`/api/driver/${TOKEN}/stops/${id}/event`, {method:'POST',
         headers:{'Content-Type':'application/json'}, body: JSON.stringify({event, force, ...pos})});
-      if (!r.ok) { toast('Помилка — спробуй ще раз'); return; }
       const j = await r.json().catch(() => ({}));
+      if (!r.ok) { toast(j.detail || 'Помилка — спробуй ще раз'); return; }
       if (j.confirm_required) {                        // v44: натискання здалеку
         const what = event === 'arrive' ? 'Точно прибув?' : 'Точно поїхав звідти?';
         if (await askYes(`Ти за ${fmtDist(j.dist_m)} від точки. ${what}`))

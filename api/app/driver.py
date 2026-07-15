@@ -4,6 +4,7 @@
 приём GPS-точек, план/факт для логиста (страницы driver.html, tokens.html,
 facts.html). Схема — migrate_011, применяется из init() при старте API.
 """
+import asyncio
 import secrets
 from datetime import date, datetime, timedelta, timezone
 
@@ -14,6 +15,7 @@ from . import osrm
 
 router = APIRouter(tags=["driver"])
 pool = None
+_track_cache = {}                       # route_id -> (GPS signature, готовий трек)
 
 
 async def init(db_pool):
@@ -545,6 +547,13 @@ async def facts(plan_date: date = Query(...)):
         WHERE r.plan_date = $1
           AND r.project_id IN (SELECT id FROM projects WHERE is_released)
         ORDER BY r.id""", plan_date)
+    route_ids = {
+        r["id"]: [i for i in {r["driver_id"], r["veh_driver_id"]} if i]
+        for r in routes
+    }
+    matched_tracks = await asyncio.gather(*(
+        _route_actual_track(r["id"], route_ids[r["id"]]) for r in routes))
+    tracks_by_route = {r["id"]: track for r, track in zip(routes, matched_tracks)}
     out = []
     for r in routes:
         stops = await pool.fetch("""
@@ -562,12 +571,15 @@ async def facts(plan_date: date = Query(...)):
             WHERE driver_id = ANY($1::int[]) ORDER BY ts DESC LIMIT 1""",
             [i for i in {r["driver_id"], r["veh_driver_id"]} if i]) \
             if (r["driver_id"] or r["veh_driver_id"]) else None
-        w_start, w_fin, w_min, w_km = await _route_worklog(
-            r["id"], [i for i in {r["driver_id"], r["veh_driver_id"]} if i])
+        driver_ids = route_ids[r["id"]]
+        w_start, w_fin, w_min, raw_km = await _route_worklog(r["id"], driver_ids)
+        track = tracks_by_route[r["id"]]
+        w_km = track["km"] if track else raw_km
         out.append({
             "route_id": r["id"], "color": r["color"],
             "vehicle": r["vehicle_name"], "driver": r["driver_name"],
             "start_ts": w_start, "finish_ts": w_fin, "work_min": w_min, "gps_km": w_km,
+            "gps_source": track["source"] if track else "gps_raw",
             "plan_km": float(r["total_km"] or 0),
             "plan_depart": _hm(r["depart_time"]), "plan_return": _hm(r["return_time"]),
             "last_gps": ({"ts": _iso(last["ts"]), "lat": last["lat"], "lon": last["lon"],
@@ -587,35 +599,22 @@ async def facts(plan_date: date = Query(...)):
 
 @router.get("/api/facts/tracks")
 async def facts_tracks(plan_date: date = Query(...)):
-    """v29: GPS-треки, прив'язані до доріг через OSRM /match.
-
-    Сирі точки фільтруємо за точністю (<=60 м), проріджуємо і матчимо
-    на дорожній граф — трек більше не «скаче». Якщо OSRM не впорався,
-    падаємо назад на сирі точки.
-    """
+    """Очищені GPS-треки конкретних рейсів + фактичний пробіг."""
     routes = await pool.fetch("""
         SELECT r.id, r.color, r.driver_id, v.driver_id AS veh_driver_id
         FROM routes r JOIN vehicles v ON v.id=r.vehicle_id
         WHERE r.plan_date = $1
           AND r.project_id IN (SELECT id FROM projects WHERE is_released)""", plan_date)
+    matched_tracks = await asyncio.gather(*(
+        _route_actual_track(r["id"], [i for i in {r["driver_id"], r["veh_driver_id"]} if i])
+        for r in routes))
     out = []
-    for r in routes:
-        ids = [i for i in {r["driver_id"], r["veh_driver_id"]} if i]
-        pts = await pool.fetch("""
-            SELECT lat, lon, ts, accuracy_m FROM gps_points
-            WHERE driver_id = ANY($1::int[])
-              AND (ts AT TIME ZONE 'Europe/Kyiv')::date = $2
-              AND (accuracy_m IS NULL OR accuracy_m <= 60)
-            ORDER BY ts""", ids, plan_date) if ids else []
-        step = max(1, len(pts) // 400)
-        thin = pts[::step]
-        matched = await osrm.match([
-            (p["lat"], p["lon"], int(p["ts"].timestamp()),
-             min(50, max(10, int(p["accuracy_m"] or 25))))
-            for p in thin])
+    for r, track in zip(routes, matched_tracks):
         out.append({"route_id": r["id"], "color": r["color"],
-                    "matched": matched is not None,
-                    "points": matched or [[p["lat"], p["lon"]] for p in thin]})
+                    "matched": bool(track and track["source"] == "osrm"),
+                    "gps_km": track["km"] if track else None,
+                    "source": track["source"] if track else None,
+                    "points": track["points"] if track else []})
     return out
 
 
@@ -725,6 +724,120 @@ def _haversine_km(lat1, lon1, lat2, lon2):
     dp, dl = radians(lat2 - lat1), radians(lon2 - lon1)
     a = sin(dp / 2) ** 2 + cos(p1) * cos(p2) * sin(dl / 2) ** 2
     return 12742 * asin(sqrt(a))
+
+
+def _collapse_stationary(points):
+    """Згорнути GPS-шум на стоянці в одну найточнішу координату.
+
+    Android передає швидкість від FusedLocation. Послідовність <3 км/год
+    вважаємо стоянкою: реальний пробіг там мізерний, зате дрейф GPS може
+    намалювати кілометри та петлі по сусідніх дорогах.
+    """
+    out, stationary = [], []
+
+    def flush():
+        if not stationary:
+            return
+        best = min(stationary, key=lambda p: float(p["accuracy_m"] or 9999))
+        out.append(best)
+        stationary.clear()
+
+    def moving(point):
+        speed = point["speed_kmh"]
+        return speed is None or float(speed) >= 3
+
+    i = 0
+    while i < len(points):
+        if not moving(points[i]):
+            stationary.append(points[i])
+            i += 1
+            continue
+        # Окремі 1–2 стрибки швидкості всередині стоянки теж є GPS-шумом.
+        # Рух відновлюємо лише після трьох послідовних точок >=3 км/год.
+        if stationary:
+            run = 1
+            while i + run < len(points) and run < 3 and moving(points[i + run]):
+                run += 1
+            if run < 3:
+                stationary.extend(points[i:i + run])
+                i += run
+                continue
+        flush()
+        out.append(points[i])
+        i += 1
+    flush()
+    return out
+
+
+async def _route_gps_points(route_id: int, driver_ids: list[int]):
+    """GPS лише в межах конкретного рейсу, обрізаний поверненням на склад."""
+    evs = {e["event"]: e["ts"] for e in await pool.fetch(
+        "SELECT event, ts FROM route_events WHERE route_id=$1", route_id)}
+    start, fin = evs.get("start"), evs.get("finish")
+    if not start or not driver_ids:
+        return start, fin, []
+    pts = list(await pool.fetch("""
+        SELECT id, ts, lat, lon, speed_kmh, accuracy_m FROM gps_points
+        WHERE driver_id = ANY($1::int[]) AND ts >= $2 AND ts <= $3
+          AND (accuracy_m IS NULL OR accuracy_m <= 60)
+        ORDER BY ts""", driver_ids, start, fin or datetime.now(timezone.utc)))
+    depot = await pool.fetchrow("""
+        SELECT d.lat, d.lon FROM routes r JOIN depots d ON d.id=r.depot_id
+        WHERE r.id=$1""", route_id)
+    stop_range = await pool.fetchrow(
+        "SELECT min(ts) AS first_ev, max(ts) AS last_ev FROM stop_events WHERE route_id=$1",
+        route_id)
+    if depot and pts:
+        inside = [_haversine_km(p["lat"], p["lon"], depot["lat"], depot["lon"]) <= 0.3
+                  for p in pts]
+        i0, i1 = 0, len(pts) - 1
+        if stop_range and stop_range["first_ev"]:
+            for i, point in enumerate(pts):
+                if point["ts"] >= stop_range["first_ev"]:
+                    break
+                if inside[i]:
+                    i0 = i
+        if stop_range and stop_range["last_ev"]:
+            for i in range(len(pts) - 1, -1, -1):
+                if pts[i]["ts"] <= stop_range["last_ev"]:
+                    break
+                if inside[i]:
+                    i1 = i
+        if i1 >= i0:
+            pts = pts[i0:i1 + 1]
+    return start, fin, pts
+
+
+async def _route_actual_track(route_id: int, driver_ids: list[int]):
+    """Фактичний дорожній трек і км; очищений GPS — резерв при збої OSRM."""
+    _, _, raw = await _route_gps_points(route_id, driver_ids)
+    if len(raw) < 2:
+        return None
+    signature = (raw[0]["id"], raw[-1]["id"], len(raw))
+    cached = _track_cache.get(route_id)
+    if cached and cached[0] == signature:
+        return cached[1]
+
+    clean = _collapse_stationary(raw)
+    # Спершу прибираємо стоянки, потім рівномірно обмежуємо запит OSRM.
+    step = max(1, (len(clean) + 399) // 400)
+    thin = clean[::step]
+    if thin[-1]["id"] != clean[-1]["id"]:
+        thin.append(clean[-1])
+    matched = await osrm.match_with_distance([
+        (p["lat"], p["lon"], int(p["ts"].timestamp()),
+         min(50, max(10, int(p["accuracy_m"] or 25))))
+        for p in thin])
+    if matched:
+        geometry, km = matched
+        result = {"points": geometry, "km": round(km, 1), "source": "osrm"}
+    else:
+        km = sum(seg for a, b in zip(clean, clean[1:])
+                 if (seg := _haversine_km(a["lat"], a["lon"], b["lat"], b["lon"])) < 2)
+        result = {"points": [[p["lat"], p["lon"]] for p in thin],
+                  "km": round(km, 1), "source": "gps_fallback"}
+    _track_cache[route_id] = (signature, result)
+    return result
 
 
 async def _route_worklog(route_id: int, driver_ids: list[int]):

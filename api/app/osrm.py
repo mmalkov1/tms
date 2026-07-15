@@ -48,17 +48,20 @@ async def route_geometry(points: list[tuple[float, float]]) -> str:
     return j["routes"][0]["geometry"]
 
 
-async def match(points: list[tuple[float, float, int, int]]) -> list[list[float]] | None:
-    """v29: map-matching сирого GPS на дорожній граф.
+async def match_with_distance(
+        points: list[tuple[float, float, int, int]],
+) -> tuple[list[list[float]], float] | None:
+    """Map-matching GPS на дорожній граф: (геометрія, відстань у км).
 
     points: [(lat, lon, ts_unix, radius_m), ...] у хронологічному порядку.
-    Повертає [[lat, lon], ...] прив'язані до доріг, або None (хай викликач
-    відмалює сирі точки). OSRM обмежує запит ~100 координатами — ріжемо
-    на шматки по 95 і зшиваємо.
+    OSRM обмежує запит ~100 координатами — ріжемо на шматки по 95 з однією
+    спільною точкою. Відстань беремо з matchings[].distance, а не вимірюємо
+    ламану на екрані.
     """
     if len(points) < 2:
         return None
     out: list[list[float]] = []
+    distance_m = 0.0
     try:
         async with httpx.AsyncClient(timeout=30) as c:
             for i in range(0, len(points) - 1, 94):
@@ -78,9 +81,16 @@ async def match(points: list[tuple[float, float, int, int]]) -> list[list[float]
                     return None
                 for m in r.json().get("matchings", []):
                     out.extend([[lat, lon] for lon, lat in m["geometry"]["coordinates"]])
+                    distance_m += float(m.get("distance") or 0)
     except Exception:
         return None
-    return out if len(out) >= 2 else None
+    return (out, distance_m / 1000) if len(out) >= 2 else None
+
+
+async def match(points: list[tuple[float, float, int, int]]) -> list[list[float]] | None:
+    """Сумісна обгортка для викликів, яким потрібна лише геометрія."""
+    result = await match_with_distance(points)
+    return result[0] if result else None
 
 
 async def route_latlon(points: list[tuple[float, float]]) -> list[list[float]] | None:

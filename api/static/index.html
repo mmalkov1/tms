@@ -1223,6 +1223,10 @@ async function loadAll() {
   try { await loadVehicles(); } catch(e) { console.warn('vehicles:', e); }
   try { await loadProjects(); } catch(e) { console.warn('projects:', e); }
   loadAll();
+  if (new URLSearchParams(location.search).get('settings') === '1') {
+    history.replaceState(null, '', location.pathname);
+    openSettings();
+  }
 })();
 </script>
 <div id="issuesPanel" style="display:none;position:fixed;top:54px;right:52px;z-index:80;width:340px;max-height:70vh;overflow:auto;background:#fff;border-radius:10px;box-shadow:0 4px 18px rgba(0,0,0,.25)">

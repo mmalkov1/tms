@@ -139,6 +139,9 @@ async def startup():
             lat       DOUBLE PRECISION,
             lon       DOUBLE PRECISION,
             UNIQUE (route_id, event))""")
+    # v43 (migrate_020): джерело нормативу простою (tocan-довідник / факти tms)
+    await pool.execute(
+        "ALTER TABLE client_service_stats ADD COLUMN IF NOT EXISTS source TEXT NOT NULL DEFAULT 'tocan'")
     # v41 (migrate_019): типовий графік водія 09:00–16:00 (для нових водіїв)
     await pool.execute("""
         ALTER TABLE drivers
@@ -503,13 +506,54 @@ async def import_service_stats(file: UploadFile = File(...)):
     stats = dwell.aggregate(dwell.parse_report(await file.read()))
     for st_ in stats:
         await pool.execute("""
-            INSERT INTO client_service_stats VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,now())
+            INSERT INTO client_service_stats (client_key, addr_key, client_name, address,
+                lat, lon, visits, median_min, p80_min, updated_at, source)
+            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,now(),'tocan')
             ON CONFLICT (client_key, addr_key) DO UPDATE SET visits=EXCLUDED.visits,
                 address=EXCLUDED.address, lat=EXCLUDED.lat, lon=EXCLUDED.lon,
-                median_min=EXCLUDED.median_min, p80_min=EXCLUDED.p80_min, updated_at=now()""",
+                median_min=EXCLUDED.median_min, p80_min=EXCLUDED.p80_min, updated_at=now()
+            WHERE client_service_stats.source <> 'tms'""",
             st_["client_key"], st_["addr_key"], st_["client_name"], st_["address"],
             st_["lat"], st_["lon"], st_["visits"], st_["median_min"], st_["p80_min"])
     return {"rows": len(stats)}
+
+
+async def _refresh_service_stats_tms():
+    """v43: нормативи простою з власних фактів TMS (stop_events прибув→поїхав).
+
+    Одна фізична зупинка = рейс × клієнт+адреса (від першого arrive до
+    останнього depart). Конвеєр той самий, що для Cars_report:
+    dwell.aggregate — фільтри шуму 2–180 хв, нічних баз, нормалізація ключів.
+    Рядок Tocan замінюється, щойно TMS накопичила ≥5 візитів по ключу;
+    далі рядок source='tms' і оновлюється перед кожним розрахунком."""
+    rows = await pool.fetch("""
+        SELECT o.client AS name, COALESCE(o.address,'') AS address,
+               max(o.lat) AS lat, max(o.lon) AS lon,
+               EXTRACT(EPOCH FROM (max(d.ts) - min(a.ts)))/60.0 AS dwell,
+               EXTRACT(HOUR FROM min(a.ts) AT TIME ZONE 'Europe/Kiev')::int AS hour
+        FROM stop_events a
+        JOIN stop_events d ON d.route_id=a.route_id AND d.order_id=a.order_id
+                          AND d.event='depart'
+        JOIN orders o ON o.id=a.order_id
+        WHERE a.event='arrive' AND d.ts > a.ts
+        GROUP BY a.route_id, o.client, o.address""")
+    visits = [{"code": "", "name": r["name"] or "", "address": r["address"],
+               "lat": r["lat"], "lon": r["lon"], "dwell": float(r["dwell"]),
+               "hour": r["hour"]} for r in rows]
+    stats = dwell.aggregate(visits)
+    for s in stats:
+        await pool.execute("""
+            INSERT INTO client_service_stats (client_key, addr_key, client_name, address,
+                lat, lon, visits, median_min, p80_min, updated_at, source)
+            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,now(),'tms')
+            ON CONFLICT (client_key, addr_key) DO UPDATE SET visits=EXCLUDED.visits,
+                address=EXCLUDED.address, lat=EXCLUDED.lat, lon=EXCLUDED.lon,
+                median_min=EXCLUDED.median_min, p80_min=EXCLUDED.p80_min,
+                updated_at=now(), source='tms'
+            WHERE client_service_stats.source='tms' OR EXCLUDED.visits >= 5""",
+            s["client_key"], s["addr_key"], s["client_name"], s["address"],
+            s["lat"], s["lon"], s["visits"], s["median_min"], s["p80_min"])
+    return len(stats)
 
 
 # ---------- геозоны ----------
@@ -700,6 +744,10 @@ async def plan(
     # простой: ручной для всех ИЛИ персональный из истории по клиент+адресу
     fallback = service_min or 15
     if service_source in ("hist_med", "hist_p80"):
+        try:
+            await _refresh_service_stats_tms()             # v43: свіжі факти TMS
+        except Exception as e:
+            print("service-stats refresh failed:", e)      # нормативи лишаться попередні
         srows = await pool.fetch("SELECT * FROM client_service_stats")
         by_client = {}
         for r in srows:

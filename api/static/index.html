@@ -62,6 +62,16 @@
   #tokQr { display:none; background:var(--cream); border-radius:12px; padding:12px; margin-bottom:14px; gap:14px; align-items:center; }
   #tokQr.show { display:flex; }
   #tokQr a { font-size:12px; word-break:break-all; color:var(--navy); }
+  .logist-intro { color:#687482; font-size:12px; line-height:1.5; margin-bottom:12px; }
+  .logist-add { display:flex; gap:7px; margin-bottom:14px; }
+  .logist-add input { flex:1; padding:7px 10px; border:1.5px solid var(--cream-300); border-radius:9px; font:inherit; }
+  .logist-add button { border:0; border-radius:9px; background:var(--navy); color:#fff; padding:7px 13px; font-weight:700; cursor:pointer; }
+  .logist-access { border:1px solid var(--cream-200); border-radius:11px; padding:11px; margin-bottom:8px; background:#fff; }
+  .logist-access-head { display:flex; align-items:center; gap:8px; }
+  .logist-access-head input { flex:1; border:0; color:var(--navy); font-weight:800; font:800 13px 'Open Sans'; padding:4px; }
+  .logist-access-head button { width:30px; height:30px; border:1px solid var(--cream-300); border-radius:8px; background:#fff; color:var(--navy); cursor:pointer; }
+  .logist-link { display:block; margin:7px 0 4px; padding:8px 9px; border-radius:8px; background:var(--cream-50); color:var(--blue); font-size:11px; word-break:break-all; }
+  .logist-meta { color:#7A8490; font-size:10px; }
   .rtab { display:inline-block; padding:5px 14px; border-radius:999px; font-size:12px; font-weight:700;
           cursor:pointer; background:#fff; color:var(--blue); margin-right:6px; border:1.5px solid var(--cream-300); }
   .rtab.on { background:var(--navy); color:#fff; border-color:var(--navy); box-shadow:0 2px 8px rgba(0,53,107,.3); }
@@ -358,6 +368,7 @@
   <div class="dlg-body">
     <div id="setSide">
       <div class="on" onclick="setSection('da', this)">Водії та авто</div>
+      <div onclick="setSection('la', this)">Доступ логіста</div>
       <div onclick="setSection('fr', this)">Причини відмов</div>
       <div class="dis">Планування <small>(згодом)</small></div>
       <div class="dis">1С <small>(згодом)</small></div>
@@ -396,6 +407,13 @@
           <input id="frNew" placeholder="Нова причина…" style="flex:1;padding:6px 9px;border:1px solid #ddd;border-radius:6px;font-size:12px">
           <button onclick="addReason()" style="border:none;background:var(--red);color:#fff;border-radius:6px;padding:6px 14px;font-size:12px;font-weight:800;cursor:pointer">Додати</button>
         </div>
+      </div>
+      <div id="sec-la" style="display:none">
+        <h4>Іменовані доступи логістів</h4>
+        <div class="logist-intro">Кожен логіст отримує власне посилання і QR-код. Перевипуск або видалення одного доступу не впливає на інші.</div>
+        <div id="logistQr" class="logist-access" style="display:none"></div>
+        <div class="logist-add"><input id="newLogistName" placeholder="Наприклад, Черговий логіст"><button onclick="addLogistAccess()">Додати доступ</button></div>
+        <div id="logistAccessRows"></div>
       </div>
     </div>
   </div>
@@ -629,7 +647,7 @@ async function rowActions(el, vid) {
 }
 
 // ================== НАЛАШТУВАННЯ ==================
-let setDrivers = [], setReasons = [], frKind = 'delivery';
+let setDrivers = [], setReasons = [], logistAccesses = [], frKind = 'delivery';
 const SET_DLG_SIZE_KEY = 'tms.settingsDialogSize.v1';
 
 function restoreSettingsSize() {
@@ -658,8 +676,8 @@ window.addEventListener('resize', () => {
 });
 
 async function openSettings() {
-  await Promise.all([loadVehicles(true), loadSetDrivers(), loadReasons()]);
-  renderSetDA(); renderReasons();
+  await Promise.all([loadVehicles(true), loadSetDrivers(), loadReasons(), loadLogistAccesses()]);
+  renderSetDA(); renderReasons(); renderLogistAccesses();
   $('tokQr').classList.remove('show');
   restoreSettingsSize();
   $('setDlg').showModal();
@@ -671,10 +689,75 @@ function setSection(sec, el) {
   el.classList.add('on');
   $('sec-da').style.display = sec === 'da' ? '' : 'none';
   $('sec-fr').style.display = sec === 'fr' ? '' : 'none';
+  $('sec-la').style.display = sec === 'la' ? '' : 'none';
 }
 
 async function loadSetDrivers() {
   setDrivers = await (await fetch('/api/drivers')).json();
+}
+
+async function loadLogistAccesses() {
+  const r = await fetch('/api/logist-accesses');
+  logistAccesses = r.ok ? await r.json() : [];
+}
+
+const escHtml = v => String(v ?? '').replace(/[&<>"']/g, c =>
+  ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+function renderLogistAccesses() {
+  const dt = v => v ? new Date(v).toLocaleString('uk-UA', {day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}) : '—';
+  $('logistAccessRows').innerHTML = logistAccesses.map(a => {
+    const url = location.origin + '/logist.html?token=' + a.token;
+    return `<div class="logist-access" data-aid="${a.id}">
+      <div class="logist-access-head">
+        <input value="${escHtml(a.name)}" onchange="renameLogistAccess(${a.id},this.value)" aria-label="Назва доступу">
+        <button onclick="showLogistQr(${a.id})" title="Показати QR" aria-label="Показати QR"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3h7v7H3zM14 3h7v7h-7zM3 14h7v7H3zM15 14h2v2h-2zM19 14h2v7h-7v-3"/></svg></button>
+        <button onclick="rotateLogistAccess(${a.id})" title="Нове посилання" aria-label="Створити нове посилання"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 6v5h-5M4 18v-5h5"/><path d="M6 9a7 7 0 0112-3l2 5M4 13l2 5a7 7 0 0012-3"/></svg></button>
+        <button onclick="deleteLogistAccess(${a.id})" title="Видалити доступ" aria-label="Видалити доступ"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6"/></svg></button>
+      </div><a class="logist-link" href="${url}" target="_blank">${url}</a>
+      <div class="logist-meta">Створено ${dt(a.created_at)} · останній вхід ${dt(a.last_used_at)}</div>
+    </div>`;
+  }).join('') || '<div class="logist-intro">Доступів ще немає.</div>';
+}
+
+async function addLogistAccess() {
+  const name = $('newLogistName').value.trim();
+  if (!name) return st('Вкажіть назву доступу');
+  const r = await fetch('/api/logist-accesses', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({name})});
+  if (!r.ok) return st('Не вдалося створити доступ');
+  $('newLogistName').value = '';
+  await loadLogistAccesses(); renderLogistAccesses();
+  showLogistQr((await r.json()).id); st('Доступ логіста створено');
+}
+
+async function renameLogistAccess(id, name) {
+  const r = await fetch(`/api/logist-accesses/${id}`, {method:'PATCH', headers:{'Content-Type':'application/json'}, body:JSON.stringify({name})});
+  if (!r.ok) st('Не вдалося перейменувати доступ');
+  else { await loadLogistAccesses(); renderLogistAccesses(); st('Назву збережено'); }
+}
+
+async function rotateLogistAccess(id) {
+  if (!confirm('Попереднє посилання цього логіста перестане працювати. Продовжити?')) return;
+  const r = await fetch(`/api/logist-accesses/${id}/rotate`, {method:'POST'});
+  if (!r.ok) return st('Не вдалося створити нове посилання');
+  await loadLogistAccesses(); renderLogistAccesses(); showLogistQr(id); st('Нове посилання створено');
+}
+
+async function deleteLogistAccess(id) {
+  if (!confirm('Видалити цей доступ логіста?')) return;
+  const r = await fetch(`/api/logist-accesses/${id}`, {method:'DELETE'});
+  if (!r.ok) return st('Не вдалося видалити доступ');
+  $('logistQr').style.display = 'none';
+  await loadLogistAccesses(); renderLogistAccesses(); st('Доступ видалено');
+}
+
+function showLogistQr(id) {
+  const a = logistAccesses.find(x => x.id === id); if (!a) return;
+  const url = location.origin + '/logist.html?token=' + a.token;
+  const box = $('logistQr');
+  box.innerHTML = `<div style="display:flex;gap:14px;align-items:center"><div id="logistQrCode"></div><div><b style="color:var(--navy)">${escHtml(a.name)}</b><a class="logist-link" href="${url}" target="_blank">${url}</a><button class="tok-btn" onclick="navigator.clipboard.writeText('${url}')">Копіювати</button></div></div>`;
+  box.style.display = '';
+  new QRCode($('logistQrCode'), {text:url, width:96, height:96, colorDark:'#00356B'});
 }
 
 function renderSetDA() {

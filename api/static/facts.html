@@ -115,7 +115,7 @@ function toggleTrack() {
 function focus(rid) {                               // клік по шапці рейсу
   focusRoute = focusRoute === rid ? null : rid;
   Object.entries(tracks).forEach(([id, pl]) =>
-    pl.setStyle({opacity: (focusRoute===null || +id===focusRoute) ? .85 : .12}));
+    pl.setStyle({opacity: (focusRoute===null || +id===focusRoute) ? .85 : .5}));
 }
 
 function focusStop(rid, oid) {                      // v41: dblclick по рядку таблиці
@@ -138,7 +138,7 @@ async function loadTracks() {
     if (t.points.length < 2) return;
     tracks[t.route_id] = L.polyline(t.points, {color:t.color,
       weight:t.matched?3:2.5, dashArray:t.matched?null:'6 5',
-      opacity:(focusRoute===null||t.route_id===focusRoute)?.8:.12})
+      opacity:(focusRoute===null||t.route_id===focusRoute)?.8:.5})
       .addTo(trackLayer);
   });
 }

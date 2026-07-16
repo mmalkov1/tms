@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="uk">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>TMS · Кабінет логіста</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Open+Sans:wght@400;600;700;800&display=swap" rel="stylesheet">
+<style>
+:root{--navy:#00356B;--blue:#285E96;--red:#E82A2C;--cream:#F3F1EF;--c50:#F6F4F5;--c200:#EFEEEC;--c300:#E2DFDA;--text:#1D2B3A;--muted:#75808C;--green:#2E8B57;--amber:#B8860B}
+*{box-sizing:border-box}html,body{height:100%;margin:0;font-family:'Open Sans',system-ui,sans-serif;color:var(--text);background:var(--cream)}
+#app{height:100%;position:relative;overflow:hidden}.top{height:72px;position:absolute;z-index:900;inset:0 0 auto;background:var(--navy);color:#fff;padding:12px 14px;display:flex;align-items:center;justify-content:space-between;box-shadow:0 2px 12px rgba(0,35,70,.24)}
+.brand{display:flex;align-items:center;gap:9px}.brand svg{width:30px;height:24px}.brand b{display:block;font-size:17px}.brand small,.sync small{font-size:10px;opacity:.78}.sync{text-align:right}.sync b{display:block;font-size:11px}.map{position:absolute;inset:72px 0 0}.leaflet-control-attribution{font-size:8px!important}
+.map-actions{position:absolute;z-index:800;top:84px;left:12px;right:12px;display:flex;justify-content:space-between;pointer-events:none}.pill{pointer-events:auto;min-height:36px;padding:8px 11px;border:1px solid rgba(0,53,107,.1);border-radius:999px;background:#fff;color:var(--navy);box-shadow:0 3px 12px rgba(0,53,107,.16);font-size:11px;font-weight:800;display:flex;align-items:center;gap:6px;cursor:pointer}.pill svg{width:15px;height:15px}.loc{width:38px;border-radius:10px;justify-content:center;padding:0}
+.sheet{position:absolute;z-index:850;left:0;right:0;bottom:0;height:48vh;background:#fff;border-radius:20px 20px 0 0;box-shadow:0 -8px 28px rgba(0,35,70,.18);padding:8px 12px 15px;overflow:auto;transition:height .22s ease}.sheet.expanded{height:calc(100vh - 86px)}.grab{position:sticky;z-index:4;top:0;width:52px;height:18px;background:#fff;margin:0 auto 2px;cursor:ns-resize;touch-action:none}.grab:after{content:"";position:absolute;left:5px;right:5px;top:5px;height:4px;background:var(--c300);border-radius:99px}.sheet-title{display:flex;align-items:center;justify-content:space-between}.sheet-title h2{font-size:15px;color:var(--navy);margin:0}.sheet-title small{font-size:10px;color:var(--muted)}
+.summary{display:grid;grid-template-columns:repeat(3,1fr);gap:7px;margin:10px 0}.metric{background:var(--c50);border-radius:10px;padding:8px 9px}.metric b{font-size:17px;color:var(--navy)}.metric span{display:block;font-size:9px;color:#6E7884}.metric.warn b{color:var(--amber)}
+.drivers{display:flex;flex-direction:column;gap:7px}.driver{display:grid;grid-template-columns:29px 1fr auto;gap:8px;align-items:center;border:1px solid var(--c200);border-radius:11px;padding:8px 9px;background:#fff;cursor:pointer}.dot{width:27px;height:27px;border-radius:50%;background:var(--color);border:3px solid #fff;box-shadow:0 0 0 1px var(--c200)}.driver b{display:block;color:var(--navy);font-size:11px}.driver small{font-size:9px;color:#78828D}.status{font-size:9px;font-style:normal;font-weight:800;border-radius:99px;padding:4px 7px;background:#E1F5EE;color:#176649;white-space:nowrap}.status.late{background:#FFF1F1;color:var(--red)}.status.early{background:#E1F5EE;color:#176649}.status.gray{background:var(--c200);color:#727A82}
+.route-title{display:flex;align-items:center;gap:9px}.bigdot{width:34px;height:34px;border-radius:50%;background:var(--rc);display:grid;place-items:center;color:#fff;flex:none}.route-title h2{font-size:14px;margin:0;color:var(--navy)}.route-title p{font-size:10px;margin:2px 0 0;color:#6E7884}.close{margin-left:auto;width:31px;height:31px;border:1px solid var(--c300);background:#fff;color:var(--navy);border-radius:9px;display:grid;place-items:center;cursor:pointer}
+.route-stats{display:grid;grid-template-columns:repeat(3,1fr);gap:7px;margin:11px 0 7px}.route-stats div{background:var(--c50);padding:8px;border-radius:9px}.route-stats b{display:block;font-size:12px;color:var(--navy)}.route-stats span{font-size:9px;color:#77818C}.route-stats .late{background:#FFF1F1}.route-stats .late b{color:var(--red)}.route-stats .forecast{background:#FFF7E6}.route-stats .forecast b{color:#86600B}.telemetry{font-size:9px;color:#697581;margin:0 2px 9px}.telemetry b{color:var(--navy)}.progress{height:6px;background:var(--c200);border-radius:99px;overflow:hidden}.progress i{display:block;height:100%;background:var(--rc);border-radius:99px}.next{display:flex;justify-content:space-between;font-size:9px;color:#77818C;margin:5px 0 10px}.next b{color:var(--navy)}
+.btnrow{display:flex;gap:7px}.btn{flex:1;height:38px;border-radius:10px;font:700 11px 'Open Sans';cursor:pointer}.btn.primary{background:var(--navy);color:#fff;border:0}.btn.secondary{background:#fff;color:var(--navy);border:1.5px solid var(--c300)}
+.truck{display:flex;align-items:center;gap:5px}.truck-pin{flex:0 0 34px;width:34px;height:34px;border-radius:50%;background:var(--rc);color:#fff;border:3px solid #fff;box-shadow:0 2px 9px rgba(0,30,60,.3);display:grid;place-items:center}.truck-pin svg,.bigdot svg{width:18px;height:18px;flex:none}.truck-tag{flex:none;background:var(--navy);color:#fff;border:2px solid #fff;border-radius:7px;padding:4px 7px;font-size:10px;font-weight:800;white-space:nowrap}.stop-dot{width:24px;height:24px;border-radius:50%;display:grid;place-items:center;background:var(--fill);color:var(--fg);border:3px solid var(--rc);box-shadow:0 1px 5px rgba(0,30,60,.25);font:800 9px/1 'Open Sans'}.stops-wrap{display:none;margin:12px -4px 0;overflow:auto;border:1px solid var(--c200);border-radius:11px}.sheet.expanded .stops-wrap{display:block}.stops-table{width:100%;min-width:680px;border-collapse:collapse;font-size:11px}.stops-table th,.stops-table td{padding:7px 8px;border-bottom:1px solid var(--c200);text-align:left}.stops-table th{position:sticky;top:0;z-index:2;background:var(--cream);color:var(--navy);font-weight:800}.stops-table tr{cursor:pointer}.stops-table tr.active td{background:#FFF7E6}.stops-table .ok{color:var(--green);font-weight:800}.stops-table .late-t{color:var(--red);font-weight:800}.stops-table .muted{color:#8A929A}.error{position:absolute;z-index:1000;inset:0;background:var(--cream);display:none;place-items:center;padding:30px;text-align:center;color:var(--navy)}.error b{font-size:18px}.error p{font-size:12px;color:var(--muted)}.leaflet-top.leaflet-right{top:54px;right:3px}.leaflet-control-zoom{border:0!important;box-shadow:0 3px 12px rgba(0,53,107,.18)!important}.leaflet-control-zoom a{color:var(--navy)!important;border:0!important}
+@media(min-width:800px){.sheet,.sheet.expanded{left:auto;width:420px;height:auto;top:86px;bottom:12px;right:12px;border-radius:16px}.stops-wrap{display:block}.map-actions{right:444px}.top{padding-left:20px;padding-right:20px}.leaflet-top.leaflet-right{right:430px}}
+</style>
+</head>
+<body><div id="app">
+  <header class="top"><div class="brand"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7h11v9H3zM14 10h4l3 3v3h-7"/><circle cx="7" cy="18" r="2"/><circle cx="17" cy="18" r="2"/></svg><span><b>TMS · Логіст</b><small id="accessName">Мобільний кабінет</small></span></div><div class="sync"><small>Оновлено</small><b id="updated">—</b></div></header>
+  <div id="map" class="map"></div>
+  <div class="map-actions"><button class="pill" id="allBtn" onclick="showAll()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 18l-6-6 6-6"/></svg><span id="allTxt">Усі водії</span></button><button class="pill loc" onclick="centerCurrent()" aria-label="Центрувати"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><circle cx="12" cy="12" r="8"/></svg></button></div>
+  <section class="sheet" id="sheet"><div class="grab"></div><div id="sheetBody"></div></section>
+  <div class="error" id="error"><div><b>Посилання недійсне</b><p>Попросіть адміністратора створити або перевипустити доступ логіста.</p></div></div>
+</div>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+const TOKEN = new URLSearchParams(location.search).get('token') || '';
+const map = L.map('map', {zoomControl:false}).setView([50.45,30.52],11);
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{attribution:'© OSM'}).addTo(map);
+L.control.zoom({position:'topright'}).addTo(map);
+const trackLayer=L.layerGroup().addTo(map), stopLayer=L.layerGroup().addTo(map), markerLayer=L.layerGroup().addTo(map);
+let routes=[], tracks={}, markers={}, stopMarkers={}, selected=null, fitted=false;
+const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const hm=v=>v?new Date(v).toLocaleTimeString('uk-UA',{hour:'2-digit',minute:'2-digit'}):'—';
+const delayText=n=>n==null?'—':n>0?`+${n} хв`:n<0?`${n} хв`:'за планом';
+const delayClass=n=>n==null?'gray':n>0?'late':'early';
+const clockMin=v=>{if(!v)return null;const [h,m]=String(v).slice(0,5).split(':').map(Number);return h*60+m};
+const eventMin=v=>{if(!v)return null;const d=new Date(v);return d.getHours()*60+d.getMinutes()};
+const stopDelta=s=>{const p=clockMin(s.eta),a=eventMin(s.arrive_ts||s.fail_ts);return p==null||a==null?null:a-p};
+const truckSvg=`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7h11v9H3zM14 10h4l3 3v3h-7"/><circle cx="7" cy="18" r="2"/><circle cx="17" cy="18" r="2"/></svg>`;
+
+async function load(){
+  try{
+    const r=await fetch(`/api/logist/${encodeURIComponent(TOKEN)}/dashboard`);
+    if(r.status===401)throw new Error('auth');
+    if(!r.ok)throw new Error('api');
+    const data=await r.json(); routes=data.routes||[];
+    document.getElementById('accessName').textContent=data.access_name;
+    document.getElementById('updated').textContent=new Date().toLocaleTimeString('uk-UA');
+    renderMap(); renderSheet();
+  }catch(e){document.getElementById('error').style.display='grid'}
+}
+
+function renderMap(){
+  trackLayer.clearLayers();stopLayer.clearLayers();markerLayer.clearLayers();tracks={};markers={};stopMarkers={};const bounds=[];
+  routes.forEach(rt=>{
+    const pts=rt.track?.points||[];
+    if(pts.length>1){
+      tracks[rt.route_id]=L.polyline(pts,{color:rt.color||'#00356B',weight:rt.track?.matched?4:3,dashArray:rt.track?.matched?null:'7 6',opacity:(selected==null||selected===rt.route_id) ? .82 : .5}).addTo(trackLayer);
+      pts.forEach(p=>bounds.push(p));
+    }
+    if(rt.last_gps){
+      const ll=[rt.last_gps.lat,rt.last_gps.lon];bounds.push(ll);
+      const isSelected=selected===rt.route_id;
+      const icon=L.divIcon({className:'',iconSize:isSelected?[160,40]:[40,40],iconAnchor:[17,20],html:`<div class="truck" style="--rc:${rt.color||'#00356B'}"><span class="truck-pin">${truckSvg}</span>${isSelected?`<span class="truck-tag">${rt.last_gps.speed_kmh==null?'GPS':Math.round(rt.last_gps.speed_kmh)+' км/год'}</span>`:''}</div>`});
+      markers[rt.route_id]=L.marker(ll,{icon}).on('click',()=>selectRoute(rt.route_id)).addTo(markerLayer);
+    }
+    if(selected===rt.route_id){
+      rt.stops.forEach(stop=>{
+        if(stop.lat==null||stop.lon==null)return;
+        const done=!!(stop.depart_ts||stop.fail_ts), arrived=!!stop.arrive_ts;
+        const fill=stop.fail_ts?'#B8860B':done?'#2E8B57':arrived?'#B8860B':'#fff';
+        const key=`${rt.route_id}-${stop.order_id}`;
+        const fg=done||arrived?'#fff':(rt.color||'#00356B');
+        const stopIcon=L.divIcon({className:'',iconSize:[24,24],iconAnchor:[12,12],html:`<div class="stop-dot" style="--rc:${rt.color||'#00356B'};--fill:${fill};--fg:${fg}">${stop.seq}</div>`});
+        stopMarkers[key]=L.marker([stop.lat,stop.lon],{icon:stopIcon})
+          .bindTooltip(`<b>${esc(stop.seq)}. ${esc(stop.client)}</b><br>План ${stop.eta||'—'} · Прибув ${hm(stop.arrive_ts)}`)
+          .on('click',()=>focusStop(rt.route_id,stop.order_id))
+          .addTo(stopLayer);
+        bounds.push([stop.lat,stop.lon]);
+      });
+    }
+  });
+  if(!fitted&&bounds.length){map.fitBounds(bounds,{paddingTopLeft:[24,80],paddingBottomRight:[24,260],maxZoom:13});fitted=true}
+}
+
+function renderSheet(){
+  const body=document.getElementById('sheetBody');
+  if(selected!=null){const rt=routes.find(x=>x.route_id===selected);if(rt){renderSelected(body,rt);return}}
+  const active=routes.filter(r=>r.start_ts&&!r.finish_ts).length;
+  const stale=routes.filter(r=>r.last_gps&&(Date.now()-new Date(r.last_gps.ts)>5*60000)).length;
+  body.innerHTML=`<div class="sheet-title"><h2>Водії сьогодні</h2><small>автооновлення · 30 с</small></div><div class="summary"><div class="metric"><b>${active}</b><span>у маршруті</span></div><div class="metric"><b>${routes.filter(r=>!r.start_ts||r.finish_ts).length}</b><span>не в маршруті</span></div><div class="metric warn"><b>${stale}</b><span>GPS понад 5 хв</span></div></div><div class="drivers">${routes.map(rt=>{const done=rt.stops.filter(s=>s.depart_ts||s.fail_ts).length;return `<div class="driver" onclick="selectRoute(${rt.route_id})" style="--color:${rt.color||'#00356B'}"><i class="dot"></i><span><b>${esc(rt.driver||rt.vehicle||'—')}</b><small>${done}/${rt.stops.length} точок · GPS ${rt.last_gps?hm(rt.last_gps.ts):'—'}</small></span><i class="status ${delayClass(rt.delay_min)}">${delayText(rt.delay_min)}</i></div>`}).join('')}</div>`;
+  document.getElementById('allTxt').textContent=`Усі водії · ${routes.length}`;
+}
+
+function renderSelected(body,rt){
+  const done=rt.stops.filter(s=>s.depart_ts||s.fail_ts).length,pct=rt.stops.length?Math.round(done/rt.stops.length*100):0;
+  const factual=rt.stops.filter(s=>s.arrive_ts||s.fail_ts).slice().sort((a,b)=>new Date(a.arrive_ts||a.fail_ts)-new Date(b.arrive_ts||b.fail_ts));
+  const factNo={};factual.forEach((s,i)=>factNo[s.order_id]=i+1);
+  const rows=rt.stops.map((s,i)=>{const fn=factNo[s.order_id],d=stopDelta(s);const moved=fn!=null&&fn!==i+1;const delta=d==null?'—':`${d>0?'+':''}${d} хв`;return `<tr id="stop-${rt.route_id}-${s.order_id}" class="${s.arrive_ts&&!s.depart_ts&&!s.fail_ts?'active':''}" onclick="centerStop(${rt.route_id},${s.order_id})"><td>${s.seq}</td><td class="${fn==null?'muted':moved?'late-t':'ok'}">${fn==null?'—':fn+(moved?(fn>i+1?' ↓':' ↑'):'')}</td><td>${esc(s.client)}</td><td>${s.eta||'—'}</td><td>${hm(s.arrive_ts)}</td><td>${hm(s.depart_ts)}</td><td class="${d==null?'muted':d>5?'late-t':'ok'}">${s.fail_ts?'відмова':delta}</td></tr>`}).join('');
+  body.innerHTML=`<div class="route-title" style="--rc:${rt.color||'#00356B'}"><span class="bigdot">${truckSvg}</span><span><h2>${esc(rt.driver||'—')}</h2><p>${esc(rt.vehicle||'—')} · маршрут ${rt.route_id}</p></span><button class="close" onclick="showAll()" aria-label="Закрити"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 5l14 14M19 5L5 19"/></svg></button></div><div class="route-stats"><div class="${rt.delay_min>0?'late':''}"><b>${delayText(rt.delay_min)}</b><span>поточне запізнення</span></div><div><b>${rt.plan_finish||'—'}</b><span>фініш за планом</span></div><div class="forecast"><b>${rt.forecast_finish||'—'}</b><span>прогноз фінішу</span></div></div><div class="telemetry"><b>GPS ${rt.last_gps?hm(rt.last_gps.ts):'—'}</b> · ${rt.last_gps?.speed_kmh==null?'швидкість —':Math.round(rt.last_gps.speed_kmh)+' км/год'} · шлях ${rt.gps_km==null?'—':rt.gps_km+' км'}</div><div class="progress" style="--rc:${rt.color||'#00356B'}"><i style="width:${pct}%"></i></div><div class="next"><span><b>${done} з ${rt.stops.length}</b> точок виконано</span><span>${rt.finish_ts?'рейс завершено':'рейс триває'}</span></div><div class="btnrow"><button class="btn secondary" onclick="showAll()">Усі водії</button><button class="btn primary" onclick="centerCurrent()">Центрувати</button></div><div class="stops-wrap"><table class="stops-table"><thead><tr><th>#</th><th>Ф№</th><th>Клієнт</th><th>План</th><th>Прибув</th><th>Поїхав</th><th>Δ / Статус</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+  document.getElementById('allTxt').textContent='Усі водії';
+}
+
+function selectRoute(id){selected=id;renderMap();renderSheet();centerCurrent()}
+function showAll(){selected=null;setExpanded(false);Object.values(tracks).forEach(line=>line.setStyle({opacity:.82,weight:3}));renderMap();renderSheet()}
+function centerCurrent(){if(selected!=null&&markers[selected])map.setView(markers[selected].getLatLng(),Math.max(map.getZoom(),14));else{const ll=Object.values(markers).map(m=>m.getLatLng());if(ll.length)map.fitBounds(L.latLngBounds(ll),{padding:[35,35],maxZoom:13})}}
+function setExpanded(on){document.getElementById('sheet').classList.toggle('expanded',on);setTimeout(()=>map.invalidateSize(),230)}
+function centerStop(rid,oid){const marker=stopMarkers[`${rid}-${oid}`];if(!marker)return;map.setView(marker.getLatLng(),Math.max(map.getZoom(),15));marker.openTooltip()}
+function focusStop(rid,oid){setExpanded(true);setTimeout(()=>{const row=document.getElementById(`stop-${rid}-${oid}`);if(row)row.scrollIntoView({behavior:'smooth',block:'center'});centerStop(rid,oid)},240)}
+const grab=document.querySelector('.grab');let dragY=null;
+grab.addEventListener('pointerdown',e=>{dragY=e.clientY;grab.setPointerCapture(e.pointerId)});
+grab.addEventListener('pointerup',e=>{if(dragY==null)return;const dy=e.clientY-dragY;setExpanded(Math.abs(dy)<18?!document.getElementById('sheet').classList.contains('expanded'):dy<0);dragY=null});
+setInterval(load,30000);load();
+</script></body></html>

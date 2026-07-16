@@ -7,6 +7,7 @@ facts.html). Схема — migrate_011, применяется из init() пр
 import asyncio
 import secrets
 from datetime import date, datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
@@ -16,6 +17,7 @@ from . import osrm
 router = APIRouter(tags=["driver"])
 pool = None
 _track_cache = {}                       # route_id -> (GPS signature, готовий трек)
+KYIV_TZ = ZoneInfo("Europe/Kyiv")
 
 
 async def init(db_pool):
@@ -31,6 +33,14 @@ async def init(db_pool):
     await pool.execute("""
         CREATE UNIQUE INDEX IF NOT EXISTS uq_driver_tokens_active
             ON driver_tokens(driver_id) WHERE is_active""")
+    await pool.execute("""
+        CREATE TABLE IF NOT EXISTS logist_tokens (
+            id           SERIAL PRIMARY KEY,
+            name         TEXT NOT NULL,
+            token        TEXT NOT NULL UNIQUE,
+            is_active    BOOLEAN NOT NULL DEFAULT TRUE,
+            created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+            last_used_at TIMESTAMPTZ)""")
     await pool.execute("""
         CREATE TABLE IF NOT EXISTS stop_events (
             id       SERIAL PRIMARY KEY,
@@ -135,6 +145,60 @@ def _iso(ts) -> str | None:
     return ts.isoformat() if ts else None
 
 
+def _route_timing(plan_date, plan_depart, plan_return, stops, start_dt, finish_dt,
+                  now=None):
+    """Поточне відхилення з урахуванням уже простроченої наступної віхи."""
+    candidates = []
+    if start_dt and plan_depart:
+        candidates.append((start_dt, plan_depart))
+    for stop in stops:
+        if stop["arrive_ts"] and stop["eta"]:
+            candidates.append((stop["arrive_ts"], stop["eta"]))
+        if stop["depart_ts"] and (stop["etd"] or stop["eta"]):
+            candidates.append((stop["depart_ts"], stop["etd"] or stop["eta"]))
+        if stop["fail_ts"] and stop["eta"]:
+            candidates.append((stop["fail_ts"], stop["eta"]))
+    if finish_dt and plan_return:
+        candidates.append((finish_dt, plan_return))
+    milestone_delay = None
+    if candidates:
+        actual, planned_time = max(candidates, key=lambda item: item[0])
+        planned = datetime.combine(plan_date, planned_time, tzinfo=KYIV_TZ)
+        milestone_delay = round(
+            (actual.astimezone(KYIV_TZ) - planned).total_seconds() / 60)
+
+    # Остання виконана точка могла бути ранньою, але після неї водій міг
+    # зупинитися, а наступна ETA/ETD уже минула. Для поточного дня це і є
+    # операційне запізнення, яке повинно рости разом із часом.
+    delay_min = milestone_delay
+    now = now or datetime.now(KYIV_TZ)
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=KYIV_TZ)
+    else:
+        now = now.astimezone(KYIV_TZ)
+    if not finish_dt and plan_date == now.date():
+        overdue = []
+        for stop in stops:
+            if stop["fail_ts"] or stop["depart_ts"]:
+                continue
+            planned_time = stop["etd"] if stop["arrive_ts"] else stop["eta"]
+            if not planned_time:
+                continue
+            planned = datetime.combine(plan_date, planned_time, tzinfo=KYIV_TZ)
+            overdue.append(round((now - planned).total_seconds() / 60))
+        if not overdue and plan_return:
+            planned = datetime.combine(plan_date, plan_return, tzinfo=KYIV_TZ)
+            overdue.append(round((now - planned).total_seconds() / 60))
+        positive_overdue = [minutes for minutes in overdue if minutes > 0]
+        if positive_overdue:
+            delay_min = max(milestone_delay or 0, max(positive_overdue))
+    forecast = None
+    if plan_return and delay_min is not None:
+        forecast_dt = datetime.combine(plan_date, plan_return) + timedelta(minutes=delay_min)
+        forecast = forecast_dt.strftime("%H:%M")
+    return delay_min, _hm(plan_return), forecast
+
+
 async def _driver_by_token(token: str):
     row = await pool.fetchrow("""
         SELECT d.id, d.name FROM driver_tokens t
@@ -143,6 +207,77 @@ async def _driver_by_token(token: str):
     if not row:
         raise HTTPException(401, "Недійсний токен")
     return row
+
+
+async def _logist_by_token(token: str):
+    row = await pool.fetchrow("""
+        UPDATE logist_tokens SET last_used_at=now()
+        WHERE token=$1 AND is_active
+        RETURNING id, name""", token)
+    if not row:
+        raise HTTPException(401, "Недійсний токен логіста")
+    return row
+
+
+class LogistAccessIn(BaseModel):
+    name: str
+
+
+@router.get("/api/logist-accesses")
+async def get_logist_accesses():
+    rows = await pool.fetch("""
+        SELECT id, name, token, created_at, last_used_at
+        FROM logist_tokens WHERE is_active ORDER BY created_at, id""")
+    return [{**dict(row), "created_at": _iso(row["created_at"]),
+             "last_used_at": _iso(row["last_used_at"])} for row in rows]
+
+
+@router.post("/api/logist-accesses")
+async def create_logist_access(body: LogistAccessIn):
+    name = body.name.strip()
+    if not name:
+        raise HTTPException(400, "Вкажіть назву доступу")
+    token = secrets.token_urlsafe(24)
+    row = await pool.fetchrow("""
+        INSERT INTO logist_tokens (name, token) VALUES ($1,$2)
+        RETURNING id, name, token, created_at, last_used_at""", name, token)
+    return {**dict(row), "created_at": _iso(row["created_at"]), "last_used_at": None,
+            "url": f"/logist.html?token={token}"}
+
+
+@router.patch("/api/logist-accesses/{access_id}")
+async def rename_logist_access(access_id: int, body: LogistAccessIn):
+    name = body.name.strip()
+    if not name:
+        raise HTTPException(400, "Вкажіть назву доступу")
+    row = await pool.fetchrow("""
+        UPDATE logist_tokens SET name=$2 WHERE id=$1 AND is_active
+        RETURNING id, name""", access_id, name)
+    if not row:
+        raise HTTPException(404, "Доступ не знайдено")
+    return dict(row)
+
+
+@router.post("/api/logist-accesses/{access_id}/rotate")
+async def rotate_logist_access(access_id: int):
+    token = secrets.token_urlsafe(24)
+    row = await pool.fetchrow("""
+        UPDATE logist_tokens SET token=$2, created_at=now(), last_used_at=NULL
+        WHERE id=$1 AND is_active RETURNING id, name, token, created_at""",
+        access_id, token)
+    if not row:
+        raise HTTPException(404, "Доступ не знайдено")
+    return {**dict(row), "created_at": _iso(row["created_at"]),
+            "url": f"/logist.html?token={token}"}
+
+
+@router.delete("/api/logist-accesses/{access_id}")
+async def delete_logist_access(access_id: int):
+    result = await pool.execute(
+        "UPDATE logist_tokens SET is_active=FALSE WHERE id=$1 AND is_active", access_id)
+    if result.endswith(" 0"):
+        raise HTTPException(404, "Доступ не знайдено")
+    return {"ok": True}
 
 
 # ---------- токены (для логиста) ----------
@@ -553,7 +688,7 @@ async def facts(plan_date: date = Query(...)):
                v.name AS vehicle_name, v.driver_id AS veh_driver_id,
                d.id AS driver_id, d.name AS driver_name
         FROM routes r JOIN vehicles v ON v.id=r.vehicle_id
-        LEFT JOIN drivers d ON d.id=r.driver_id
+        LEFT JOIN drivers d ON d.id=COALESCE(r.driver_id, v.driver_id)
         WHERE r.plan_date = $1
           AND r.project_id IN (SELECT id FROM projects WHERE is_released)
         ORDER BY r.id""", plan_date)
@@ -589,6 +724,9 @@ async def facts(plan_date: date = Query(...)):
                       (s["arrive_ts"], s["depart_ts"], s["fail_ts"]) if ts]
         start_dt = datetime.fromisoformat(w_start) if w_start else None
         finish_dt = datetime.fromisoformat(w_fin) if w_fin else None
+        delay_min, plan_finish, forecast_finish = _route_timing(
+            r["plan_date"], r["depart_time"], r["return_time"],
+            stops, start_dt, finish_dt)
         bad_event_order = bool(
             (start_dt and finish_dt and start_dt >= finish_dt)
             or (start_dt and stop_times and min(stop_times) < start_dt)
@@ -615,6 +753,8 @@ async def facts(plan_date: date = Query(...)):
             "gps_complete": gps_issue is None, "gps_issue": gps_issue,
             "plan_km": float(r["total_km"] or 0),
             "plan_depart": _hm(r["depart_time"]), "plan_return": _hm(r["return_time"]),
+            "delay_min": delay_min, "plan_finish": plan_finish,
+            "forecast_finish": forecast_finish,
             "last_gps": ({"ts": _iso(last["ts"]), "lat": last["lat"], "lon": last["lon"],
                           "speed_kmh": last["speed_kmh"]} if last else None),
             "stops": [{
@@ -651,6 +791,22 @@ async def facts_tracks(plan_date: date = Query(...)):
                     "boundary_ok": track.get("boundary_ok", False) if track else False,
                     "points": track["points"] if track else []})
     return out
+
+
+@router.get("/api/logist/{token}/dashboard")
+async def logist_dashboard(token: str, plan_date: date | None = Query(None)):
+    """Мобільний кабінет логіста: факти, GPS-маркери та очищені треки."""
+    access = await _logist_by_token(token)
+    day = plan_date or kyiv_today()
+    # facts() наповнює кеш matched-треків; другий виклик повторно використовує його,
+    # а не запускає паралельний дубль OSRM map-matching для кожного рейсу.
+    routes = await facts(day)
+    track_rows = await facts_tracks(day)
+    tracks = {row["route_id"]: row for row in track_rows}
+    for route in routes:
+        track = tracks.get(route["route_id"])
+        route["track"] = track or {"points": [], "source": None, "gps_km": None}
+    return {"access_name": access["name"], "date": day.isoformat(), "routes": routes}
 
 
 # ---------- v28: рейс на наступний день ----------

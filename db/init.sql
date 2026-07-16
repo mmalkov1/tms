@@ -94,6 +94,16 @@ INSERT INTO drivers (name, shift_start, shift_end) VALUES
  ('Водій 2', '08:00', '18:00'),
  ('Водій 3', '08:00', '18:00');
 
+-- v48: іменовані незалежні доступи до мобільного кабінету логіста
+CREATE TABLE IF NOT EXISTS logist_tokens (
+    id           SERIAL PRIMARY KEY,
+    name         TEXT NOT NULL,
+    token        TEXT NOT NULL UNIQUE,
+    is_active    BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+    last_used_at TIMESTAMPTZ
+);
+
 INSERT INTO vehicles (name, max_weight_kg, max_volume_m3, is_hired, driver_id) VALUES
  ('Авто 1', 1500, 12.0, FALSE, 1),
  ('Авто 2', 1500, 12.0, FALSE, 2),

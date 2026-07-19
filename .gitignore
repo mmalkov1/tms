@@ -3,3 +3,5 @@ __pycache__/
 *.pyc
 osrm/*.pbf
 osrm/*.osrm*
+analytics/*.log
+*.txt

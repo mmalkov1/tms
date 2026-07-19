@@ -154,9 +154,15 @@
   .tl .brk { position:absolute; top:0; bottom:0;
              background:repeating-linear-gradient(135deg,#E8B4A0 0 4px,#F7E0D6 4px 8px); }
   .tl .visit { position:absolute; top:2.5px; bottom:2.5px; background:var(--navy); min-width:5px; border-radius:99px; }
-  .tl:hover::after { content:attr(data-tip); position:absolute; bottom:calc(100% + 5px); left:50%; transform:translateX(-50%);
-    background:var(--navy); color:#fff; padding:5px 10px; border-radius:8px; font-size:11px; font-weight:600;
-    white-space:nowrap; z-index:60; box-shadow:0 4px 14px rgba(0,20,50,.3); pointer-events:none; }
+  /* v51: тултип шкали — синглтон на body (::after різався overflow:hidden карток) */
+  #tlTip { display:none; position:fixed; z-index:200; background:var(--navy); color:#fff;
+    padding:6px 12px; border-radius:8px; font-size:11.5px; font-weight:600; white-space:nowrap;
+    box-shadow:0 4px 14px rgba(0,20,50,.3); pointer-events:none; }
+  #tlTip::after { content:""; position:absolute; top:100%; left:var(--ar,50%); transform:translateX(-50%);
+    border:6px solid transparent; border-top-color:var(--navy); }
+  .stop.depot .sfedit { cursor:pointer; color:var(--muted); display:inline-flex; }
+  .stop.depot .sfedit:hover { color:var(--navy); }
+  .stop.depot .sfk { color:var(--blue); font-weight:700; }
   .sortable-ghost { opacity:.4; background:#DBE6F5; }
   #unassigned { border-left-color:var(--cream-400); }
   #unassigned .route-head { color:var(--blue); }
@@ -330,6 +336,59 @@
     <button class="pri" onclick="edSave()">Зберегти</button>
   </div>
 </dialog>
+<dialog id="sfDlg" style="max-width:480px">
+  <div class="dlg-head"><span id="sfTitle">Старт / Фініш</span>
+    <span style="cursor:pointer" onclick="$('sfDlg').close()"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg></span></div>
+  <div class="dlg-body">
+    <div style="font-size:11.5px;font-weight:700;color:var(--navy);text-transform:uppercase;letter-spacing:.4px;margin-bottom:7px">Старт маршруту</div>
+    <div style="display:flex;gap:6px;margin-bottom:9px">
+      <span class="rtab" data-g="s" data-k="depot" onclick="sfKind(this)">Склад</span>
+      <span class="rtab" data-g="s" data-k="home" onclick="sfKind(this)">Дім водія</span>
+      <span class="rtab" data-g="s" data-k="custom" onclick="sfKind(this)">Інша адреса</span>
+    </div>
+    <div id="sfSInfo" style="font-size:12px;color:var(--muted);background:var(--cream-50);border-radius:9px;padding:7px 10px;margin-bottom:8px"></div>
+    <div id="sfSAddr" style="display:none;margin-bottom:8px">
+      <div style="display:flex;gap:6px">
+        <input id="sfSAddrIn" placeholder="Місто, вулиця, будинок" style="flex:1;padding:8px 10px;border:1.5px solid var(--cream-300);border-radius:9px;font:inherit;font-size:12.5px">
+        <button onclick="sfGeocode('s')" style="border:1.5px solid var(--cream-300);background:#fff;color:var(--blue);border-radius:9px;padding:7px 12px;font:inherit;font-size:12px;font-weight:600;cursor:pointer">Знайти</button>
+      </div>
+      <div id="sfSMsg" style="font-size:11.5px;margin-top:4px"></div>
+    </div>
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:14px">
+      <label style="font-size:12.5px;font-weight:600;color:var(--navy)">Час виїзду</label>
+      <input type="time" id="sfDep" style="padding:6px 8px;border:1.5px solid var(--cream-300);border-radius:9px;font:inherit;font-size:12.5px">
+    </div>
+    <div style="border-top:1px solid var(--cream-200);padding-top:12px">
+      <div style="font-size:11.5px;font-weight:700;color:var(--navy);text-transform:uppercase;letter-spacing:.4px;margin-bottom:7px">Фініш маршруту</div>
+      <div style="display:flex;gap:6px;margin-bottom:9px">
+        <span class="rtab" data-g="f" data-k="depot" onclick="sfKind(this)">Склад</span>
+        <span class="rtab" data-g="f" data-k="home" onclick="sfKind(this)">Дім водія</span>
+        <span class="rtab" data-g="f" data-k="custom" onclick="sfKind(this)">Інша адреса</span>
+      </div>
+      <div id="sfFInfo" style="font-size:12px;color:var(--muted);background:var(--cream-50);border-radius:9px;padding:7px 10px;margin-bottom:8px"></div>
+      <div id="sfFAddr" style="display:none;margin-bottom:8px">
+        <div style="display:flex;gap:6px">
+          <input id="sfFAddrIn" placeholder="Місто, вулиця, будинок (напр., СТО)" style="flex:1;padding:8px 10px;border:1.5px solid var(--cream-300);border-radius:9px;font:inherit;font-size:12.5px">
+          <button onclick="sfGeocode('f')" style="border:1.5px solid var(--cream-300);background:#fff;color:var(--blue);border-radius:9px;padding:7px 12px;font:inherit;font-size:12px;font-weight:600;cursor:pointer">Знайти</button>
+        </div>
+        <div id="sfFMsg" style="font-size:11.5px;margin-top:4px"></div>
+      </div>
+      <div style="display:flex;align-items:center;gap:8px">
+        <label style="font-size:12.5px;font-weight:600;color:var(--navy)">Час фінішу</label>
+        <input type="time" id="sfRet" style="padding:6px 8px;border:1.5px solid var(--cream-300);border-radius:9px;font:inherit;font-size:12.5px">
+        <span style="font-size:11px;color:var(--muted)">порожньо = авторозрахунок</span>
+      </div>
+    </div>
+    <div style="font-size:11.5px;color:var(--muted);background:var(--cream-50);border-radius:9px;padding:8px 10px;margin-top:12px;display:flex;gap:8px;align-items:flex-start">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#285E96" stroke-width="2" stroke-linecap="round" style="flex:none;margin-top:1px"><circle cx="12" cy="12" r="9"/><path d="M12 8h.01M12 11v5"/></svg>
+      <span>У 1С в експорті на початку та в кінці рейсу завжди передається склад — незалежно від цих налаштувань.</span>
+    </div>
+  </div>
+  <div class="dlg-foot">
+    <button onclick="$('sfDlg').close()">Скасувати</button>
+    <button class="pri" onclick="sfSave()">Зберегти і перерахувати</button>
+  </div>
+</dialog>
 <dialog id="addRtDlg">
   <div class="dlg-head"><span>Додати авто в день</span><span onclick="addRtDlg.close()">✕</span></div>
   <div class="dlg-body">
@@ -380,10 +439,10 @@
             <a id="tokQrLink" target="_blank"></a><br>
             <small style="color:#888">водій сканує QR або відкриває посилання в Chrome</small></div></div>
         <h4>Водії</h4>
-        <table><thead><tr><th>ПІБ</th><th>Телефон</th><th>Код 1С</th><th title="Пріоритет 2: постійний графік водія. Діє, коли немає вікна на дату; обрізається часом роботи депо">Графік</th><th>Кабінет водія</th><th></th></tr></thead>
+        <table><thead><tr><th>ПІБ</th><th>Телефон</th><th>Код 1С</th><th title="Пріоритет 2: постійний графік водія. Діє, коли немає вікна на дату; обрізається часом роботи депо">Графік</th><th title="Для старту/фінішу маршруту з дому. Геокодиться автоматично при збереженні">Адреса дому</th><th>Кабінет водія</th><th></th></tr></thead>
           <tbody id="setDrvRows"></tbody>
           <tfoot><tr><td><input id="ndName" placeholder="ПІБ нового водія" style="width:140px"></td>
-            <td colspan="4"></td><td class="act" onclick="addDriverSet()" title="Додати"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14"/><path d="M5 12h14"/></svg></td></tr></tfoot>
+            <td colspan="5"></td><td class="act" onclick="addDriverSet()" title="Додати"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14"/><path d="M5 12h14"/></svg></td></tr></tfoot>
         </table>
         <small style="color:#888;display:block;margin:4px 0 12px">графік — постійний робочий час водія
         (типово 09:00–16:00, жовта рамка = інший); пріоритет розрахунку:
@@ -568,6 +627,27 @@ function tlHtml(twF, twT, eta, etd, bF, bT) {
     h += `<div class="visit" style="left:${pct(a)}%;width:${Math.max(1.5, pct(d??a+15)-pct(a))}%"></div>`;
   return h + '</div>';
 }
+
+// v51: тултип шкали поверх усього (замість ::after, що різався картками)
+const tlTip = document.createElement('div'); tlTip.id = 'tlTip';
+document.body.appendChild(tlTip);
+document.addEventListener('mouseover', e => {
+  const t = e.target.closest('.tl');
+  if (!t || !t.dataset.tip) return;
+  tlTip.textContent = t.dataset.tip;
+  tlTip.style.display = 'block';
+  const r = t.getBoundingClientRect();
+  const w = tlTip.offsetWidth;
+  let x = r.left + r.width/2 - w/2;
+  x = Math.max(8, Math.min(x, window.innerWidth - w - 8));
+  tlTip.style.left = x + 'px';
+  tlTip.style.top = (r.top - tlTip.offsetHeight - 9) + 'px';
+  tlTip.style.setProperty('--ar', (r.left + r.width/2 - x) + 'px');
+});
+document.addEventListener('mouseout', e => {
+  if (e.target.closest && e.target.closest('.tl')) tlTip.style.display = 'none';
+});
+document.addEventListener('scroll', () => tlTip.style.display = 'none', true);
 
 let selectedVeh = new Set();
 let driversList = [];
@@ -768,6 +848,7 @@ function renderSetDA() {
     <td><input class="sdp" value="${d.phone||''}" placeholder="—" style="width:110px"></td>
     <td><input class="sdc" value="${d.code_1c||''}" placeholder="—" style="width:95px" title="Код водія в 1С (ФизическиеЛица)"></td>
     <td style="white-space:nowrap"><input type="time" class="sds" value="${String(d.shift_start||'09:00').slice(0,5)}" style="width:76px${ns(d)?';border:1.5px solid #D8A230;font-weight:700':''}">–<input type="time" class="sde" value="${String(d.shift_end||'16:00').slice(0,5)}" style="width:76px${ns(d)?';border:1.5px solid #D8A230;font-weight:700':''}"></td>
+    <td style="white-space:nowrap"><input class="sdh" value="${d.home_address||''}" placeholder="не вказано" style="width:180px" title="Адреса дому для старту/фінішу маршруту">${d.home_address ? (d.home_lat!=null ? ' <span style="color:#2E8B57;font-weight:700" title="Адресу геокодовано">✓</span>' : ' <span style="color:#B8860B;font-weight:700" title="Не вдалося геокодувати — уточни адресу">⚠</span>') : ''}</td>
     <td>${d.token_created
         ? `<span class="tok-ok">✓ від ${dd(d.token_created)}</span>`
         : `<span class="tok-no">немає токена</span>`}
@@ -792,9 +873,13 @@ async function saveDriverSet(el, did) {
     headers:{'Content-Type':'application/json'},
     body: JSON.stringify({ name: tr.querySelector('.sdn').value,
       phone: tr.querySelector('.sdp').value, code_1c: tr.querySelector('.sdc').value,
-      shift_start: tr.querySelector('.sds').value, shift_end: tr.querySelector('.sde').value })});
+      shift_start: tr.querySelector('.sds').value, shift_end: tr.querySelector('.sde').value,
+      home_address: tr.querySelector('.sdh').value })});
   if (!r.ok) { st('Помилка збереження водія'); return; }
-  st('Водія збережено');
+  const j = await r.json();                                          // v51
+  st(j.home_geocoded === false
+     ? '⚠ Водія збережено, але адресу дому не знайдено — уточни її'
+     : 'Водія збережено');
   await loadSetDrivers(); await loadVehicles(true); renderSetDA();
 }
 
@@ -1172,16 +1257,108 @@ function highlightPoint(lat, lon, name) {
   setTimeout(() => { if (hlMarker) { layers.removeLayer(hlMarker); hlMarker=null; } }, 2600);
 }
 
-function depotEl(name, kind, t, w, v) {
+function depotEl(r, kind, t, w, v) {                       // v51: старт/фініш не зі складу
+  const k = kind==='out' ? (r.start_kind||'depot') : (r.finish_kind||'depot');
+  const addr = kind==='out' ? r.start_address : r.finish_address;
+  const label = k==='depot' ? r.depot_name
+              : k==='home'  ? `<span class="sfk">Дім водія</span>${addr?' · '+addr:''}`
+              :               `<span class="sfk">Інша адреса</span>${addr?' · '+addr:''}`;
+  const badge = k==='depot' ? 'С' : k==='home' ? 'Д' : 'А';
+  const manual = kind==='in' && r.return_time_manual;
   const d = document.createElement('div');
   d.className = 'stop depot';
   d.innerHTML = `<span class="seq">${kind==='out'?'▶':'◀'}</span>
-    <span class="kind depot">С</span>
-    <span>${name} · ${kind==='out'?'виїзд':'повернення'}</span>
+    <span class="kind depot">${badge}</span>
+    <span>${label} · ${kind==='out'?'виїзд':'фініш'}
+      <span class="sfedit" title="Змінити старт/фініш маршруту" onclick="openSF(${r.id})"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-1px"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></svg></span></span>
     <span class="cum">${w!=null ? (+w).toFixed(1)+' кг<br>'+(+v).toFixed(2)+' м³' : ''}</span>
     ${tlHtml(null, null, t, t)}
-    <span class="eta">${hm(t)}</span>`;
+    <span class="eta" ${manual?'title="Час фінішу зафіксовано вручну" style="text-decoration:underline dotted"':''}>${hm(t)}</span>`;
   return d;
+}
+
+// --- v51: старт/фініш маршруту не зі складу ---
+let sfRoute = null, sfGeo = {s:null, f:null};
+
+function sfKind(el) {
+  const g = el.dataset.g;
+  document.querySelectorAll(`#sfDlg .rtab[data-g="${g}"]`)
+    .forEach(x => x.classList.toggle('on', x === el));
+  sfRender(g);
+}
+function sfCur(g) {
+  const on = document.querySelector(`#sfDlg .rtab[data-g="${g}"].on`);
+  return on ? on.dataset.k : 'depot';
+}
+function sfRender(g) {
+  const k = sfCur(g);
+  const info = $(g==='s' ? 'sfSInfo' : 'sfFInfo');
+  const addr = $(g==='s' ? 'sfSAddr' : 'sfFAddr');
+  addr.style.display = k === 'custom' ? 'block' : 'none';
+  if (k === 'depot') {
+    info.style.display = 'block';
+    info.innerHTML = sfRoute.depot_name || 'Склад';
+  } else if (k === 'home') {
+    info.style.display = 'block';
+    info.innerHTML = sfRoute.driver_has_home
+      ? `Дім водія · ${sfRoute.driver_home_address || ''}`
+      : `<span style="color:var(--red);font-weight:600">У водія не вказано адресу дому — додай її в Налаштування → Водії</span>`;
+  } else info.style.display = 'none';
+}
+function openSF(rid) {
+  sfRoute = (window._routes || []).find(r => r.id === rid);
+  if (!sfRoute) return;
+  sfGeo = {
+    s: sfRoute.start_kind === 'custom' && sfRoute.start_lat != null
+       ? {lat: sfRoute.start_lat, lon: sfRoute.start_lon} : null,
+    f: sfRoute.finish_kind === 'custom' && sfRoute.finish_lat != null
+       ? {lat: sfRoute.finish_lat, lon: sfRoute.finish_lon} : null };
+  $('sfTitle').textContent = `Старт / Фініш · ${sfRoute.vehicle_name}`;
+  document.querySelectorAll('#sfDlg .rtab').forEach(x =>
+    x.classList.toggle('on', x.dataset.k === ((x.dataset.g==='s' ? sfRoute.start_kind : sfRoute.finish_kind) || 'depot')));
+  $('sfSAddrIn').value = sfRoute.start_kind === 'custom' ? (sfRoute.start_address || '') : '';
+  $('sfFAddrIn').value = sfRoute.finish_kind === 'custom' ? (sfRoute.finish_address || '') : '';
+  $('sfSMsg').textContent = ''; $('sfFMsg').textContent = '';
+  $('sfDep').value = sfRoute.depart_time ? String(sfRoute.depart_time).slice(0,5) : '';
+  $('sfRet').value = sfRoute.return_time_manual ? String(sfRoute.return_time_manual).slice(0,5) : '';
+  sfRender('s'); sfRender('f');
+  $('sfDlg').showModal();
+}
+async function sfGeocode(g) {
+  const inp = $(g==='s' ? 'sfSAddrIn' : 'sfFAddrIn');
+  const msg = $(g==='s' ? 'sfSMsg' : 'sfFMsg');
+  msg.style.color = 'var(--navy)'; msg.textContent = 'Геокодинг…';
+  const r = await fetch('/api/geocode-address', {method:'POST',
+    headers:{'Content-Type':'application/json'}, body: JSON.stringify({address: inp.value})});
+  if (!r.ok) {
+    sfGeo[g] = null;
+    msg.style.color = 'var(--red)';
+    msg.textContent = '⚠ ' + ((await r.json()).detail || 'Помилка');
+    return;
+  }
+  const j = await r.json();
+  sfGeo[g] = j;
+  highlightPoint(j.lat, j.lon);
+  msg.style.color = '#2E8B57';
+  msg.textContent = `Знайдено: ${j.lat.toFixed(5)}, ${j.lon.toFixed(5)} — точку показано на карті`;
+}
+async function sfSave() {
+  const sk = sfCur('s'), fk = sfCur('f');
+  if (sk === 'custom' && !sfGeo.s) return st('Старт: спочатку натисни «Знайти» для адреси');
+  if (fk === 'custom' && !sfGeo.f) return st('Фініш: спочатку натисни «Знайти» для адреси');
+  const body = {
+    start_kind: sk, start_address: $('sfSAddrIn').value || null,
+    start_lat: sfGeo.s ? sfGeo.s.lat : null, start_lon: sfGeo.s ? sfGeo.s.lon : null,
+    depart_time: $('sfDep').value || null,
+    finish_kind: fk, finish_address: $('sfFAddrIn').value || null,
+    finish_lat: sfGeo.f ? sfGeo.f.lat : null, finish_lon: sfGeo.f ? sfGeo.f.lon : null,
+    return_time_manual: $('sfRet').value || null };
+  const r = await fetch(`/api/routes/${sfRoute.id}/start-finish`, {method:'PATCH',
+    headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
+  if (!r.ok) { st('⚠ ' + ((await r.json()).detail || 'Помилка збереження')); return; }
+  $('sfDlg').close();
+  st('Старт/фініш збережено, маршрут перераховано');
+  loadAll();
 }
 
 async function loadAll() {
@@ -1193,6 +1370,7 @@ async function loadAll() {
     fetch(`/api/routes?project_id=${pid}`).then(r=>r.json()),
   ]);
 
+  window._routes = routes;                        // v51: для діалогу старт/фініш
   const routed = new Set(routes.flatMap(r => r.stops.map(s => s.order_id)));
   orders.forEach(o => {
     if (!o.lat || routed.has(o.id)) return;
@@ -1255,11 +1433,11 @@ async function loadAll() {
       ${over?'<span class="over">ПЕРЕВАНТАЖЕННЯ</span>':''}</span></div>`;
     const list = document.createElement('div');
     list.className = 'stops'; list.dataset.route = r.id;
-    if (r.depart_time) list.appendChild(depotEl(r.depot_name, 'out', r.depart_time, r.start_weight, r.start_volume));
+    if (r.depart_time) list.appendChild(depotEl(r, 'out', r.depart_time, r.start_weight, r.start_volume));
     r.stops.forEach(s => list.appendChild(stopEl(s, s.seq, s.eta, s.etd, r.id)));
     if (r.return_time && r.stops.length) {
       const last = r.stops[r.stops.length-1];
-      list.appendChild(depotEl(r.depot_name, 'in', r.return_time, last.cum_weight, last.cum_volume));
+      list.appendChild(depotEl(r, 'in', r.return_time_manual || r.return_time, last.cum_weight, last.cum_volume));
     }
     card.querySelector('.route-head').addEventListener('click', e => {
       if (e.target.closest('.del')) return;

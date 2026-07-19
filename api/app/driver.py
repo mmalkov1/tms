@@ -313,7 +313,12 @@ async def driver_trip(token: str, d: date | None = Query(None),
     day = d or kyiv_today()
     # v39: у водія може бути кілька рейсів на день
     rr = await pool.fetch("""
-        SELECT r.id, r.plan_date, r.color, r.total_km, r.depart_time, r.return_time,
+        SELECT r.id, r.plan_date, r.color, r.total_km, r.depart_time,
+               COALESCE(r.return_time_manual, r.return_time) AS return_time,   -- v51
+               COALESCE(r.start_kind, 'depot')  AS start_kind,
+               r.start_address,
+               COALESCE(r.finish_kind, 'depot') AS finish_kind,
+               r.finish_address,
                v.name AS vehicle_name, v.plate,
                (SELECT count(*) FROM route_stops s WHERE s.route_id = r.id) AS n_stops,
                (SELECT ts FROM route_events e WHERE e.route_id=r.id AND e.event='start')  AS start_ts,
@@ -373,6 +378,10 @@ async def driver_trip(token: str, d: date | None = Query(None),
         "route": {"id": route["id"], "vehicle": route["vehicle_name"], "plate": route["plate"],
                   "color": route["color"], "total_km": float(route["total_km"] or 0),
                   "depart": _hm(route["depart_time"]), "return": _hm(route["return_time"]),
+                  "start_kind": route["start_kind"],                  # v51
+                  "start_address": route["start_address"],
+                  "finish_kind": route["finish_kind"],
+                  "finish_address": route["finish_address"],
                   "depot_arrive_ts": _iso(await pool.fetchval(          # v38
                       "SELECT ts FROM route_events WHERE route_id=$1 AND event='depot_arrive'",
                       route["id"])),
@@ -684,7 +693,8 @@ async def position(token: str, body: GpsBatch):
 async def facts(plan_date: date = Query(...)):
     routes = await pool.fetch("""
         SELECT r.id, r.color, r.plan_date, r.project_id,
-               r.total_km, r.depart_time, r.return_time,
+               r.total_km, r.depart_time,
+               COALESCE(r.return_time_manual, r.return_time) AS return_time,   -- v51
                v.name AS vehicle_name, v.driver_id AS veh_driver_id,
                d.id AS driver_id, d.name AS driver_name
         FROM routes r JOIN vehicles v ON v.id=r.vehicle_id
@@ -703,6 +713,9 @@ async def facts(plan_date: date = Query(...)):
     for r in routes:
         stops = await pool.fetch("""
             SELECT s.seq, s.eta, s.etd, o.id AS order_id, o.client, o.address, o.lat, o.lon,
+                   o.kind, o.doc_number, o.address_extra, o.contact_person, o.phone,   -- v51
+                   o.tw_from, o.tw_to, o.break_from, o.break_to,
+                   o.weight_kg, o.volume_m3, o.seats, o.service_min,
                    ea.ts AS arrive_ts, ed.ts AS depart_ts,
                    ef.ts AS fail_ts, COALESCE(ef.reason_text, fr.name) AS fail_reason
             FROM route_stops s JOIN orders o ON o.id=s.order_id
@@ -760,6 +773,14 @@ async def facts(plan_date: date = Query(...)):
             "stops": [{
                 "seq": s["seq"], "order_id": s["order_id"], "client": s["client"],
                 "address": s["address"], "lat": s["lat"], "lon": s["lon"],
+                "kind": s["kind"], "doc_number": s["doc_number"],               # v51
+                "address_extra": s["address_extra"],
+                "contact_person": s["contact_person"], "phone": s["phone"],
+                "tw_from": _hm(s["tw_from"]), "tw_to": _hm(s["tw_to"]),
+                "break_from": _hm(s["break_from"]), "break_to": _hm(s["break_to"]),
+                "weight_kg": float(s["weight_kg"] or 0),
+                "volume_m3": float(s["volume_m3"] or 0),
+                "seats": s["seats"], "service_min": s["service_min"],
                 "eta": _hm(s["eta"]), "etd": _hm(s["etd"]),
                 "arrive_ts": _iso(s["arrive_ts"]), "depart_ts": _iso(s["depart_ts"]),
                 "fail_ts": _iso(s["fail_ts"]), "fail_reason": s["fail_reason"],
@@ -829,7 +850,13 @@ async def driver_next_trip(token: str):
         return {"trip": None, "trips": []}
     rr = await pool.fetch("""
         SELECT r.id, r.plan_date, r.depart_time, v.name AS vehicle_name, v.plate,
-               d.lat AS depot_lat, d.lon AS depot_lon, d.name AS depot_name
+               COALESCE(r.start_lat, d.lat)   AS depot_lat,          -- v51: точка старту
+               COALESCE(r.start_lon, d.lon)   AS depot_lon,
+               COALESCE(r.finish_lat, d.lat)  AS fin_lat,
+               COALESCE(r.finish_lon, d.lon)  AS fin_lon,
+               COALESCE(r.start_kind, 'depot')  AS start_kind,
+               COALESCE(r.finish_kind, 'depot') AS finish_kind,
+               r.start_address, r.finish_address, d.name AS depot_name
         FROM routes r JOIN vehicles v ON v.id = r.vehicle_id
         JOIN depots d ON d.id = r.depot_id
         WHERE r.plan_date = $2
@@ -844,15 +871,27 @@ async def driver_next_trip(token: str):
                    o.lat, o.lon
             FROM route_stops s JOIN orders o ON o.id = s.order_id
             WHERE s.route_id = $1 ORDER BY s.seq""", route["id"])
-        depot_pt = (route["depot_lat"], route["depot_lon"])
-        geometry = await osrm.route_latlon(                  # v33: плечі склад→1 і остання→склад
-            [depot_pt] + [(s["lat"], s["lon"]) for s in stops if s["lat"] is not None] + [depot_pt])
+        start_pt = (route["depot_lat"], route["depot_lon"])   # v51: старт (може бути не склад)
+        fin_pt = (route["fin_lat"], route["fin_lon"])
+        geometry = await osrm.route_latlon(                  # v33: плечі старт→1 і остання→фініш
+            [start_pt] + [(s["lat"], s["lon"]) for s in stops if s["lat"] is not None] + [fin_pt])
+
+        def _pt_name(kind, addr):
+            if kind == "depot":
+                return route["depot_name"]
+            if kind == "home":
+                return f"Дім · {addr}" if addr else "Дім водія"
+            return addr or "Інша адреса"
         trips.append({
             "date": route["plan_date"].isoformat(), "route_id": route["id"],
             "vehicle": route["vehicle_name"], "plate": route["plate"],
             "depart": _hm(route["depart_time"]),
             "depot": {"lat": route["depot_lat"], "lon": route["depot_lon"],
-                      "name": route["depot_name"]},
+                      "kind": route["start_kind"],
+                      "name": _pt_name(route["start_kind"], route["start_address"])},
+            "finish": {"lat": route["fin_lat"], "lon": route["fin_lon"],   # v51
+                       "kind": route["finish_kind"],
+                       "name": _pt_name(route["finish_kind"], route["finish_address"])},
             "geometry": geometry,
             "stops": [{"seq": s["seq"], "client": s["client"], "kind": s["kind"],
                        "address": s["address"], "address_extra": s["address_extra"],
@@ -884,8 +923,16 @@ async def route_event(token: str, route_id: int, body: RouteEventIn):
         drv["id"], route_id)
     if not ok:
         raise HTTPException(404, "Не твій рейс")
-    if body.event == "start":                          # v38: спочатку — на склад
-        arrived = await pool.fetchval(
+    dep = await pool.fetchrow("""
+        SELECT COALESCE(r.start_lat, d.lat)  AS s_lat,               -- v51
+               COALESCE(r.start_lon, d.lon)  AS s_lon,
+               COALESCE(r.finish_lat, d.lat) AS f_lat,
+               COALESCE(r.finish_lon, d.lon) AS f_lon,
+               COALESCE(r.start_kind, 'depot') AS start_kind
+        FROM routes r JOIN depots d ON d.id=r.depot_id
+        WHERE r.id=$1""", route_id)                                                # v47
+    if body.event == "start" and dep and dep["start_kind"] == "depot":
+        arrived = await pool.fetchval(               # v38/v51: склад-крок лише
             "SELECT 1 FROM route_events WHERE route_id=$1 AND event='depot_arrive'", route_id)
         if not arrived:
             raise HTTPException(400, "Спочатку познач прибуття на склад")
@@ -894,11 +941,9 @@ async def route_event(token: str, route_id: int, body: RouteEventIn):
             "SELECT 1 FROM route_events WHERE route_id=$1 AND event='start'", route_id)
         if not started:
             raise HTTPException(400, "Спочатку познач виїзд")
-    dep = await pool.fetchrow("""
-        SELECT d.lat, d.lon FROM routes r JOIN depots d ON d.id=r.depot_id
-        WHERE r.id=$1""", route_id)                                                # v47
-    dist = await _press_distance_m(drv["id"], dep["lat"] if dep else None,
-                                   dep["lon"] if dep else None, body.lat, body.lon)
+    tgt_lat = (dep["f_lat"] if body.event == "finish" else dep["s_lat"]) if dep else None
+    tgt_lon = (dep["f_lon"] if body.event == "finish" else dep["s_lon"]) if dep else None
+    dist = await _press_distance_m(drv["id"], tgt_lat, tgt_lon, body.lat, body.lon)
     if dist is not None and dist > GEO_CONFIRM_M and not body.force:
         return {"confirm_required": True, "dist_m": dist}
     # перше натискання перемагає, повторне — ігнорується
@@ -968,7 +1013,11 @@ async def _route_gps_points(route_id: int, driver_ids: list[int]):
         "SELECT event, ts FROM route_events WHERE route_id=$1", route_id)}
     start, fin = evs.get("start"), evs.get("finish")
     depot = await pool.fetchrow("""
-        SELECT d.lat, d.lon FROM routes r JOIN depots d ON d.id=r.depot_id
+        SELECT COALESCE(r.start_lat, d.lat)  AS s_lat,               -- v51
+               COALESCE(r.start_lon, d.lon)  AS s_lon,
+               COALESCE(r.finish_lat, d.lat) AS f_lat,
+               COALESCE(r.finish_lon, d.lon) AS f_lon
+        FROM routes r JOIN depots d ON d.id=r.depot_id
         WHERE r.id=$1""", route_id)
     if not start or not driver_ids:
         return start, fin, [], depot
@@ -981,20 +1030,22 @@ async def _route_gps_points(route_id: int, driver_ids: list[int]):
         "SELECT min(ts) AS first_ev, max(ts) AS last_ev FROM stop_events WHERE route_id=$1",
         route_id)
     if depot and pts:
-        inside = [_haversine_km(p["lat"], p["lon"], depot["lat"], depot["lon"]) <= 0.3
-                  for p in pts]
+        inside_s = [_haversine_km(p["lat"], p["lon"], depot["s_lat"], depot["s_lon"]) <= 0.3
+                    for p in pts]
+        inside_f = [_haversine_km(p["lat"], p["lon"], depot["f_lat"], depot["f_lon"]) <= 0.3
+                    for p in pts]
         i0, i1 = 0, len(pts) - 1
         if stop_range and stop_range["first_ev"]:
             for i, point in enumerate(pts):
                 if point["ts"] >= stop_range["first_ev"]:
                     break
-                if inside[i]:
+                if inside_s[i]:
                     i0 = i
         if stop_range and stop_range["last_ev"]:
             for i in range(len(pts) - 1, -1, -1):
                 if pts[i]["ts"] <= stop_range["last_ev"]:
                     break
-                if inside[i]:
+                if inside_f[i]:
                     i1 = i
         if i1 >= i0:
             pts = pts[i0:i1 + 1]
@@ -1019,9 +1070,10 @@ async def _route_actual_track(route_id: int, driver_ids: list[int]):
         thin.append(clean[-1])
     boundary_ok = bool(
         depot
-        and _haversine_km(raw[0]["lat"], raw[0]["lon"], depot["lat"], depot["lon"]) <= 0.5
+        and _haversine_km(raw[0]["lat"], raw[0]["lon"],
+                          depot["s_lat"], depot["s_lon"]) <= 0.5
         and (not fin or _haversine_km(
-            raw[-1]["lat"], raw[-1]["lon"], depot["lat"], depot["lon"]) <= 0.5))
+            raw[-1]["lat"], raw[-1]["lon"], depot["f_lat"], depot["f_lon"]) <= 0.5))
     matched = await osrm.match_with_distance([
         (p["lat"], p["lon"], int(p["ts"].timestamp()),
          min(50, max(10, int(p["accuracy_m"] or 25))))
@@ -1060,25 +1112,33 @@ async def _route_worklog(route_id: int, driver_ids: list[int]):
             WHERE driver_id = ANY($1::int[]) AND ts >= $2 AND ts <= $3
               AND (accuracy_m IS NULL OR accuracy_m <= 60)
             ORDER BY ts""", driver_ids, start, fin or datetime.now(timezone.utc))
-        depot = await pool.fetchrow("SELECT lat, lon FROM depots WHERE id=1")
+        depot = await pool.fetchrow("""
+            SELECT COALESCE(r.start_lat, d.lat)  AS s_lat,           -- v51
+                   COALESCE(r.start_lon, d.lon)  AS s_lon,
+                   COALESCE(r.finish_lat, d.lat) AS f_lat,
+                   COALESCE(r.finish_lon, d.lon) AS f_lon
+            FROM routes r JOIN depots d ON d.id=r.depot_id
+            WHERE r.id=$1""", route_id)
         ev = await pool.fetchrow(
             "SELECT min(ts) AS first_ev, max(ts) AS last_ev FROM stop_events WHERE route_id=$1",
             route_id)
         if depot and pts:
-            ing = [_haversine_km(p["lat"], p["lon"], depot["lat"], depot["lon"]) <= 0.3
-                   for p in pts]
+            ing_s = [_haversine_km(p["lat"], p["lon"], depot["s_lat"], depot["s_lon"]) <= 0.3
+                     for p in pts]
+            ing_f = [_haversine_km(p["lat"], p["lon"], depot["f_lat"], depot["f_lon"]) <= 0.3
+                     for p in pts]
             i0, i1 = 0, len(pts) - 1
-            if ev and ev["first_ev"]:      # старт: остання точка на складі до 1-ї події
+            if ev and ev["first_ev"]:      # старт: остання точка на старті до 1-ї події
                 for i, p in enumerate(pts):
                     if p["ts"] >= ev["first_ev"]:
                         break
-                    if ing[i]:
+                    if ing_s[i]:
                         i0 = i
-            if ev and ev["last_ev"]:       # фініш: перша точка на складі після останньої події
+            if ev and ev["last_ev"]:       # фініш: перша точка на фініші після останньої події
                 for i in range(len(pts) - 1, -1, -1):
                     if pts[i]["ts"] <= ev["last_ev"]:
                         break
-                    if ing[i]:
+                    if ing_f[i]:
                         i1 = i
             if i1 >= i0:
                 pts = pts[i0:i1 + 1]

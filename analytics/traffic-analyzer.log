@@ -1,0 +1,12 @@
+2026-07-14: маршрутов 4, перегонов 33, usable=6, suspect=5, rejected=22
+2026-07-15: маршрутов 3, перегонов 25, usable=7, suspect=6, rejected=12
+2026-07-16: маршрутов 3, перегонов 28, usable=18, suspect=3, rejected=7
+Итого: legs_rejected=41, legs_suspect=14, legs_total=86, legs_usable=31, routes_accepted=6, routes_total=10
+2026-07-15: маршрутов 3, перегонов 25, usable=7, suspect=6, rejected=12
+2026-07-16: маршрутов 3, перегонов 28, usable=18, suspect=3, rejected=7
+2026-07-17: маршрутов 3, перегонов 23, usable=6, suspect=0, rejected=17
+Итого: legs_rejected=36, legs_suspect=9, legs_total=76, legs_usable=31, routes_accepted=6, routes_total=9
+2026-07-16: маршрутов 3, перегонов 28, usable=18, suspect=3, rejected=7
+2026-07-17: маршрутов 3, перегонов 23, usable=6, suspect=0, rejected=17
+2026-07-18: маршрутов 0, перегонов 0, usable=0, suspect=0, rejected=0
+Итого: legs_rejected=24, legs_suspect=3, legs_total=51, legs_usable=24, routes_accepted=4, routes_total=6

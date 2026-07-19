@@ -493,13 +493,19 @@ function render() {
         onclick="switchRoute(${x.id})">Рейс ${i+1} · ${x.depart||'—'}<br><b>${st}</b></button>`;
     }).join('') + `</div>`;
   }
-  if (!rt.depot_arrive_ts) {                       // v38: спершу — на склад
+  const fromDepot = (rt.start_kind || 'depot') === 'depot';   // v51: старт може бути не зі складу
+  if (fromDepot && !rt.depot_arrive_ts) {          // v38: спершу — на склад
     head = `<button class="b-route go" onclick="routeEvent('depot_arrive')"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-3px"><path d="M3 21V8l9-5 9 5v13"/><path d="M7 21v-8h10v8"/><path d="M7 17h10"/></svg> Прибув на склад</button>`;
   } else if (!rt.start_ts) {
-    head = `<div class="onroute">На складі з <b>${hm(rt.depot_arrive_ts)}</b></div>
+    const from = fromDepot
+      ? `На складі з <b>${hm(rt.depot_arrive_ts)}</b>`
+      : `Старт: <b>${rt.start_kind==='home' ? 'з дому' : (rt.start_address || 'інша адреса')}</b>`;
+    head = `<div class="onroute">${from}</div>
       <button class="b-route go" onclick="routeEvent('start')"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-3px"><rect x="1.5" y="6" width="13" height="9"/><path d="M14.5 9h4l3 3.5V15h-7z"/><circle cx="6" cy="18" r="1.8"/><circle cx="17.5" cy="18" r="1.8"/></svg> Виїхав на маршрут</button>`;
   } else if (!rt.finish_ts) {
-    head = `<div class="onroute">У рейсі з <b>${hm(rt.start_ts)}</b></div>`;
+    const finHint = (rt.finish_kind && rt.finish_kind !== 'depot')   // v51
+      ? `<br><span style="font-size:12px;color:#5F5E5A">Фініш: <b>${rt.finish_kind==='home' ? 'дім' : (rt.finish_address || 'інша адреса')}</b></span>` : '';
+    head = `<div class="onroute">У рейсі з <b>${hm(rt.start_ts)}</b>${finHint}</div>`;
     tail = `<button class="b-route fin" onclick="routeEvent('finish')"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-3px"><path d="M5 21V4"/><path d="M5 4h13l-3 4 3 4H5"/></svg> Завершив маршрут</button>`;
   } else {
     const toM = t => { if(!t) return null; const [h,m]=t.split(':'); return (+h)*60 + (+m); };
@@ -699,11 +705,22 @@ async function openTomorrowMap() {
      .addTo(_tMap);
   });
   if (nextTrip.depot && nextTrip.depot.lat != null) {
+    const sB = {depot:'С', home:'Д', custom:'А'}[nextTrip.depot.kind || 'depot'] || 'С';   // v51
     pts.push([nextTrip.depot.lat, nextTrip.depot.lon]);
     L.marker([nextTrip.depot.lat, nextTrip.depot.lon], {icon: L.divIcon({className:'',
-      html:`<div style="width:26px;height:26px;border-radius:6px;background:#E82A2C;color:#fff;display:flex;align-items:center;justify-content:center;font:800 13px 'Open Sans',sans-serif;box-shadow:0 0 0 2px #fff">С</div>`,
+      html:`<div style="width:26px;height:26px;border-radius:6px;background:#E82A2C;color:#fff;display:flex;align-items:center;justify-content:center;font:800 13px 'Open Sans',sans-serif;box-shadow:0 0 0 2px #fff">${sB}</div>`,
       iconSize:[26,26], iconAnchor:[13,13]})})
-     .bindTooltip(nextTrip.depot.name || 'Склад').addTo(_tMap);
+     .bindTooltip('Старт: ' + (nextTrip.depot.name || 'Склад')).addTo(_tMap);
+  }
+  const fin = nextTrip.finish;                                       // v51: фініш ≠ старт
+  if (fin && fin.lat != null && nextTrip.depot
+      && (fin.lat !== nextTrip.depot.lat || fin.lon !== nextTrip.depot.lon)) {
+    const fB = {depot:'С', home:'Д', custom:'А'}[fin.kind || 'depot'] || 'С';
+    pts.push([fin.lat, fin.lon]);
+    L.marker([fin.lat, fin.lon], {icon: L.divIcon({className:'',
+      html:`<div style="width:26px;height:26px;border-radius:6px;background:#00356B;color:#fff;display:flex;align-items:center;justify-content:center;font:800 13px 'Open Sans',sans-serif;box-shadow:0 0 0 2px #fff">${fB}</div>`,
+      iconSize:[26,26], iconAnchor:[13,13]})})
+     .bindTooltip('Фініш: ' + (fin.name || '')).addTo(_tMap);
   }
   if (nextTrip.geometry && nextTrip.geometry.length > 1)
     L.polyline(nextTrip.geometry, {color:'#00356B', weight:3, opacity:.8}).addTo(_tMap);

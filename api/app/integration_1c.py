@@ -376,6 +376,7 @@ async def export_trips(key: str = Query(""),
 
     parts = ["<RESPONSE><ERROR>0</ERROR>"]
     for r in rr:
+        ret_t = r["return_time_manual"] or r["return_time"]     # v51: ручний фініш
         ss = await pool.fetch("""
             SELECT s.seq, s.eta, s.etd, s.order_id, o.doc_number, o.weight_kg
             FROM route_stops s JOIN orders o ON o.id=s.order_id
@@ -401,7 +402,7 @@ async def export_trips(key: str = Query(""),
         parts.append(f"<TRIP_DIST_PLAN>{r['total_km'] or 0}</TRIP_DIST_PLAN>")
         parts.append("<TRIP_DIST_FACT></TRIP_DIST_FACT>")
         parts.append(f"<START_TIME_PLAN>{_dt(r['plan_date'], r['depart_time'])}</START_TIME_PLAN>")
-        parts.append(f"<FINISH_TIME_PLAN>{_dt(r['plan_date'], r['return_time'])}</FINISH_TIME_PLAN>")
+        parts.append(f"<FINISH_TIME_PLAN>{_dt(r['plan_date'], ret_t)}</FINISH_TIME_PLAN>")
         parts.append(f"<START_TIME_FACT>{_ft(started)}</START_TIME_FACT>"
                      f"<FINISH_TIME_FACT>{_ft(finished)}</FINISH_TIME_FACT>")
         parts.append(f"<TRIP_ORDERS_WEIGHT_PLAN>{round(total_w, 2)}</TRIP_ORDERS_WEIGHT_PLAN>")
@@ -449,9 +450,9 @@ async def export_trips(key: str = Query(""),
             parts.append(f"<CODE>{_esc(wcode)}</CODE>")
             parts.append(f"<IN_TRIP_NUMBER>{last_seq}</IN_TRIP_NUMBER>")
             parts.append("<PLAN_DIST>0</PLAN_DIST><FACT_DIST>0</FACT_DIST>")
-            parts.append(f"<DELIVERY_DATE_PLAN>{_dt(r['plan_date'], r['return_time'])}</DELIVERY_DATE_PLAN>")
+            parts.append(f"<DELIVERY_DATE_PLAN>{_dt(r['plan_date'], ret_t)}</DELIVERY_DATE_PLAN>")
             parts.append(f"<DELIVERY_DATE_FACT>{_ft(finished)}</DELIVERY_DATE_FACT>")
-            parts.append(f"<DELIVERY_OUTDATE_PLAN>{_dt(r['plan_date'], r['return_time'])}</DELIVERY_OUTDATE_PLAN>")
+            parts.append(f"<DELIVERY_OUTDATE_PLAN>{_dt(r['plan_date'], ret_t)}</DELIVERY_OUTDATE_PLAN>")
             parts.append(f"<DELIVERY_OUTDATE_FACT>{_ft(finished)}</DELIVERY_OUTDATE_FACT>")
             parts.append(f"<STATUS_POINT>{4 if finished else 1}</STATUS_POINT>")
             parts.append("</ORDER>")

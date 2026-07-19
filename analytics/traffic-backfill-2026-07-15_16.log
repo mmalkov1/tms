@@ -1,0 +1,3 @@
+2026-07-15: маршрутов 3, перегонов 25, usable=10, suspect=4, rejected=11
+2026-07-16: маршрутов 2, перегонов 25, usable=19, suspect=2, rejected=4
+Итого: legs_rejected=15, legs_suspect=6, legs_total=50, legs_usable=29, routes_accepted=5, routes_total=5

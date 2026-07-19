@@ -51,7 +51,9 @@ async def _route_autoclose_loop():
         try:
             # --- рівень 1: геозона складу ---
             cand = await pool.fetch("""
-                SELECT re.route_id, re.driver_id, d.lat AS dlat, d.lon AS dlon
+                SELECT re.route_id, re.driver_id,
+                       COALESCE(r.finish_lat, d.lat) AS dlat,        -- v51: фініш
+                       COALESCE(r.finish_lon, d.lon) AS dlon         -- може бути не склад
                 FROM route_events re
                 JOIN routes r ON r.id = re.route_id
                 JOIN depots d ON d.id = r.depot_id
@@ -370,6 +372,7 @@ class VehicleIn(BaseModel):
 async def get_drivers():
     rows = await pool.fetch("""
         SELECT d.id, d.name, d.code_1c, d.phone, d.shift_start, d.shift_end,
+               d.home_address, d.home_lat, d.home_lon,               -- v51
                t.created_at AS token_created
         FROM drivers d
         LEFT JOIN driver_tokens t ON t.driver_id = d.id AND t.is_active
@@ -403,6 +406,7 @@ class DriverPatch(BaseModel):
     shift_start: str | None = None      # v41: постійний графік водія "HH:MM"
     shift_end: str | None = None
     is_active: bool | None = None
+    home_address: str | None = None     # v51: дім водія (геокодиться на сервері)
 
 
 @app.patch("/api/drivers/{driver_id}")
@@ -430,7 +434,22 @@ async def patch_driver(driver_id: int, d: DriverPatch):
         if not d.is_active:   # архів водія — гасимо його токени
             await pool.execute(
                 "UPDATE driver_tokens SET is_active=FALSE WHERE driver_id=$1", driver_id)
-    return {"ok": True}
+    home_geocoded = None                                             # v51
+    if d.home_address is not None:
+        ha = d.home_address.strip() or None
+        prev = await pool.fetchrow(
+            "SELECT home_address, home_lat FROM drivers WHERE id=$1", driver_id)
+        if ha is None:
+            await pool.execute(
+                "UPDATE drivers SET home_address=NULL, home_lat=NULL, home_lon=NULL WHERE id=$1",
+                driver_id)
+        elif ha != (prev["home_address"] or "") or prev["home_lat"] is None:
+            res = await geocoder.geocode(ha)
+            home_geocoded = bool(res)
+            await pool.execute(
+                "UPDATE drivers SET home_address=$1, home_lat=$2, home_lon=$3 WHERE id=$4",
+                ha, res[0] if res else None, res[1] if res else None, driver_id)
+    return {"ok": True, "home_geocoded": home_geocoded}
 
 
 @app.post("/api/vehicles")
@@ -951,7 +970,11 @@ class SetStops(BaseModel):
 
 async def _rebuild_route(route_id: int):
     r = await pool.fetchrow("""
-        SELECT r.id, r.vehicle_id, r.depart_time, d.lat, d.lon,
+        SELECT r.id, r.vehicle_id, r.depart_time,
+               COALESCE(r.start_lat, d.lat)  AS s_lat,      -- v51: старт/фініш
+               COALESCE(r.start_lon, d.lon)  AS s_lon,      -- не зі складу
+               COALESCE(r.finish_lat, d.lat) AS f_lat,
+               COALESCE(r.finish_lon, d.lon) AS f_lon,
                COALESCE(dr.shift_start,'08:00'::time) ss
         FROM routes r JOIN depots d ON d.id=r.depot_id
         LEFT JOIN drivers dr ON dr.id=r.driver_id WHERE r.id=$1""", route_id)
@@ -965,7 +988,8 @@ async def _rebuild_route(route_id: int):
             load_weight=0, load_volume=0, return_time=NULL WHERE id=$1""", route_id)
         return
     _, _, _, peak_w, peak_v = running_loads(ss)
-    points = [(r["lat"], r["lon"])] + [(s["lat"], s["lon"]) for s in ss] + [(r["lat"], r["lon"])]
+    points = ([(r["s_lat"], r["s_lon"])] + [(s["lat"], s["lon"]) for s in ss]
+              + [(r["f_lat"], r["f_lon"])])
     geom, legs, km = await osrm.route_with_legs(points)
     start = t2m(r["depart_time"], None) if r["depart_time"] else t2m(r["ss"], 9 * 60)
     t = start
@@ -1037,6 +1061,87 @@ async def reverse_route(route_id: int):
     return {"ok": True}
 
 
+# v51: старт/фініш маршруту не зі складу (дім водія / інша адреса)
+class RouteStartFinish(BaseModel):
+    start_kind: str = "depot"                # depot | home | custom
+    start_address: str | None = None
+    start_lat: float | None = None
+    start_lon: float | None = None
+    depart_time: str | None = None           # "HH:MM"; None = не міняти
+    finish_kind: str = "depot"
+    finish_address: str | None = None
+    finish_lat: float | None = None
+    finish_lon: float | None = None
+    return_time_manual: str | None = None    # "HH:MM"; None/"" = авторозрахунок
+
+
+@app.patch("/api/routes/{route_id}/start-finish")
+async def set_start_finish(route_id: int, b: RouteStartFinish):
+    r = await pool.fetchrow("""
+        SELECT r.id, COALESCE(r.driver_id, v.driver_id) AS eff_driver
+        FROM routes r JOIN vehicles v ON v.id=r.vehicle_id WHERE r.id=$1""", route_id)
+    if not r:
+        raise HTTPException(404, "Маршрут не знайдено")
+
+    async def resolve(kind, addr, lat, lon, what):
+        if kind == "depot":
+            return None, None, None
+        if kind == "home":
+            drv = await pool.fetchrow(
+                "SELECT home_address, home_lat, home_lon FROM drivers WHERE id=$1",
+                r["eff_driver"])
+            if not drv or drv["home_lat"] is None:
+                raise HTTPException(400,
+                    f"{what}: у водія не вказано адресу дому (Налаштування → Водії)")
+            return drv["home_address"], drv["home_lat"], drv["home_lon"]
+        if kind == "custom":
+            if lat is None or lon is None:
+                raise HTTPException(400, f"{what}: спочатку знайди адресу на карті")
+            return (addr or "").strip() or None, lat, lon
+        raise HTTPException(400, "kind: depot|home|custom")
+
+    s_addr, s_lat, s_lon = await resolve(
+        b.start_kind, b.start_address, b.start_lat, b.start_lon, "Старт")
+    f_addr, f_lat, f_lon = await resolve(
+        b.finish_kind, b.finish_address, b.finish_lat, b.finish_lon, "Фініш")
+    dep = None
+    if b.depart_time:
+        m = parse_hhmm(b.depart_time, -1)
+        if m < 0:
+            raise HTTPException(400, "Час виїзду: формат HH:MM")
+        dep = m2t(m)
+    rtm = None
+    if b.return_time_manual:
+        m = parse_hhmm(b.return_time_manual, -1)
+        if m < 0:
+            raise HTTPException(400, "Час фінішу: формат HH:MM")
+        rtm = m2t(m)
+    await pool.execute("""
+        UPDATE routes SET start_kind=$1, start_address=$2, start_lat=$3, start_lon=$4,
+            finish_kind=$5, finish_address=$6, finish_lat=$7, finish_lon=$8,
+            depart_time=COALESCE($9, depart_time), return_time_manual=$10
+        WHERE id=$11""",
+        b.start_kind, s_addr, s_lat, s_lon,
+        b.finish_kind, f_addr, f_lat, f_lon, dep, rtm, route_id)
+    await _rebuild_route(route_id)
+    return {"ok": True}
+
+
+class GeocodeIn(BaseModel):                  # v51: геокодинг довільної адреси
+    address: str
+
+
+@app.post("/api/geocode-address")
+async def geocode_address(b: GeocodeIn):
+    addr = (b.address or "").strip()
+    if not addr:
+        raise HTTPException(400, "Вкажи адресу")
+    res = await geocoder.geocode(addr)
+    if not res:
+        raise HTTPException(404, "Адресу не знайдено — спробуй уточнити (місто, вулиця, будинок)")
+    return {"lat": res[0], "lon": res[1]}
+
+
 # п.3: снять точку с маршрута в буфер
 @app.delete("/api/routes/{route_id}/stops/{order_id}")
 async def remove_stop(route_id: int, order_id: int):
@@ -1053,9 +1158,12 @@ async def remove_stop(route_id: int, order_id: int):
 async def get_routes(project_id: int = Query(...)):
     rr = await pool.fetch("""
         SELECT r.*, v.name vehicle_name, v.max_weight_kg, v.max_volume_m3, d.name driver_name,
-               dep.name depot_name
+               dep.name depot_name,
+               dh.home_address AS driver_home_address,               -- v51
+               (dh.home_lat IS NOT NULL) AS driver_has_home
         FROM routes r JOIN vehicles v ON v.id=r.vehicle_id
         LEFT JOIN drivers d ON d.id=r.driver_id
+        LEFT JOIN drivers dh ON dh.id=COALESCE(r.driver_id, v.driver_id)
         JOIN depots dep ON dep.id=r.depot_id
         WHERE r.project_id=$1 ORDER BY r.id""", project_id)
     result = []

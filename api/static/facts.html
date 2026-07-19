@@ -51,6 +51,28 @@
   .failrow { background:#FFF3D6; } .failrow:hover td { background:transparent; }
   .failtag { color:var(--amber); font-weight:800; }
   .gps-note { color:var(--amber); font-weight:700; }
+  /* v51: нумеровані маркери точок на карті */
+  .npt { width:24px; height:24px; border-radius:50%; border:2.5px solid #fff; color:#fff;
+         font:800 11px 'Open Sans',sans-serif; display:flex; align-items:center; justify-content:center;
+         box-shadow:0 1px 4px rgba(0,0,0,.35); }
+  /* v51: кнопка «i» та діалог деталей точки */
+  .inf { cursor:pointer; text-align:center; color:var(--blue); width:30px; }
+  .inf:hover { color:var(--navy); }
+  .inf svg { vertical-align:-2px; }
+  dialog { border:none; border-radius:14px; padding:0; max-width:420px; width:92%;
+           box-shadow:0 12px 48px rgba(0,20,50,.35); margin:auto; background:#fff;
+           color:var(--text); font-family:'Open Sans',system-ui,sans-serif; }
+  dialog::backdrop { background:rgba(0,20,50,.45); }
+  .sd-head { background:var(--navy); color:#fff; padding:10px 14px; font-size:13.5px; font-weight:700;
+             display:flex; justify-content:space-between; align-items:center; }
+  .sd-head span:last-child { cursor:pointer; }
+  .sd-body { padding:12px 14px; font-size:12.5px; }
+  .sd-body table { border-collapse:collapse; }
+  .sd-body td { border:none; padding:4px 0; }
+  .sd-body td:first-child { color:var(--muted); width:44%; }
+  .sd-body td:last-child { color:var(--text); }
+  .sd-pf { border-top:1px solid var(--cream-200); margin-top:8px; padding-top:8px;
+           display:flex; gap:14px; flex-wrap:wrap; font-size:12px; color:var(--muted); }
 </style>
 </head>
 <body>
@@ -122,10 +144,14 @@ function focusStop(rid, oid) {                      // v41: dblclick по ряд
   const m = markers[rid + '-' + oid];
   if (!m) return;
   map.setView(m.getLatLng(), Math.max(map.getZoom(), 15));
-  m.setStyle({radius: 13, weight: 4});
   m.openTooltip();
-  clearTimeout(m._pulse);
-  m._pulse = setTimeout(() => m.setStyle({radius: 8, weight: 2}), 1800);
+  const el = m.getElement() && m.getElement().querySelector('.npt');   // v51
+  if (el) {
+    el.style.transition = 'transform .2s';
+    el.style.transform = 'scale(1.5)';
+    clearTimeout(m._pulse);
+    m._pulse = setTimeout(() => el.style.transform = '', 1800);
+  }
   if (focusRoute !== rid) focus(rid);
 }
 
@@ -143,9 +169,45 @@ async function loadTracks() {
   });
 }
 
+let _routesData = [];                               // v51: для діалогу деталей точки
+
+function stopInfo(rid, oid) {
+  const rt = _routesData.find(r => r.route_id === rid);
+  const s = rt && rt.stops.find(x => x.order_id === oid);
+  if (!s) return;
+  const row = (k, v) => v ? `<tr><td>${k}</td><td>${v}</td></tr>` : '';
+  const b = (v, c) => `<b style="${c?'color:'+c:''}">${v}</b>`;
+  const kind = s.kind === 'pickup' ? 'забір' : 'доставка';
+  const dm = (p, f) => {
+    if (!p || !f) return '';
+    const d = tsMin(f) - toMin(p);
+    return ` <span class="${d>5?'late':'early'}">${d>0?'+':''}${d} хв</span>`;
+  };
+  $('sdTitle').textContent = `Точка ${s.seq} · ${s.client}`;
+  $('sdBody').innerHTML = `<table style="width:100%">
+    ${row('Документ', s.doc_number ? `${b(s.doc_number)} · ${kind}` : kind)}
+    ${row('Адреса', s.address)}
+    ${row('Уточнення', s.address_extra)}
+    ${row('Конт. особа', [s.contact_person, s.phone].filter(Boolean).join(' · '))}
+    ${row('Вікно роботи', s.tw_from ? b(`${s.tw_from} – ${s.tw_to||''}`) : 'не задано')}
+    ${row('Перерва', s.break_from ? `${s.break_from} – ${s.break_to||''}` : '')}
+    ${row('Вага / Об\u2019єм', `${(+s.weight_kg).toFixed(1)} кг · ${(+s.volume_m3).toFixed(3)} м³`)}
+    ${row('Місць', s.seats)}
+    ${row('Розвантаження', s.service_min ? s.service_min + ' хв' : '')}
+    </table>
+    <div class="sd-pf">
+      <span>План ${b((s.eta||'—') + '–' + (s.etd||'—'), 'var(--navy)')}</span>
+      <span>Факт ${s.fail_ts
+        ? `<b class="failtag">✗ ${s.fail_reason||'відмова'}</b> · ${hm(s.fail_ts)}`
+        : b((hm(s.arrive_ts)||'—') + '–' + (hm(s.depart_ts)||'—'), 'var(--green)') + dm(s.eta, s.arrive_ts)}</span>
+    </div>`;
+  $('stopDlg').showModal();
+}
+
 async function load() {
   const r = await fetch(`/api/facts?plan_date=${$('d').value}`);
   const routes = await r.json();
+  _routesData = routes;                             // v51
   layers.clearLayers(); markers = {};
   const pts = [];
   $('panel').innerHTML = routes.map(rt => {
@@ -156,9 +218,11 @@ async function load() {
       pts.push([s.lat, s.lon]);
       const fill = s.fail_ts ? '#E8890C'
                  : s.depart_ts ? '#2E8B57' : s.arrive_ts ? '#B8860B' : '#bbb';
-      markers[rt.route_id + '-' + s.order_id] =
-        L.circleMarker([s.lat, s.lon], {radius:8, color:rt.color, weight:2, fillColor:fill, fillOpacity:1})
-       .bindTooltip(`<b>${s.client}</b><br>${s.address||''}<br>` +
+      markers[rt.route_id + '-' + s.order_id] =        // v51: маркер з номером у плані
+        L.marker([s.lat, s.lon], {icon: L.divIcon({className:'',
+          html:`<div class="npt" style="background:${fill};border-color:${rt.color}">${s.seq}</div>`,
+          iconSize:[24,24], iconAnchor:[12,12]})})
+       .bindTooltip(`<b>${s.seq}. ${s.client}</b><br>${s.address||''}<br>` +
          (s.fail_ts ? `<b style="color:#B8860B">✗ ${s.fail_reason||'відмова'}</b> · ${hm(s.fail_ts)}`
                     : `План ${s.eta||'—'} · Факт ${hm(s.arrive_ts)||'—'}`))
        .addTo(layers);
@@ -195,7 +259,7 @@ async function load() {
             const d=rt.plan_km ? +(rt.gps_km-rt.plan_km).toFixed(1) : null;
             return `<span>Шлях <b>${rt.gps_km} км</b>${rt.plan_km?` / план ${rt.plan_km.toFixed(1)}`:''}${d!=null?` <span class="${d>10?'late':'early'}">${d>0?'+':''}${d} км</span>`:''}</span>`;})() : ''}
       </div>` : ''}
-      <table><tr><th>#</th><th>Ф№</th><th>Клієнт</th><th>План</th><th>Прибув</th><th>Поїхав</th><th>Δ / Статус</th></tr>
+      <table><tr><th>#</th><th>Ф№</th><th>Клієнт</th><th>План</th><th>Прибув</th><th>Поїхав</th><th>Δ / Статус</th><th></th></tr>
       ${(()=>{                                     // v38: фактична послідовність
         const vis = rt.stops.filter(s=>s.arrive_ts||s.fail_ts)
           .slice().sort((a,b)=>new Date(a.arrive_ts||a.fail_ts)-new Date(b.arrive_ts||b.fail_ts));
@@ -208,7 +272,8 @@ async function load() {
           return `<tr class="${s.fail_ts?'failrow':s.depart_ts?'done':''}" style="cursor:pointer" title="Подвійний клік — показати точку на карті" ondblclick="focusStop(${rt.route_id},${s.order_id})">
         <td>${s.seq}</td>${fcell}<td>${s.client}</td><td>${s.eta||'—'}</td>
         <td>${hm(s.arrive_ts)||'—'}</td><td>${hm(s.depart_ts)||'—'}</td>
-        <td>${s.fail_ts ? '<span class="failtag">✗ '+(s.fail_reason||'відмова')+'</span>' : delta(s.eta, s.arrive_ts)}</td></tr>`;
+        <td>${s.fail_ts ? '<span class="failtag">✗ '+(s.fail_reason||'відмова')+'</span>' : delta(s.eta, s.arrive_ts)}</td>
+        <td class="inf" title="Деталі точки" onclick="event.stopPropagation();stopInfo(${rt.route_id},${s.order_id})"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 8h.01M12 11v5"/></svg></td></tr>`;
         }).join('');
       })()}
       </table></div>`;
@@ -222,6 +287,11 @@ if (showTrack) $('trk').classList.add('on');
 setInterval(load, 30000);
 load();
 </script>
+<dialog id="stopDlg">
+  <div class="sd-head"><span id="sdTitle"></span>
+    <span onclick="document.getElementById('stopDlg').close()"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg></span></div>
+  <div class="sd-body" id="sdBody"></div>
+</dialog>
 <div id="issuesPanel" style="display:none;position:fixed;top:54px;right:52px;z-index:80;width:340px;max-height:70vh;overflow:auto;background:#fff;border-radius:10px;box-shadow:0 4px 18px rgba(0,0,0,.25)">
   <div style="padding:9px 13px;border-bottom:1px solid #eee;font-size:12px;font-weight:700;color:var(--navy)">Повідомлення від водіїв</div>
   <div id="issuesList"></div>

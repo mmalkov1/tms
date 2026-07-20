@@ -118,6 +118,24 @@
   .routedone { background:#fff; border-radius:10px; padding:10px 12px; margin:10px 10px 0; font-size:13px; box-shadow:0 1px 3px rgba(0,53,107,.08); }
   .preview-note { background:#FFF7E6; border:1px solid #EF9F27; border-radius:10px;
                   padding:8px 11px; font-size:12px; color:#854F0B; margin:10px 10px 0; }
+  /* v54: пілотний транспортний лист */
+  .fuel-card { background:#fff; margin:10px 10px 0; border-radius:13px; padding:13px;
+               border-left:5px solid var(--navy); box-shadow:0 2px 10px rgba(0,53,107,.1); }
+  .fuel-head { display:flex; align-items:center; justify-content:space-between; gap:8px; color:var(--navy); }
+  .fuel-head b { font-size:15px; } .fuel-status { border-radius:999px; padding:3px 9px; font-size:10px; font-weight:800; background:#E9EFF7; color:var(--blue); }
+  .fuel-status.revision { background:#FDEBEC; color:var(--red); } .fuel-status.approved { background:#E1F5EE; color:#087355; }
+  .fuel-grid { display:grid; grid-template-columns:1fr auto; gap:8px 12px; margin:12px 0; font-size:12.5px; }
+  .fuel-grid span:nth-child(odd) { color:#69737e; } .fuel-grid b { text-align:right; }
+  .fuel-actions { display:flex; gap:7px; flex-wrap:wrap; }
+  .fuel-actions button { min-height:43px; font-size:13px; padding:0 11px; }
+  .fuel-primary { background:var(--navy); } .fuel-secondary { background:#fff; color:var(--navy); border:1.5px solid var(--cream-300); }
+  #fuelDlg { position:fixed; inset:0; background:rgba(0,20,50,.5); display:none; align-items:flex-end; justify-content:center; z-index:80; }
+  #fuelDlg.open { display:flex; } #fuelBox { background:#fff; border-radius:16px 16px 0 0; padding:16px; width:100%; max-width:480px; max-height:88vh; overflow:auto; }
+  #fuelBox h3 { color:var(--navy); font-size:17px; margin-bottom:4px; } #fuelBox .fsub { color:var(--muted); font-size:12px; margin-bottom:14px; }
+  .fuel-field { margin-bottom:12px; } .fuel-field label { display:block; color:var(--navy); font-size:12px; font-weight:700; margin-bottom:5px; }
+  .fuel-field input,.fuel-field select,.fuel-field textarea { width:100%; border:1.5px solid var(--cream-300); border-radius:10px; padding:11px 12px; font:inherit; font-size:15px; }
+  .fuel-field textarea { min-height:70px; resize:vertical; } .fuel-field input:focus,.fuel-field select:focus,.fuel-field textarea:focus { outline:none; border-color:var(--navy); box-shadow:0 0 0 3px rgba(0,53,107,.12); }
+  .fuel-note { background:#FFF7E6; color:#854F0B; border:1px solid #EF9F27; border-radius:10px; padding:9px 11px; font-size:11px; margin-bottom:12px; }
 </style>
 </head>
 <body>
@@ -165,12 +183,93 @@
 <div id="cardDlg" onclick="if(event.target===this)closeCard()">
   <div id="cardBox"></div>
 </div>
+<div id="fuelDlg" onclick="if(event.target===this)closeFuelDlg()"><div id="fuelBox"></div></div>
 <div id="toast"></div>
 <script>
 const qs = new URLSearchParams(location.search);
 const TOKEN = qs.get('token');
 const NATIVE = /TMSKultApp/.test(navigator.userAgent);   // v26: сторінка всередині APK
 const $ = id => document.getElementById(id);
+
+// ---------- v54: пілот транспортного листа ----------
+let fuelPilot = false, fuelSheet = null;
+const fnum = (v, d=1) => v==null ? '—' : Number(v).toLocaleString('uk-UA',{minimumFractionDigits:d,maximumFractionDigits:d});
+const fuelStatus = {draft:'Чернетка',submitted:'Очікує логіста',approved:'Підтверджено',revision:'Повторна перевірка'};
+
+async function loadTransportSheet() {
+  if (!TOKEN || MODE !== 'today') return;
+  try {
+    const r = await fetch(`/api/driver/${TOKEN}/transport-sheet`);
+    if (!r.ok) return;
+    const j = await r.json(); fuelPilot = !!j.enabled; fuelSheet = j.sheet || null;
+    renderTransportCard(j.error);
+  } catch(e) { /* рейси працюють незалежно від пілота */ }
+}
+
+function renderTransportCard(error='') {
+  document.querySelector('.fuel-card')?.remove();
+  if (!fuelPilot || MODE !== 'today') return;
+  const s=fuelSheet;
+  const html = !s ? `<div class="fuel-card"><div class="fuel-head"><b>Транспортний лист</b></div><div class="fuel-note" style="margin:10px 0 0">${error||'Не вдалося визначити автомобіль'}</div></div>` : `
+    <div class="fuel-card">
+      <div class="fuel-head"><b>Транспортний лист</b><span class="fuel-status ${s.status}">${fuelStatus[s.status]||s.status}</span></div>
+      <div style="font-size:11px;color:var(--muted);margin-top:3px">${s.vehicle}${s.plate?' · '+s.plate:''}</div>
+      ${s.status==='revision'?`<div class="fuel-note" style="margin-top:9px">Логіст отримає повідомлення про виправлення.</div>`:''}
+      <div class="fuel-grid">
+        <span>Одометр на початок</span><b>${s.odometer_start==null?'Не внесено':fnum(s.odometer_start,1)+' км'}</b>
+        <span>Одометр на кінець</span><b>${s.odometer_end==null?'Не внесено':fnum(s.odometer_end,1)+' км'}</b>
+        <span>Залишок на початок</span><b>${fnum(s.opening_balance_l,2)} л</b>
+        <span>Заправлено</span><b>${fnum(s.refueled_l,2)} л</b>
+        <span>Залишок на кінець</span><b>${fnum(s.closing_balance_l,2)} л</b>
+      </div>
+      <div class="fuel-actions">
+        <button class="fuel-primary" onclick="openOdometer()">${s.odometer_start==null?'Внести початок':s.odometer_end==null?'Внести кінець':'Показники'}</button>
+        <button class="fuel-secondary" onclick="openRefuel()">Додати заправку</button>
+        ${(s.odometer_start!=null&&s.odometer_end!=null&&s.status==='draft')?'<button class="fuel-primary" style="flex-basis:100%" onclick="submitTransportSheet()">Надіслати логісту</button>':''}
+      </div>
+    </div>`;
+  $('list').insertAdjacentHTML('afterbegin',html);
+}
+
+function closeFuelDlg(){ $('fuelDlg').classList.remove('open'); }
+function openOdometer(){
+  const s=fuelSheet, approved=s.status==='approved';
+  $('fuelBox').innerHTML=`<h3>${approved?'Виправити показники':'Показники одометра'}</h3><div class="fsub">${s.vehicle} · ${s.date}</div>
+    ${approved?'<div class="fuel-note">Лист уже підтверджено. Після зміни логіст отримає повідомлення.</div>':''}
+    <div class="fuel-field"><label>На початок дня, км</label><input id="fuelOdoStart" inputmode="decimal" value="${s.odometer_start??''}"></div>
+    <div class="fuel-field"><label>На кінець дня, км</label><input id="fuelOdoEnd" inputmode="decimal" value="${s.odometer_end??''}" placeholder="Внести після повернення додому"></div>
+    ${approved?`<div class="fuel-field"><label>Причина виправлення</label><select id="fuelReason"><option value="">Оберіть причину</option><option>Службова поїздка після завершення дня</option><option>Помилка у показнику</option><option>Заправка, СТО або мийка</option><option>Інше</option></select></div><div class="fuel-field"><label>Коментар</label><textarea id="fuelComment"></textarea></div>`:''}
+    <div style="display:flex;gap:8px"><button class="fuel-secondary" onclick="closeFuelDlg()">Скасувати</button><button class="fuel-primary" onclick="saveOdometer()">Зберегти</button></div>`;
+  $('fuelDlg').classList.add('open');
+}
+async function saveOdometer(){
+  const approved=fuelSheet.status==='approved';
+  const reason=approved?[($('fuelReason').value||''),($('fuelComment').value||'')].filter(Boolean).join(': '):null;
+  const body={odometer_start:$('fuelOdoStart').value||null,odometer_end:$('fuelOdoEnd').value||null,reason};
+  const r=await fetch(`/api/driver/${TOKEN}/transport-sheet/odometer`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+  const j=await r.json().catch(()=>({})); if(!r.ok){toast(j.detail||'Не вдалося зберегти');return}
+  fuelSheet=j.sheet;closeFuelDlg();renderTransportCard();toast('Показники збережено');
+}
+function openRefuel(){
+  const approved=fuelSheet.status==='approved';
+  $('fuelBox').innerHTML=`<h3>Додати заправку</h3><div class="fsub">Внесіть кількість літрів із чека</div>
+    ${approved?'<div class="fuel-note">Лист підтверджено — вкажіть причину додавання.</div>':''}
+    <div class="fuel-field"><label>Кількість пального, літрів</label><input id="fuelLiters" inputmode="decimal" autofocus></div>
+    ${approved?'<div class="fuel-field"><label>Причина</label><textarea id="fuelRefReason" placeholder="Чому заправку додано після підтвердження"></textarea></div>':''}
+    <div style="display:flex;gap:8px"><button class="fuel-secondary" onclick="closeFuelDlg()">Скасувати</button><button class="fuel-primary" onclick="saveRefuel()">Зберегти</button></div>`;
+  $('fuelDlg').classList.add('open'); setTimeout(()=>$('fuelLiters')?.focus(),100);
+}
+async function saveRefuel(){
+  const body={liters:$('fuelLiters').value,reason:$('fuelRefReason')?.value||null};
+  const r=await fetch(`/api/driver/${TOKEN}/transport-sheet/refuels`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+  const j=await r.json().catch(()=>({}));if(!r.ok){toast(j.detail||'Не вдалося зберегти');return}
+  fuelSheet=j.sheet;closeFuelDlg();renderTransportCard();toast('Заправку додано');
+}
+async function submitTransportSheet(){
+  if(!await askYes('Надіслати транспортний лист логісту?'))return;
+  const r=await fetch(`/api/driver/${TOKEN}/transport-sheet/submit`,{method:'POST'});const j=await r.json().catch(()=>({}));
+  if(!r.ok){toast(j.detail||'Не вдалося надіслати');return} fuelSheet=j.sheet;renderTransportCard();toast('Передано логісту');
+}
 
 // ---------- v38: картка точки + «повідомити про помилку» ----------
 const CARD_ICO = {
@@ -363,7 +462,7 @@ function setMode(m) {
   MODE = m;
   $('tabToday').classList.toggle('on', m==='today');
   $('tabNext').classList.toggle('on', m==='next');
-  if (m==='today') render(); else renderNext();
+  if (m==='today') { render(); renderTransportCard(); } else renderNext();
 }
 
 async function loadNext() {                        // v28: рейс на наступний день
@@ -425,6 +524,11 @@ function switchRoute(id) {                        // v39
 }
 
 async function routeEvent(ev, force = false) {
+  if (ev === 'start' && fuelPilot && fuelSheet && fuelSheet.odometer_start == null) {
+    openOdometer();
+    toast('Спочатку внесіть початковий одометр');
+    return;
+  }
   const Q = {depot_arrive:'Позначити прибуття на склад?',
              start:'Позначити виїзд на маршрут?', finish:'Завершити маршрут?'};
   const OK = {depot_arrive:'Прибуття на склад зафіксовано',
@@ -466,6 +570,7 @@ async function load() {
   trip = await r.json();
   if (trip.route) selRoute = trip.route.id;        // v39: сервер міг обрати сам
   if (MODE==='today') render();
+  await loadTransportSheet();                     // v54: для інших водіїв enabled=false
   loadNext();
 }
 

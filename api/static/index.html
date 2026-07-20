@@ -208,6 +208,7 @@
   <nav class="tabs">
     <a class="on">Планування</a>
     <a href="/facts.html">План / Факт</a>
+    <a href="/fuel.html">Транспортні листи <span id="fuelNotice" style="display:none;background:var(--red);color:#fff;border-radius:999px;padding:0 5px;font-size:10px"></span></a>
   </nav>
   <button onclick="openPlanDlg()">Розрахунок ▸</button>
   <input type="date" id="planDate">
@@ -227,6 +228,11 @@
     </svg>
   </button>
 </header>
+<script>
+fetch('/api/transport-sheets/notifications/count').then(r=>r.json()).then(j=>{
+  const b=document.getElementById('fuelNotice'); if(b&&j.count){b.textContent=j.count;b.style.display='inline'}
+}).catch(()=>{});
+</script>
 <div id="layout">
   <div id="map"></div>
   <div id="dragbar"></div>

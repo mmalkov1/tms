@@ -8,7 +8,7 @@ from fastapi import FastAPI, File, HTTPException, Query, UploadFile
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import appupd, driver, dwell, geo, geocoder, importer, integration_1c, osrm, solver
+from . import appupd, driver, dwell, fuel, geo, geocoder, importer, integration_1c, osrm, solver
 
 DB_DSN = os.getenv("DATABASE_URL", "postgresql://tms:tms@db:5432/tms")
 ROUTE_COLORS = ["#E82A2C", "#00356B", "#2E8B57", "#B8860B", "#8B008B", "#FF6347",
@@ -168,6 +168,8 @@ async def startup():
     await integration_1c.init(pool)
     # v17 (migrate_011): мобильный кабинет водителя — токены, факты, GPS
     await driver.init(pool)
+    # v54: пілот транспортних листів (увімкнено лише для коду водія з env)
+    await fuel.init(pool)
     # v21 (migrate_012): контактный телефон точки — для кнопки «Подзвонити»
     await pool.execute("ALTER TABLE orders ADD COLUMN IF NOT EXISTS phone TEXT")
     # v22 (migrate_013): количество мест (SEATS из 1С)
@@ -1186,6 +1188,7 @@ async def get_routes(project_id: int = Query(...)):
 
 app.include_router(integration_1c.router)
 app.include_router(driver.router)
+app.include_router(fuel.router)
 app.include_router(appupd.router)
 
 app.mount("/", StaticFiles(directory="static", html=True), name="static")

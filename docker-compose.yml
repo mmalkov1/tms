@@ -26,6 +26,8 @@ services:
       TMS_1C_LOGIN: ${TMS_1C_LOGIN:-1c}
       TMS_1C_PASSWORD: ${TMS_1C_PASSWORD:-kultukr-1c}
       APK_UPLOAD_KEY: ${APK_UPLOAD_KEY:-}
+      # v54: транспортний лист бачить тільки пілотний водій
+      FUEL_PILOT_DRIVER_CODE_1C: ${FUEL_PILOT_DRIVER_CODE_1C:-000000653}
     volumes:
       - tms_apk:/app/apk
     depends_on: [db, osrm]

@@ -81,6 +81,7 @@
   <nav class="tabs">
     <a href="/index.html">Планування</a>
     <a class="on">План / Факт</a>
+    <a href="/fuel.html">Транспортні листи <span id="fuelNotice" style="display:none;background:var(--red);color:#fff;border-radius:999px;padding:0 5px;font-size:10px"></span></a>
   </nav>
   <input type="date" id="d">
   <span class="trk" id="trk" onclick="toggleTrack()"><span class="sw"><i></i></span>Показувати трек</span>
@@ -98,6 +99,11 @@
     </svg>
   </button>
 </header>
+<script>
+fetch('/api/transport-sheets/notifications/count').then(r=>r.json()).then(j=>{
+  const b=document.getElementById('fuelNotice'); if(b&&j.count){b.textContent=j.count;b.style.display='inline'}
+}).catch(()=>{});
+</script>
 <div id="layout">
   <div id="map"></div>
   <div id="panel"></div>

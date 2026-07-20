@@ -444,7 +444,15 @@ async function routeEvent(ev, force = false) {
     if (await askYes(T[ev])) return routeEvent(ev, true);
     return;
   }
-  toast(OK[ev]); load();
+  // v53: після завершення одразу відкрити наступний незавершений рейс.
+  // Поточний рейс ще має finished=false у локальних даних, тому виключаємо
+  // його за id. Якщо наступного немає — лишаємось на підсумку завершеного.
+  const nextRoute = ev === 'finish'
+    ? (trip.routes||[]).find(x => x.id !== trip.route.id && !x.finished)
+    : null;
+  if (nextRoute) selRoute = nextRoute.id;
+  toast(nextRoute ? 'Рейс завершено · відкрито наступний рейс' : OK[ev]);
+  load();
 }
 
 let selRoute = null;                               // v39: обраний рейс (кілька на день)
@@ -484,9 +492,9 @@ function render() {
 
   const rt = trip.route;
   const fmtDur = m => m==null ? '' : `${Math.floor(m/60)} год ${String(m%60).padStart(2,'0')} хв`;
-  let head = '', tail = '';
+  let switcher = '', head = '', tail = '';
   if ((trip.routes||[]).length > 1) {              // v39: кілька рейсів на день
-    head += `<div class="rswitch">` + trip.routes.map((x,i) => {
+    switcher = `<div class="rswitch">` + trip.routes.map((x,i) => {
       const on = x.id === rt.id;
       const st = x.finished ? 'завершено ✓' : x.started ? 'в дорозі' : x.stops + ' точок';
       return `<button class="rsw ${on?'on':''} ${x.finished?'fin':''}"
@@ -518,7 +526,7 @@ function render() {
       <span style="color:#5F5E5A">Час: <b>${fmtDur(rt.work_min)}</b>${planMin!=null?` · план ${fmtDur(planMin)}`:''}${dMin!=null?` <b style="color:${dMin>15?'var(--red)':'var(--green)'}">(${sig(dMin)} хв)</b>`:''}</span><br>
       <span style="color:#5F5E5A">Шлях: <b>${rt.gps_km!=null?rt.gps_km+' км':'—'}</b>${rt.total_km?` · план ${rt.total_km.toFixed(1)} км`:''}${dKm!=null?` <b style="color:${dKm>10?'var(--red)':'var(--green)'}">(${sig(dKm)} км)</b>`:''}</span></div>`;
   }
-  $('list').innerHTML = head + groups.map((g, gi) => {
+  $('list').innerHTML = switcher + head + groups.map((g, gi) => {
     const arrived  = g.items.every(s => s.arrive_ts);
     const departed = g.items.every(s => s.depart_ts);
     const failed   = g.items.every(s => s.fail_ts);

@@ -1,24 +1,191 @@
 <!doctype html><html lang="uk"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Транспортні листи · TMS</title>
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link href="https://fonts.googleapis.com/css2?family=Open+Sans:wght@400;600;700;800&display=swap" rel="stylesheet">
 <style>
-:root{--navy:#00356B;--blue:#285E96;--red:#E82A2C;--cream:#F3F1EF;--c2:#EFEEEC;--c3:#E2DFDA;--text:#1D2B3A;--muted:#77736D;--green:#2E8B57;--amber:#B8860B}*{box-sizing:border-box}body{margin:0;font-family:'Open Sans',system-ui,sans-serif;background:var(--cream);color:var(--text)}header{background:var(--navy);color:#fff;padding:9px 16px;display:flex;align-items:center;gap:12px;flex-wrap:wrap}h1{font-size:15px;margin:0;font-weight:800}.tabs{display:flex;gap:4px;background:rgba(255,255,255,.12);border-radius:11px;padding:3px}.tabs a{padding:6px 13px;color:#e8edf4;text-decoration:none;border-radius:8px;font-size:13px;font-weight:600}.tabs a.on{background:#fff;color:var(--navy)}header input,header select{padding:7px 9px;border-radius:8px;border:1px solid rgba(255,255,255,.3);background:rgba(255,255,255,.12);color:#fff;font:inherit;font-size:12px}header option{color:#111}.btn{border:0;border-radius:9px;padding:8px 13px;background:var(--navy);color:#fff;font:700 12px 'Open Sans';cursor:pointer}.btn.red{background:var(--red)}.btn.light{background:#fff;color:var(--navy);border:1px solid var(--c3)}main{padding:14px}.setup{background:#fff;border-radius:13px;padding:14px;box-shadow:0 2px 12px rgba(0,53,107,.08);margin-bottom:12px}.setup h2{font-size:14px;color:var(--navy);margin:0 0 9px}.setup-row{display:flex;align-items:end;gap:10px;flex-wrap:wrap}.field{display:flex;flex-direction:column;gap:4px}.field label{font-size:11px;color:var(--navy);font-weight:700}.field input,.field select,.field textarea{border:1.5px solid var(--c3);border-radius:9px;padding:8px 10px;font:inherit;font-size:12px;background:#fff}.field textarea{min-height:65px}.note{font-size:11px;color:var(--muted);margin-top:8px}.tablebox{background:#fff;border-radius:13px;overflow:auto;box-shadow:0 2px 12px rgba(0,53,107,.08)}table{width:100%;border-collapse:collapse;font-size:11.5px;white-space:nowrap}th{background:var(--c2);color:var(--navy);padding:8px;text-align:left;position:sticky;top:0}td{padding:8px;border-bottom:1px solid var(--c2)}tr.revision td{background:#fff0f0}tr:hover td{background:#f8f7f6}.status{font-size:10px;font-weight:800;border-radius:999px;padding:3px 8px;background:#e9eff7;color:var(--blue)}.status.approved{background:#e1f5ee;color:#087355}.status.revision{background:#fdebec;color:var(--red)}.status.submitted{background:#fff3d9;color:#855f00}.actions{display:flex;gap:5px}.empty{text-align:center;padding:40px;color:var(--muted)}dialog{border:0;border-radius:14px;padding:0;width:min(440px,94vw);box-shadow:0 15px 50px rgba(0,20,50,.35)}dialog::backdrop{background:rgba(0,20,50,.5)}.dh{background:var(--navy);color:#fff;padding:12px 15px;font-weight:800;display:flex;justify-content:space-between}.db{padding:15px}.grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}.history{margin-top:12px;padding-top:10px;border-top:1px solid var(--c2);max-height:160px;overflow:auto;font-size:10.5px}.hist{padding:6px 0;border-bottom:1px solid var(--c2)}#toast{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);background:var(--navy);color:#fff;padding:10px 16px;border-radius:10px;display:none}
+:root{--navy:#00356B;--blue:#285E96;--red:#E82A2C;--cream:#F3F1EF;--c2:#EFEEEC;--c3:#E2DFDA;--text:#1D2B3A;--muted:#77736D;--green:#2E8B57;--amber:#B8860B}
+*{box-sizing:border-box}body{margin:0;font-family:'Open Sans',system-ui,sans-serif;background:var(--cream);color:var(--text)}
+header{background:var(--navy);color:#fff;padding:9px 16px;display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+h1{font-size:15px;margin:0;font-weight:800}
+.tabs{display:flex;gap:4px;background:rgba(255,255,255,.12);border-radius:11px;padding:3px}
+.tabs a{padding:6px 13px;color:#e8edf4;text-decoration:none;border-radius:8px;font-size:13px;font-weight:600}.tabs a.on{background:#fff;color:var(--navy)}
+header input,header select{padding:7px 9px;border-radius:8px;border:1px solid rgba(255,255,255,.3);background:rgba(255,255,255,.12);color:#fff;font:inherit;font-size:12px}header option{color:#111}
+.btn{border:0;border-radius:9px;padding:8px 13px;background:var(--navy);color:#fff;font:700 12px 'Open Sans';cursor:pointer}
+.btn.red{background:var(--red)}.btn.light{background:#fff;color:var(--navy);border:1px solid var(--c3)}.btn.line{background:#fff;color:var(--navy);border:2px solid var(--navy)}
+main{padding:14px}
+.grid2{display:grid;grid-template-columns:1fr 1.35fr;gap:12px;margin-bottom:12px}
+@media(max-width:900px){.grid2{grid-template-columns:1fr}}
+.card{background:#fff;border-radius:13px;padding:14px 16px;box-shadow:0 2px 12px rgba(0,53,107,.08)}
+.card h2{font-size:13.5px;color:var(--navy);margin:0;display:flex;align-items:center;gap:8px}
+.tag{font-size:10px;font-weight:800;padding:2px 9px;border-radius:999px}
+.tag.perm{background:#e9eff7;color:var(--blue)}.tag.live{background:#e1f5ee;color:#087355}
+.vh{font-size:16px;font-weight:800;color:var(--navy);margin-top:9px}
+.vh small{display:block;font-size:12px;font-weight:600;color:var(--muted);margin-top:2px}
+.frow{display:flex;gap:10px;margin-top:11px;align-items:flex-end;flex-wrap:wrap}
+.field{display:flex;flex-direction:column;gap:4px}
+.field label{font-size:11px;color:var(--navy);font-weight:700}
+.field input,.field select,.field textarea{border:1.5px solid var(--c3);border-radius:9px;padding:8px 10px;font:inherit;font-size:13px;background:#fff}
+.field textarea{min-height:60px}
+.saved{font-size:11.5px;color:var(--green);font-weight:700;margin-top:8px;min-height:15px}
+.balnum{display:flex;align-items:baseline;gap:7px;margin-top:8px}
+.balnum b{font-size:31px;font-weight:800;color:var(--navy)}
+.balnum span{font-size:13px;color:var(--muted);font-weight:600}
+.chain{margin-top:8px;font-size:12px;color:#4d5866;line-height:1.55}
+.chain b{color:var(--navy)}
+.hist{margin-top:9px;border-top:1px solid var(--c2);max-height:130px;overflow:auto}
+.hrow{display:flex;justify-content:space-between;gap:10px;font-size:11.5px;padding:6px 2px;border-bottom:1px solid var(--c2)}
+.hrow .why{color:var(--muted);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.hrow .v{font-weight:800;color:var(--navy);white-space:nowrap}
+.tablebox{background:#fff;border-radius:13px;overflow:auto;box-shadow:0 2px 12px rgba(0,53,107,.08)}
+table{width:100%;border-collapse:collapse;font-size:11.5px;white-space:nowrap}
+th{background:var(--c2);color:var(--navy);padding:8px;text-align:left;position:sticky;top:0}
+td{padding:8px;border-bottom:1px solid var(--c2)}
+tr.revision td{background:#fff0f0}tr:hover td{background:#f8f7f6}
+tr.gap td{background:#FFF7E6;color:#854F0B;font-size:11px;border-bottom:1px solid #EF9F27}
+.flow{display:inline-flex;align-items:center;gap:5px;font-weight:700}
+.flow svg{color:var(--muted);flex:none}
+.status{font-size:10px;font-weight:800;border-radius:999px;padding:3px 8px;background:#e9eff7;color:var(--blue)}
+.status.approved{background:#e1f5ee;color:#087355}.status.revision{background:#fdebec;color:var(--red)}.status.submitted{background:#fff3d9;color:#855f00}
+.actions{display:flex;gap:5px}
+.empty{text-align:center;padding:40px;color:var(--muted)}
+dialog{border:0;border-radius:14px;padding:0;width:min(460px,94vw);box-shadow:0 15px 50px rgba(0,20,50,.35)}
+dialog::backdrop{background:rgba(0,20,50,.5)}
+.dh{background:var(--navy);color:#fff;padding:12px 15px;font-weight:800;display:flex;justify-content:space-between}
+.db{padding:15px}
+.dgrid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.history{margin-top:12px;padding-top:10px;border-top:1px solid var(--c2);max-height:160px;overflow:auto;font-size:10.5px}
+.history .h1{padding:6px 0;border-bottom:1px solid var(--c2)}
+#toast{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);background:var(--navy);color:#fff;padding:10px 16px;border-radius:10px;display:none;z-index:50}
 </style></head><body>
-<header><h1>TMS</h1><nav class="tabs"><a href="/index.html">Планування</a><a href="/facts.html">План / Факт</a><a class="on">Транспортні листи</a></nav><input type="date" id="from"><input type="date" id="to"><select id="drv" multiple title="Водії"></select><button class="btn light" onclick="load()">Оновити</button><button class="btn red" onclick="exportXlsx()">Excel</button><span id="stat" style="margin-left:auto;font-size:11px"></span></header>
-<main><section class="setup" id="setup"><h2>Пілот · налаштування автомобіля</h2><div id="setupBody" class="note">Завантаження…</div></section><section class="tablebox"><table><thead><tr><th>Дата</th><th>Автомобіль</th><th>Водій</th><th>Початок</th><th>Кінець</th><th>Пробіг</th><th>Заправлено</th><th>Норма</th><th>Витрата</th><th>Залишок поч.</th><th>Залишок кін.</th><th>Статус</th><th></th></tr></thead><tbody id="rows"><tr><td colspan="13" class="empty">Завантаження…</td></tr></tbody></table></section></main>
-<dialog id="dlg"><div class="dh"><span>Транспортний лист</span><span onclick="dlg.close()" style="cursor:pointer">×</span></div><div class="db" id="dlgBody"></div></dialog><div id="toast"></div>
+<header><h1>TMS</h1><nav class="tabs"><a href="/index.html">Планування</a><a href="/facts.html">План / Факт</a><a class="on">Транспортні листи</a></nav>
+<input type="date" id="from"><input type="date" id="to"><select id="drv" multiple title="Водії"></select>
+<button class="btn light" onclick="load()">Оновити</button><button class="btn red" onclick="exportXlsx()">Excel</button>
+<span id="stat" style="margin-left:auto;font-size:11px"></span></header>
+<main>
+<div class="grid2">
+  <section class="card" id="carCard">
+    <h2>Автомобіль <span class="tag perm">постійні налаштування</span></h2>
+    <div id="carBody" style="font-size:12px;color:var(--muted);margin-top:8px">Завантаження…</div>
+  </section>
+  <section class="card" id="balCard">
+    <h2>Паливний баланс <span class="tag live">ланцюжок</span></h2>
+    <div id="balBody" style="font-size:12px;color:var(--muted);margin-top:8px">Завантаження…</div>
+  </section>
+</div>
+<section class="tablebox"><table><thead><tr><th>Дата</th><th>Автомобіль</th><th>Водій</th><th>Одометр</th><th>Пробіг</th><th>Заправлено</th><th>Норма</th><th>Витрата</th><th>Залишок поч → кін</th><th>Статус</th><th></th></tr></thead>
+<tbody id="rows"><tr><td colspan="11" class="empty">Завантаження…</td></tr></tbody></table></section>
+</main>
+<dialog id="dlg"><div class="dh"><span id="dlgTitle">Транспортний лист</span><span onclick="dlg.close()" style="cursor:pointer">×</span></div><div class="db" id="dlgBody"></div></dialog>
+<div id="toast"></div>
 <script>
-const $=id=>document.getElementById(id),statusName={draft:'Чернетка',submitted:'Очікує підтвердження',approved:'Підтверджено',revision:'Повторна перевірка'};let meta=null,data=[],active=null;const iso=d=>d.toISOString().slice(0,10),n=(v,d=1)=>v==null?'—':Number(v).toLocaleString('uk-UA',{minimumFractionDigits:d,maximumFractionDigits:d});
+const $=id=>document.getElementById(id),ARROW='<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>';
+const statusName={draft:'Чернетка',submitted:'Очікує підтвердження',approved:'Підтверджено',revision:'Повторна перевірка'};
+let meta=null,data=[],active=null,vehId=null;
+const iso=d=>d.toISOString().slice(0,10),n=(v,d=1)=>v==null?'—':Number(v).toLocaleString('uk-UA',{minimumFractionDigits:d,maximumFractionDigits:d});
+const dt=s=>s?new Date(s).toLocaleString('uk-UA',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}):'';
 const today=new Date();$('to').value=iso(today);$('from').value=iso(new Date(today.getFullYear(),today.getMonth(),1));
-function toast(t){$('toast').textContent=t;$('toast').style.display='block';setTimeout(()=>$('toast').style.display='none',2500)}
+function toast(t){$('toast').textContent=t;$('toast').style.display='block';setTimeout(()=>$('toast').style.display='none',2600)}
 async function api(url,opt){const r=await fetch(url,opt),j=await r.json().catch(()=>({}));if(!r.ok)throw new Error(j.detail||'Помилка');return j}
-async function loadMeta(){meta=await api('/api/transport-sheets/meta');const m=meta.drivers[0];$('drv').innerHTML=meta.drivers.map(x=>`<option value="${x.driver_id}" selected>${x.name}</option>`).join('');if(!m){$('setupBody').textContent='Водія з кодом '+meta.pilot_code+' не знайдено';return}$('setupBody').innerHTML=`<div class="setup-row"><div><b style="color:var(--navy)">${m.vehicle_name||'Автомобіль не закріплено'}</b><div class="note">${m.name} · код 1С ${m.code_1c}</div></div>${m.vehicle_id?`<div class="field"><label>Норма, л/100 км</label><input id="rate" type="number" step="0.001" value="${m.rate_l_per_100??''}"></div><div class="field"><label>Початковий залишок, л</label><input id="balance" type="number" step="0.001" value="${m.initial_balance_l??''}"></div><div class="field"><label>Дата залишку</label><input id="balanceDate" type="date" value="${m.initial_balance_date||$('from').value}"></div><button class="btn" onclick="saveSettings(${m.vehicle_id})">Зберегти</button>`:''}</div><div class="note">Ці значення потрібні один раз. Далі залишок переноситься з попереднього підтвердженого дня.</div>`}
-async function saveSettings(id){try{await api('/api/transport-sheets/settings/'+id,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({rate_l_per_100:$('rate').value,initial_balance_l:$('balance').value,initial_balance_date:$('balanceDate').value})});toast('Налаштування збережено');await loadMeta();await load()}catch(e){toast(e.message)}}
+
+async function loadMeta(){
+  meta=await api('/api/transport-sheets/meta');const m=meta.drivers[0];
+  $('drv').innerHTML=meta.drivers.map(x=>`<option value="${x.driver_id}" selected>${x.name}</option>`).join('');
+  if(!m){$('carBody').textContent='Водія з кодом '+meta.pilot_code+' не знайдено';$('balBody').textContent='—';return}
+  vehId=m.vehicle_id;
+  $('carBody').innerHTML=`<div class="vh">${m.vehicle_name||'Автомобіль не закріплено'}<small>${m.name} · код 1С ${m.code_1c}</small></div>
+    ${vehId?`<div class="frow"><div class="field"><label>Норма, л/100 км</label><input id="rate" type="number" step="0.001" style="width:120px" value="${m.rate_l_per_100??''}"></div>
+    <button class="btn" onclick="saveRate()">Зберегти</button></div>
+    <div class="saved" id="rateSaved"></div>
+    <div style="font-size:11px;color:var(--muted)">Норма — постійне налаштування. Зміна впливає на нові розрахунки; підтверджені листи не перераховуються.</div>`:''}`;
+  if(vehId)await loadBalance();
+}
+async function loadBalance(){
+  const b=await api('/api/transport-sheets/balance/'+vehId);
+  const cur=b.current,sp=b.start_point;
+  const startLine=sp&&sp.initial_balance_l!=null&&sp.initial_balance_date
+    ?`Ланцюжок ведеться з <b>${sp.initial_balance_date} (${n(sp.initial_balance_l,1)} л)</b>`
+    :`<b style="color:var(--amber)">Немає стартової точки</b> — додайте коригування залишку на дату`;
+  const adj=(b.adjustments||[]).map(a=>`<div class="hrow"><span>${a.adjust_date} · коригування</span><span class="why" title="${a.reason}">${a.reason}</span><span class="v">${n(a.balance_l,1)} л</span></div>`).join('');
+  $('balBody').innerHTML=`
+    <div class="balnum"><b>${cur?n(cur.closing_balance_l,1):'—'}</b><span>л · залишок на кінець ${cur?cur.work_date:'—'}${cur&&cur.status!=='approved'?' (не підтверджено)':''}</span></div>
+    <div class="chain">${startLine} · кожен день: залишок поч. = залишок кін. попереднього підтвердженого дня</div>
+    <div class="hist">${adj||'<div class="hrow"><span class="why">Коригувань ще не було</span></div>'}</div>
+    <div style="margin-top:10px"><button class="btn line" onclick="openAdjust()">Скоригувати залишок на дату</button></div>`;
+}
+async function saveRate(){
+  try{const j=await api('/api/transport-sheets/settings/'+vehId,{method:'PUT',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({rate_l_per_100:$('rate').value})});
+    $('rateSaved').textContent='Збережено '+dt(j.updated_at)+' · діє для нових розрахунків';
+    await load();await loadBalance()}catch(e){toast(e.message)}
+}
+function openAdjust(){
+  $('dlgTitle').textContent='Коригування залишку';
+  $('dlgBody').innerHTML=`<div style="font-size:12px;color:var(--muted);margin-bottom:10px">Задає залишок пального на ранок вказаної дати. Ланцюжок перерахується вперед; підтверджені листи не змінюються.</div>
+    <div class="dgrid"><div class="field"><label>Дата</label><input id="adjDate" type="date" value="${iso(new Date())}"></div>
+    <div class="field"><label>Залишок на ранок, л</label><input id="adjVal" type="number" step="0.001"></div></div>
+    <div class="field" style="margin-top:10px"><label>Причина</label><textarea id="adjReason" placeholder="Напр.: звірка по чеку АЗС, інвентаризація"></textarea></div>
+    <div style="display:flex;gap:8px;margin-top:10px"><button class="btn light" onclick="dlg.close()">Скасувати</button><button class="btn" onclick="saveAdjust()">Застосувати</button></div>`;
+  $('dlg').showModal();
+}
+async function saveAdjust(){
+  try{await api('/api/transport-sheets/adjustments',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({vehicle_id:vehId,adjust_date:$('adjDate').value,balance_l:$('adjVal').value,reason:$('adjReason').value})});
+    dlg.close();toast('Коригування застосовано, ланцюжок перераховано');await load();await loadBalance()}catch(e){toast(e.message)}
+}
+
 function selected(){return [...$('drv').selectedOptions].map(o=>o.value).join(',')}
-async function load(){try{data=await api(`/api/transport-sheets?date_from=${$('from').value}&date_to=${$('to').value}&driver_ids=${selected()}`);$('stat').textContent=`${data.length} листів`;render()}catch(e){toast(e.message)}}
-function render(){if(!data.length){$('rows').innerHTML='<tr><td colspan="13" class="empty">За вибраний період листів немає. Відкрийте кабінет Шарипової, щоб створити перший.</td></tr>';return}$('rows').innerHTML=data.map(x=>{const km=x.odometer_start!=null&&x.odometer_end!=null?x.odometer_end-x.odometer_start:null;return `<tr class="${x.status}"><td>${x.work_date}</td><td>${x.vehicle_name}</td><td>${x.driver_name}</td><td>${n(x.odometer_start)}</td><td>${n(x.odometer_end)}</td><td><b>${n(km)}</b></td><td>${n(x.refueled_l,2)}</td><td>${n(x.rate_l_per_100,2)}</td><td>${n(x.fuel_used_l,2)}</td><td>${n(x.opening_balance_l,2)}</td><td><b>${n(x.closing_balance_l,2)}</b></td><td><span class="status ${x.status}">${statusName[x.status]||x.status}</span></td><td><div class="actions"><button class="btn light" onclick="openSheet(${x.id})">Відкрити</button>${x.status!=='approved'?`<button class="btn" onclick="approve(${x.id})">Підтвердити</button>`:''}</div></td></tr>`}).join('')}
-async function openSheet(id){active=await api('/api/transport-sheets/'+id);const changes=active.changes||[];$('dlgBody').innerHTML=`<div class="grid"><div class="field"><label>Одометр початок</label><input id="edStart" value="${active.odometer_start??''}"></div><div class="field"><label>Одометр кінець</label><input id="edEnd" value="${active.odometer_end??''}"></div><div class="field"><label>Залишок на початок, л</label><input id="edOpen" value="${active.opening_balance_l??''}"></div><div class="field"><label>Заправлено, л</label><input disabled value="${active.refueled_l??0}"></div></div><div class="field" style="margin-top:10px"><label>Причина зміни</label><textarea id="edReason" placeholder="Обов'язково при редагуванні"></textarea></div><div style="display:flex;gap:8px"><button class="btn light" onclick="dlg.close()">Закрити</button><button class="btn" onclick="saveEdit()">Зберегти зміни</button>${active.status!=='approved'?`<button class="btn red" onclick="approve(${id})">Підтвердити</button>`:''}</div>${active.revision_reason?`<div class="note" style="color:var(--red)"><b>Причина водія:</b> ${active.revision_reason}</div>`:''}<div class="history">${changes.length?changes.map(c=>`<div class="hist"><b>${c.actor_name||c.actor_role}</b> · ${c.field_name}: ${c.old_value||'—'} → ${c.new_value||'—'}<br>${c.reason||''}</div>`).join(''):'Змін ще не було.'}</div>`;$('dlg').showModal()}
-async function saveEdit(){try{await api('/api/transport-sheets/'+active.id,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({odometer_start:$('edStart').value||null,odometer_end:$('edEnd').value||null,opening_balance_l:$('edOpen').value||null,reason:$('edReason').value})});$('dlg').close();toast('Зміни збережено');load()}catch(e){toast(e.message)}}
-async function approve(id){try{await api(`/api/transport-sheets/${id}/approve`,{method:'POST'});$('dlg').close();toast('Лист підтверджено');load()}catch(e){toast(e.message)}}
-function exportXlsx(){const ids=selected();location.href=`/api/transport-sheets/export.xlsx?date_from=${$('from').value}&date_to=${$('to').value}&driver_ids=${ids}&approved_only=true`}
+async function load(){try{
+  data=await api(`/api/transport-sheets?date_from=${$('from').value}&date_to=${$('to').value}&driver_ids=${selected()}`);
+  $('stat').textContent=`${data.length} листів`;render()}catch(e){toast(e.message)}}
+
+function render(){
+  if(!data.length){$('rows').innerHTML='<tr><td colspan="11" class="empty">За вибраний період листів немає. Відкрийте кабінет водія, щоб створити перший.</td></tr>';return}
+  const asc=[...data].sort((a,b)=>a.work_date<b.work_date?-1:1);
+  let html='',prev=null;
+  for(const x of asc){
+    if(prev){
+      const d1=new Date(prev.work_date),d2=new Date(x.work_date),gap=Math.round((d2-d1)/86400000)-1;
+      if(gap>0)html+=`<tr class="gap"><td colspan="11">${gap===1?'1 день без листа':gap+' дн. без листів'} — залишок ${n(prev.closing_balance_l,1)} л переноситься без розриву</td></tr>`;
+    }
+    const km=x.odometer_start!=null&&x.odometer_end!=null?x.odometer_end-x.odometer_start:null;
+    html+=`<tr class="${x.status}">
+      <td><b>${x.work_date}</b></td><td>${x.vehicle_name}</td><td>${x.driver_name}</td>
+      <td style="color:#4d5866">${n(x.odometer_start)} → <b style="color:var(--text)">${n(x.odometer_end)}</b></td>
+      <td><b>${n(km)}</b></td><td>${n(x.refueled_l,2)}</td><td>${n(x.rate_l_per_100,2)}</td><td>${n(x.fuel_used_l,2)}</td>
+      <td><span class="flow">${n(x.opening_balance_l,1)} ${ARROW} <b>${n(x.closing_balance_l,1)}</b></span>${x.opening_balance_l==null?' <span style="color:var(--amber);font-weight:800">немає ланцюжка</span>':''}</td>
+      <td><span class="status ${x.status}">${statusName[x.status]||x.status}</span></td>
+      <td><div class="actions"><button class="btn light" onclick="openSheet(${x.id})">Відкрити</button>
+      ${x.status!=='approved'?`<button class="btn" onclick="approve(${x.id})">Підтвердити</button>`:''}</div></td></tr>`;
+    prev=x;
+  }
+  $('rows').innerHTML=html;
+}
+
+async function openSheet(id){
+  active=await api('/api/transport-sheets/'+id);const changes=active.changes||[];
+  $('dlgTitle').textContent='Транспортний лист · '+active.work_date;
+  $('dlgBody').innerHTML=`
+    <div class="dgrid">
+      <div class="field"><label>Одометр початок</label><input id="edStart" value="${active.odometer_start??''}"></div>
+      <div class="field"><label>Одометр кінець</label><input id="edEnd" value="${active.odometer_end??''}"></div>
+      <div class="field"><label>Залишок на початок, л</label><input disabled value="${active.opening_balance_l??'—'}" title="Керується ланцюжком і коригуваннями"></div>
+      <div class="field"><label>Заправлено, л</label><input disabled value="${active.refueled_l??0}"></div>
+    </div>
+    <div style="font-size:11px;color:var(--muted);margin-top:6px">Залишок редагується лише через «Скоригувати залишок на дату» — так зберігається ланцюжок.</div>
+    <div class="field" style="margin-top:10px"><label>Причина зміни</label><textarea id="edReason" placeholder="Обов'язково при редагуванні"></textarea></div>
+    <div style="display:flex;gap:8px"><button class="btn light" onclick="dlg.close()">Закрити</button>
+      <button class="btn" onclick="saveEdit()">Зберегти зміни</button>
+      ${active.status!=='approved'?`<button class="btn red" onclick="approve(${id})">Підтвердити</button>`:''}</div>
+    ${active.revision_reason?`<div style="font-size:11px;color:var(--red);margin-top:8px"><b>Причина водія:</b> ${active.revision_reason}</div>`:''}
+    <div class="history">${changes.length?changes.map(c=>`<div class="h1"><b>${c.actor_name||c.actor_role}</b> · ${c.field_name}: ${c.old_value||'—'} → ${c.new_value||'—'}<br>${c.reason||''}</div>`).join(''):'Змін ще не було.'}</div>`;
+  $('dlg').showModal();
+}
+async function saveEdit(){
+  try{await api('/api/transport-sheets/'+active.id,{method:'PATCH',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({odometer_start:$('edStart').value||null,odometer_end:$('edEnd').value||null,reason:$('edReason').value})});
+    dlg.close();toast('Зміни збережено');load();loadBalance()}catch(e){toast(e.message)}
+}
+async function approve(id){
+  try{await api(`/api/transport-sheets/${id}/approve`,{method:'POST'});dlg.close();toast('Лист підтверджено');load();loadBalance()}catch(e){toast(e.message)}
+}
+function exportXlsx(){location.href=`/api/transport-sheets/export.xlsx?date_from=${$('from').value}&date_to=${$('to').value}&driver_ids=${selected()}&approved_only=true`}
 (async()=>{await loadMeta();await load()})();
 </script></body></html>

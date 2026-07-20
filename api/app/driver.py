@@ -4,6 +4,7 @@
 приём GPS-точек, план/факт для логиста (страницы driver.html, tokens.html,
 facts.html). Схема — migrate_011, применяется из init() при старте API.
 """
+import os
 import asyncio
 import secrets
 from datetime import date, datetime, timedelta, timezone
@@ -201,7 +202,7 @@ def _route_timing(plan_date, plan_depart, plan_return, stops, start_dt, finish_d
 
 async def _driver_by_token(token: str):
     row = await pool.fetchrow("""
-        SELECT d.id, d.name FROM driver_tokens t
+        SELECT d.id, d.name, d.code_1c FROM driver_tokens t
         JOIN drivers d ON d.id = t.driver_id
         WHERE t.token = $1 AND t.is_active AND d.is_active""", token)
     if not row:
@@ -373,7 +374,11 @@ async def driver_trip(token: str, d: date | None = Query(None),
         # v39: список усіх рейсів дня для перемикача
         "routes": [{"id": r["id"], "depart": _hm(r["depart_time"]),
                     "return": _hm(r["return_time"]), "stops": r["n_stops"],
-                    "started": bool(r["start_ts"]), "finished": bool(r["finish_ts"])}
+                    "started": bool(r["start_ts"]), "finished": bool(r["finish_ts"]),
+                    # v55: GPS-пробіг для вечірнього передзаповнення (лише пілот ТЛ)
+                    "gps_km": (await _route_worklog(r["id"], [drv["id"]]))[3]
+                        if (drv["code_1c"] or "").strip() ==
+                           os.getenv("FUEL_PILOT_DRIVER_CODE_1C", "000000653") else None}
                    for r in rr],
         "route": {"id": route["id"], "vehicle": route["vehicle_name"], "plate": route["plate"],
                   "color": route["color"], "total_km": float(route["total_km"] or 0),
@@ -382,9 +387,11 @@ async def driver_trip(token: str, d: date | None = Query(None),
                   "start_address": route["start_address"],
                   "finish_kind": route["finish_kind"],
                   "finish_address": route["finish_address"],
-                  "depot_arrive_ts": _iso(await pool.fetchval(          # v38
-                      "SELECT ts FROM route_events WHERE route_id=$1 AND event='depot_arrive'",
-                      route["id"])),
+                  **(lambda da: {"depot_arrive_ts": _iso(da["ts"]) if da else None,   # v38/v55
+                                 "depot_arrive_auto": bool(da and da["source"] != "driver")})(
+                      await pool.fetchrow(
+                          "SELECT ts, COALESCE(source,'driver') AS source FROM route_events "
+                          "WHERE route_id=$1 AND event='depot_arrive'", route["id"])),
                   **dict(zip(("start_ts", "finish_ts", "work_min", "gps_km"),
                              await _route_worklog(route["id"], [drv["id"]])))},
         "stops": [{
@@ -951,7 +958,16 @@ async def route_event(token: str, route_id: int, body: RouteEventIn):
         arrived = await pool.fetchval(               # v38/v51: склад-крок лише
             "SELECT 1 FROM route_events WHERE route_id=$1 AND event='depot_arrive'", route_id)
         if not arrived:
-            raise HTTPException(400, "Спочатку познач прибуття на склад")
+            # v55: пілот ТЛ — кнопки складу немає, подію дописуємо на виїзді
+            pilot_code = os.getenv("FUEL_PILOT_DRIVER_CODE_1C", "000000653")
+            if (drv["code_1c"] or "").strip() == pilot_code:
+                await pool.execute("""
+                    INSERT INTO route_events (route_id, driver_id, event, lat, lon, source)
+                    VALUES ($1,$2,'depot_arrive',$3,$4,'auto')
+                    ON CONFLICT (route_id, event) DO NOTHING""",
+                    route_id, drv["id"], body.lat, body.lon)
+            else:
+                raise HTTPException(400, "Спочатку познач прибуття на склад")
     if body.event == "finish":
         started = await pool.fetchval(
             "SELECT 1 FROM route_events WHERE route_id=$1 AND event='start'", route_id)

@@ -119,6 +119,27 @@
   .preview-note { background:#FFF7E6; border:1px solid #EF9F27; border-radius:10px;
                   padding:8px 11px; font-size:12px; color:#854F0B; margin:10px 10px 0; }
   /* v54: пілотний транспортний лист */
+  /* v55: чип ТЛ */
+  .tl-chip { display:flex; align-items:center; gap:9px; background:#fff; margin:10px 10px 0;
+             border-radius:11px; padding:8px 12px; box-shadow:0 1px 4px rgba(0,53,107,.10);
+             font-size:13px; cursor:pointer; }
+  .tl-chip.closed { border-left:4px solid var(--green); }
+  .tl-chip.warn { border-left:4px solid var(--amber); }
+  .tl-chip .t { flex:1; min-width:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .tl-chip .t b { color:var(--navy); }
+  .tl-chip .fuelbtn { flex:none; width:38px; height:38px; display:flex; align-items:center;
+             justify-content:center; border:1.5px solid var(--cream-300); border-radius:9px;
+             background:#fff; color:var(--navy); padding:0; min-height:0; box-shadow:none; }
+  .tl-chip .chev { color:var(--muted); font-size:17px; font-weight:700; }
+  .tl-sumrow { display:flex; justify-content:space-between; font-size:13.5px; padding:7px 2px;
+               border-bottom:1px solid var(--cream-200); }
+  .tl-sumrow b { color:var(--navy); }
+  .tl-odo { display:flex; align-items:baseline; justify-content:center; gap:6px;
+            border:1.5px solid var(--cream-300); border-radius:12px; padding:12px;
+            font-size:26px; font-weight:800; color:var(--navy); margin-bottom:6px; }
+  .tl-odo input { border:none; outline:none; font:inherit; color:inherit; width:150px; text-align:center; }
+  .tl-odo small { font-size:13px; font-weight:600; color:var(--muted); }
+  .tl-hint { font-size:12px; color:var(--muted); text-align:center; margin-bottom:12px; }
   .fuel-card { background:#fff; margin:10px 10px 0; border-radius:13px; padding:13px;
                border-left:5px solid var(--navy); box-shadow:0 2px 10px rgba(0,53,107,.1); }
   .fuel-head { display:flex; align-items:center; justify-content:space-between; gap:8px; color:var(--navy); }
@@ -203,32 +224,151 @@ async function loadTransportSheet() {
     if (!r.ok) return;
     const j = await r.json(); fuelPilot = !!j.enabled; fuelSheet = j.sheet || null;
     renderTransportCard(j.error);
+    maybeEveningDlg();                              // v55: вечірній тригер
   } catch(e) { /* рейси працюють незалежно від пілота */ }
 }
 
+// v55: широкої картки немає — ТЛ живе у чипі-рядку, деталі у шторці
+const TL_ICO = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#00356B" stroke-width="2" stroke-linecap="round"><path d="M4 4h12v16H4z"/><path d="M8 8h4M8 12h4M8 16h2"/><path d="M16 9h3l1.5 2V16h-4.5"/></svg>';
+const PUMP_ICO = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M5 4h8v16H5zM5 20h8M7 4v5h4V4"/><path d="M13 9h3l2 2v6a1.5 1.5 0 0 1-3 0v-4h-2"/></svg>';
+const OK_ICO = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#2E8B57" stroke-width="2" stroke-linecap="round"><path d="M20 6L9 17l-5-5"/></svg>';
+
 function renderTransportCard(error='') {
-  document.querySelector('.fuel-card')?.remove();
+  document.querySelector('.tl-chip')?.remove();
   if (!fuelPilot || MODE !== 'today') return;
   const s=fuelSheet;
-  const html = !s ? `<div class="fuel-card"><div class="fuel-head"><b>Транспортний лист</b></div><div class="fuel-note" style="margin:10px 0 0">${error||'Не вдалося визначити автомобіль'}</div></div>` : `
-    <div class="fuel-card">
-      <div class="fuel-head"><b>Транспортний лист</b><span class="fuel-status ${s.status}">${fuelStatus[s.status]||s.status}</span></div>
-      <div style="font-size:11px;color:var(--muted);margin-top:3px">${s.vehicle}${s.plate?' · '+s.plate:''}</div>
-      ${s.status==='revision'?`<div class="fuel-note" style="margin-top:9px">Логіст отримає повідомлення про виправлення.</div>`:''}
-      <div class="fuel-grid">
-        <span>Одометр на початок</span><b>${s.odometer_start==null?'Не внесено':fnum(s.odometer_start,1)+' км'}</b>
-        <span>Одометр на кінець</span><b>${s.odometer_end==null?'Не внесено':fnum(s.odometer_end,1)+' км'}</b>
-        <span>Залишок на початок</span><b>${fnum(s.opening_balance_l,2)} л</b>
-        <span>Заправлено</span><b>${fnum(s.refueled_l,2)} л</b>
-        <span>Залишок на кінець</span><b>${fnum(s.closing_balance_l,2)} л</b>
-      </div>
-      <div class="fuel-actions">
-        <button class="fuel-primary" onclick="openOdometer()">${s.odometer_start==null?'Внести початок':s.odometer_end==null?'Внести кінець':'Показники'}</button>
-        <button class="fuel-secondary" onclick="openRefuel()">Додати заправку</button>
-        ${(s.odometer_start!=null&&s.odometer_end!=null&&s.status==='draft')?'<button class="fuel-primary" style="flex-basis:100%" onclick="submitTransportSheet()">Надіслати логісту</button>':''}
-      </div>
+  let cls='', ico=TL_ICO, txt, pump=true;
+  if (!s) { txt = error||'Не вдалося визначити автомобіль'; cls='warn'; pump=false; }
+  else if (s.status==='approved') {
+    const km = s.km!=null?fnum(s.km,0)+' км · ':'';
+    ico=OK_ICO; cls='closed'; txt=`День закрито · <b>${km}залишок ${fnum(s.closing_balance_l,1)} л</b>`;
+  } else if (s.status==='submitted') {
+    ico=OK_ICO; cls='closed'; txt=`ТЛ надіслано · <b>${s.km!=null?fnum(s.km,0)+' км':''}</b> · очікує логіста`;
+  } else {
+    if (s.status==='revision') cls='warn';
+    const ref = s.refuels.length ? ` · ${s.refuels.length} заправ${s.refuels.length===1?'ка':'ки'}` : '';
+    txt = !s.start_confirmed
+      ? `ТЛ · <b>${s.odometer_start==null?'одометр не внесено':'вчора '+fnum(s.odometer_start,1)+' км'}</b> · Чернетка`
+      : `ТЛ · <b>${fnum(s.odometer_start,1)} км</b>${ref}${s.status==='revision'?' · повторна перевірка':''}`;
+  }
+  const showFinish = s && ['draft','revision'].includes(s.status) && s.start_confirmed &&
+                     s.odometer_end==null && allRoutesFinished();
+  $('list').insertAdjacentHTML('afterbegin', `
+    <div class="tl-chip ${cls}" onclick="openTlDetail()">${ico}<div class="t">${txt}</div>
+      ${pump?`<button class="fuelbtn" onclick="event.stopPropagation();openRefuel()" title="Додати заправку">${PUMP_ICO}</button>`:''}
+      <span class="chev">›</span></div>
+    ${showFinish?`<button class="b-route go" style="margin-top:8px" onclick="openEveningDlg()">Завершити день</button>`:''}`);
+}
+
+// шторка з деталями — «запасний вхід» для будь-яких правок
+function openTlDetail(){
+  const s=fuelSheet; if(!s) return;
+  $('fuelBox').innerHTML=`<h3>Транспортний лист <span class="fuel-status ${s.status}" style="float:right">${fuelStatus[s.status]||s.status}</span></h3>
+    <div class="fsub">${s.vehicle}${s.plate?' · '+s.plate:''} · ${s.date}</div>
+    ${s.status==='revision'?`<div class="fuel-note">Логіст отримає повідомлення про виправлення.</div>`:''}
+    <div class="fuel-grid">
+      <span>Одометр на початок</span><b>${s.odometer_start==null?'Не внесено':fnum(s.odometer_start,1)+' км'}</b>
+      <span>Одометр на кінець</span><b>${s.odometer_end==null?'Не внесено':fnum(s.odometer_end,1)+' км'}</b>
+      <span>Залишок на початок</span><b>${fnum(s.opening_balance_l,2)} л</b>
+      <span>Заправлено</span><b>${fnum(s.refueled_l,2)} л</b>
+      <span>Залишок на кінець</span><b>${fnum(s.closing_balance_l,2)} л</b>
+    </div>
+    <div class="fuel-actions">
+      <button class="fuel-primary" onclick="closeFuelDlg();openOdometer()">Показники</button>
+      <button class="fuel-secondary" onclick="closeFuelDlg();openRefuel()">Додати заправку</button>
+      ${(s.odometer_start!=null&&s.odometer_end!=null&&['draft','revision'].includes(s.status))?'<button class="fuel-primary" style="flex-basis:100%" onclick="submitTransportSheet()">Надіслати логісту</button>':''}
+      ${['submitted','approved'].includes(s.status)?'<button class="fuel-secondary" style="flex-basis:100%" onclick="closeFuelDlg();openOdometer()">Відновити день / виправити</button>':''}
     </div>`;
-  $('list').insertAdjacentHTML('afterbegin',html);
+  $('fuelDlg').classList.add('open');
+}
+
+// ---------- v55: ранок — підтвердження одометра при першому «Виїхав» ----------
+let pendingStart = null;                                   // route_id, який чекає підтвердження
+function needMorningConfirm(){
+  return fuelPilot && fuelSheet && !fuelSheet.start_confirmed &&
+         ['draft','revision'].includes(fuelSheet.status);
+}
+function openMorningDlg(routeId){
+  pendingStart = routeId;
+  const s=fuelSheet, has = s.odometer_start!=null;
+  $('fuelBox').innerHTML=`<h3>Одометр на початок дня</h3>
+    <div class="fsub">${has?'Підставлено вчорашнє кінцеве показання':'Перший день — внесіть показання з панелі'}</div>
+    <div class="tl-odo"><input id="tlMorning" inputmode="decimal" value="${has?s.odometer_start:''}" ${has?'readonly':''}><small>км</small></div>
+    <div class="tl-hint" id="tlMornHint">${has?'Не збігається? «Змінити» — і вкажіть нове значення':'Введіть число з одометра'}</div>
+    <div id="tlMornReason" style="display:none" class="fuel-field"><label>Причина зміни</label><textarea id="tlMornReasonTxt" placeholder="Чому показник відрізняється"></textarea></div>
+    <div style="display:flex;gap:8px">
+      <button class="fuel-primary" style="flex:1.6" onclick="confirmMorning()">Підтвердити</button>
+      ${has?'<button class="fuel-secondary" style="flex:1" id="tlMornEdit" onclick="editMorning()">Змінити</button>':''}
+    </div>`;
+  $('fuelDlg').classList.add('open');
+}
+function editMorning(){
+  const inp=$('tlMorning'); inp.readOnly=false; inp.focus(); inp.select();
+  $('tlMornReason').style.display='block';
+  $('tlMornHint').textContent='Вкажіть фактичний показник і причину';
+  $('tlMornEdit').style.display='none';
+}
+async function confirmMorning(){
+  const val=($('tlMorning').value||'').trim();
+  if(!val){toast('Введіть показник одометра');return}
+  const changed = fuelSheet.odometer_start!=null && String(fuelSheet.odometer_start)!==val.replace(',','.');
+  const reason = changed ? ($('tlMornReasonTxt')?.value||'').trim() : null;
+  if(changed && !reason){toast('Вкажіть причину зміни');return}
+  const r=await fetch(`/api/driver/${TOKEN}/transport-sheet/odometer`,{method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({odometer_start:val,confirm_start:true,reason})});
+  const j=await r.json().catch(()=>({}));
+  if(!r.ok){toast(j.detail||'Не вдалося зберегти');return}
+  fuelSheet=j.sheet; closeFuelDlg(); renderTransportCard();
+  if(pendingStart!=null){pendingStart=null; routeEvent('start',false,true);}
+}
+
+// ---------- v55: вечір — один діалог «Завершення дня» ----------
+function allRoutesFinished(){
+  const list = (trip && trip.routes) || [];
+  return list.length>0 && list.every(x=>x.finished);
+}
+function tlGpsKm(){
+  const list = (trip && trip.routes) || [];
+  const km = list.reduce((a,x)=>a+(x.gps_km||0),0);
+  return km || (trip?.route?.gps_km || 0);
+}
+function maybeEveningDlg(auto=true){
+  if(!fuelPilot||!fuelSheet) return;
+  const s=fuelSheet;
+  if(!['draft','revision'].includes(s.status) || s.odometer_end!=null || !s.start_confirmed) return;
+  if(!allRoutesFinished()) return;
+  if(auto && sessionStorage.getItem('tlEveShown')===s.date) return;
+  sessionStorage.setItem('tlEveShown', s.date);
+  openEveningDlg();
+}
+function openEveningDlg(){
+  const s=fuelSheet, gps=tlGpsKm();
+  const suggested = s.odometer_start!=null && gps>0 ? Math.round(Number(s.odometer_start)+gps) : '';
+  $('fuelBox').innerHTML=`<h3>Завершення дня</h3>
+    <div class="fsub">Усі маршрути завершено</div>
+    <div class="tl-odo"><input id="tlEveEnd" inputmode="decimal" value="${suggested}"><small>км</small></div>
+    <div class="tl-hint">${suggested?`Розраховано за GPS-треком (+${fnum(gps,1)} км) — виправте, якщо на панелі інакше`:'Введіть кінцевий показник з панелі'}</div>
+    <div class="tl-sumrow"><span>Заправлено</span><b>${fnum(s.refueled_l,2)} л · ${s.refuels.length} шт</b></div>
+    <div class="tl-sumrow" style="border:none"><span>Залишок на початок</span><b>${fnum(s.opening_balance_l,2)} л</b></div>
+    <div style="display:flex;gap:8px;margin-top:12px">
+      <button class="fuel-primary" style="flex:1.6" onclick="finishDay()">Надіслати логісту</button>
+      <button class="fuel-secondary" style="flex:1" onclick="closeFuelDlg()">Пізніше</button>
+    </div>`;
+  $('fuelDlg').classList.add('open');
+}
+async function finishDay(){
+  const val=($('tlEveEnd').value||'').trim();
+  if(!val){toast('Введіть кінцевий одометр');return}
+  let r=await fetch(`/api/driver/${TOKEN}/transport-sheet/odometer`,{method:'POST',
+    headers:{'Content-Type':'application/json'},body:JSON.stringify({odometer_end:val})});
+  let j=await r.json().catch(()=>({}));
+  if(!r.ok){toast(j.detail||'Не вдалося зберегти');return}
+  fuelSheet=j.sheet;
+  r=await fetch(`/api/driver/${TOKEN}/transport-sheet/submit`,{method:'POST'});
+  j=await r.json().catch(()=>({}));
+  if(!r.ok){toast(j.detail||'Показник збережено, але не надіслано: '+(j.detail||''));renderTransportCard();return}
+  fuelSheet=j.sheet; closeFuelDlg(); renderTransportCard(); toast('День закрито · передано логісту');
 }
 
 function closeFuelDlg(){ $('fuelDlg').classList.remove('open'); }
@@ -523,17 +663,14 @@ function switchRoute(id) {                        // v39
   load();
 }
 
-async function routeEvent(ev, force = false) {
-  if (ev === 'start' && fuelPilot && fuelSheet && fuelSheet.odometer_start == null) {
-    openOdometer();
-    toast('Спочатку внесіть початковий одометр');
-    return;
-  }
+async function routeEvent(ev, force = false, skipAsk = false) {
+  // v55: перший «Виїхав» дня — ранкове підтвердження одометра (1 діалог = 2 дії)
+  if (ev === 'start' && needMorningConfirm()) { openMorningDlg(trip.route.id); return; }
   const Q = {depot_arrive:'Позначити прибуття на склад?',
              start:'Позначити виїзд на маршрут?', finish:'Завершити маршрут?'};
   const OK = {depot_arrive:'Прибуття на склад зафіксовано',
               start:'Гарної дороги!', finish:'Рейс завершено'};
-  if (!force && !await askYes(Q[ev])) return;
+  if (!force && !skipAsk && !await askYes(Q[ev])) return;
   const last = (typeof lastPos !== 'undefined' && lastPos) ? lastPos
              : (typeof queue !== 'undefined' && queue.length ? queue[queue.length-1] : null);
   const r = await fetch(`/api/driver/${TOKEN}/route/${trip.route.id}/event`, {
@@ -607,14 +744,17 @@ function render() {
     }).join('') + `</div>`;
   }
   const fromDepot = (rt.start_kind || 'depot') === 'depot';   // v51: старт може бути не зі складу
-  if (fromDepot && !rt.depot_arrive_ts) {          // v38: спершу — на склад
+  if (fromDepot && !rt.depot_arrive_ts && !fuelPilot) {   // v38; v55: пілот — склад авто
     head = `<button class="b-route go" onclick="routeEvent('depot_arrive')"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-3px"><path d="M3 21V8l9-5 9 5v13"/><path d="M7 21v-8h10v8"/><path d="M7 17h10"/></svg> Прибув на склад</button>`;
   } else if (!rt.start_ts) {
+    const autoBadge = rt.depot_arrive_auto ? ' <span style="font-size:10.5px;font-weight:800;color:#1D9E75;border:1px solid #1D9E75;border-radius:999px;padding:1px 7px;vertical-align:1px">GPS·авто</span>' : '';
     const from = fromDepot
-      ? `На складі з <b>${hm(rt.depot_arrive_ts)}</b>`
+      ? (rt.depot_arrive_ts
+          ? `На складі з <b>${hm(rt.depot_arrive_ts)}</b>${autoBadge}`
+          : `Старт: <b>зі складу</b>`)
       : `Старт: <b>${rt.start_kind==='home' ? 'з дому' : (rt.start_address || 'інша адреса')}</b>`;
     head = `<div class="onroute">${from}</div>
-      <button class="b-route go" onclick="routeEvent('start')"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-3px"><rect x="1.5" y="6" width="13" height="9"/><path d="M14.5 9h4l3 3.5V15h-7z"/><circle cx="6" cy="18" r="1.8"/><circle cx="17.5" cy="18" r="1.8"/></svg> Виїхав на маршрут</button>`;
+      <button class="b-route go" onclick="routeEvent('start')"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-3px"><rect x="1.5" y="6" width="13" height="9"/><path d="M14.5 9h4l3 3.5V15h-7z"/><circle cx="6" cy="18" r="1.8"/><circle cx="17.5" cy="18" r="1.8"/></svg> Виїхав на маршрут${(trip.routes||[]).length>1?` · ${trip.routes.findIndex(x=>x.id===rt.id)+1} з ${trip.routes.length}`:''}</button>`;
   } else if (!rt.finish_ts) {
     const finHint = (rt.finish_kind && rt.finish_kind !== 'depot')   // v51
       ? `<br><span style="font-size:12px;color:#5F5E5A">Фініш: <b>${rt.finish_kind==='home' ? 'дім' : (rt.finish_address || 'інша адреса')}</b></span>` : '';

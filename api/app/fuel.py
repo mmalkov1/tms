@@ -56,6 +56,51 @@ async def init(db_pool):
             actor_role TEXT NOT NULL CHECK (actor_role IN ('driver','logist','system')),
             actor_name TEXT, field_name TEXT NOT NULL, old_value TEXT, new_value TEXT,
             reason TEXT, created_at TIMESTAMPTZ NOT NULL DEFAULT now())""")
+    # v55
+    await pool.execute(
+        "ALTER TABLE transport_sheets ADD COLUMN IF NOT EXISTS odometer_start_confirmed_at TIMESTAMPTZ")
+    await pool.execute(
+        "ALTER TABLE route_events ADD COLUMN IF NOT EXISTS source TEXT NOT NULL DEFAULT 'driver'")
+    await pool.execute("""
+        CREATE TABLE IF NOT EXISTS fuel_balance_adjustments (
+            id BIGSERIAL PRIMARY KEY,
+            vehicle_id INT NOT NULL REFERENCES vehicles(id) ON DELETE CASCADE,
+            adjust_date DATE NOT NULL,
+            balance_l NUMERIC(10,3) NOT NULL CHECK (balance_l >= 0),
+            reason TEXT NOT NULL,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT now())""")
+    await pool.execute("""CREATE INDEX IF NOT EXISTS idx_fuel_adjustments_vehicle
+        ON fuel_balance_adjustments(vehicle_id, adjust_date DESC, id DESC)""")
+
+
+async def _derive_opening(vehicle_id, day, conn=None):
+    """v55: залишок на початок дня — ТІЛЬКИ з ланцюжка.
+
+    Пріоритет: (а) коригування, датоване пізніше за останній підтверджений день;
+    (б) залишок кін. останнього підтвердженого дня; (в) стартова точка з налаштувань.
+    Жодних фолбеків на одометр чи ручні значення.
+    """
+    c = conn or pool
+    prev = await c.fetchrow("""
+        SELECT work_date, closing_balance_l FROM transport_sheets
+        WHERE vehicle_id=$1 AND work_date<$2 AND status='approved'
+          AND closing_balance_l IS NOT NULL
+        ORDER BY work_date DESC LIMIT 1""", vehicle_id, day)
+    adj = await c.fetchrow("""
+        SELECT adjust_date, balance_l FROM fuel_balance_adjustments
+        WHERE vehicle_id=$1 AND adjust_date<=$2
+        ORDER BY adjust_date DESC, id DESC LIMIT 1""", vehicle_id, day)
+    if adj and (not prev or adj["adjust_date"] > prev["work_date"]):
+        return adj["balance_l"]
+    if prev:
+        return prev["closing_balance_l"]
+    settings = await c.fetchrow(
+        "SELECT initial_balance_l, initial_balance_date FROM vehicle_fuel_settings WHERE vehicle_id=$1",
+        vehicle_id)
+    if settings and settings["initial_balance_l"] is not None and \
+       settings["initial_balance_date"] and settings["initial_balance_date"] <= day:
+        return settings["initial_balance_l"]
+    return None
 
 
 def _num(value, field, allow_none=True):
@@ -101,14 +146,10 @@ async def _ensure_sheet(driver, day):
     if sheet:
         return sheet, vehicle
     previous = await pool.fetchrow("""
-        SELECT odometer_end, closing_balance_l FROM transport_sheets
+        SELECT odometer_end FROM transport_sheets
         WHERE vehicle_id=$1 AND work_date<$2 AND odometer_end IS NOT NULL AND status='approved'
         ORDER BY work_date DESC LIMIT 1""", vehicle["id"], day)
-    settings = await pool.fetchrow(
-        "SELECT * FROM vehicle_fuel_settings WHERE vehicle_id=$1", vehicle["id"])
-    opening = previous["closing_balance_l"] if previous and previous["closing_balance_l"] is not None else (
-        settings["initial_balance_l"] if settings and settings["initial_balance_date"] and
-        settings["initial_balance_date"] <= day else None)
+    opening = await _derive_opening(vehicle["id"], day)          # v55: тільки ланцюжок
     start = previous["odometer_end"] if previous else None
     sheet = await pool.fetchrow("""
         INSERT INTO transport_sheets (work_date,vehicle_id,driver_id,odometer_start,opening_balance_l)
@@ -129,12 +170,15 @@ async def _recalculate(sheet_id):
         km = row["odometer_end"] - row["odometer_start"]
         if km < 0:
             raise HTTPException(400, "Кінцевий одометр не може бути меншим за початковий")
+    opening = row["opening_balance_l"]
+    if opening is None and row["status"] != "approved":          # v55: самолікування
+        opening = await _derive_opening(row["vehicle_id"], row["work_date"])
     used = km * row["rate_l_per_100"] / 100 if km is not None and row["rate_l_per_100"] is not None else None
-    closing = (row["opening_balance_l"] + row["refueled_l"] - used
-               if row["opening_balance_l"] is not None and used is not None else None)
+    closing = (opening + row["refueled_l"] - used
+               if opening is not None and used is not None else None)
     return await pool.fetchrow("""
-        UPDATE transport_sheets SET fuel_used_l=$1,closing_balance_l=$2,updated_at=now()
-        WHERE id=$3 RETURNING *""", used, closing, sheet_id)
+        UPDATE transport_sheets SET opening_balance_l=$1,fuel_used_l=$2,closing_balance_l=$3,updated_at=now()
+        WHERE id=$4 RETURNING *""", opening, used, closing, sheet_id)
 
 
 async def _payload(sheet, vehicle):
@@ -154,6 +198,8 @@ async def _payload(sheet, vehicle):
             "fuel_used_l": sheet["fuel_used_l"], "closing_balance_l": sheet["closing_balance_l"],
             "rate_l_per_100": cfg["rate_l_per_100"] if cfg else None,
             "status": sheet["status"], "revision_reason": sheet["revision_reason"],
+            "start_confirmed": sheet["odometer_start_confirmed_at"] is not None,   # v55
+            "settings_ready": bool(cfg and cfg["rate_l_per_100"] is not None),
             "refuels": [dict(r) for r in refs], "changes": [dict(c) for c in changes]}
 
 
@@ -173,6 +219,7 @@ class OdometerIn(BaseModel):
     odometer_start: str | float | None = None
     odometer_end: str | float | None = None
     reason: str | None = None
+    confirm_start: bool = False          # v55: ранкове підтвердження одним тапом
 
 
 async def _pilot_sheet(token, day=None):
@@ -209,9 +256,12 @@ async def save_odometer(token: str, body: OdometerIn):
                         sheet["id"], driver["name"], field,
                         str(old) if old is not None else None, str(new), reason)
             status = "revision" if sheet["status"] == "approved" else "draft"
+            confirm = body.confirm_start and new_start is not None
             sheet = await c.fetchrow("""UPDATE transport_sheets SET odometer_start=$1,odometer_end=$2,
-                status=$3,revision_reason=$4,approved_at=NULL,approved_by=NULL,updated_at=now()
-                WHERE id=$5 RETURNING *""", new_start, new_end, status, reason, sheet["id"])
+                status=$3,revision_reason=$4,approved_at=NULL,approved_by=NULL,
+                odometer_start_confirmed_at=CASE WHEN $6 THEN now()
+                    ELSE odometer_start_confirmed_at END,updated_at=now()
+                WHERE id=$5 RETURNING *""", new_start, new_end, status, reason, sheet["id"], confirm)
     return {"ok": True, "sheet": await _payload(sheet, vehicle)}
 
 
@@ -260,25 +310,99 @@ async def submit_sheet(token: str):
 
 class SettingsIn(BaseModel):
     rate_l_per_100: str | float
-    initial_balance_l: str | float
-    initial_balance_date: date
+    initial_balance_l: str | float | None = None       # v55: опційно, керується коригуваннями
+    initial_balance_date: date | None = None
 
 
 @router.put("/api/transport-sheets/settings/{vehicle_id}")
 async def save_settings(vehicle_id: int, body: SettingsIn):
     rate = _num(body.rate_l_per_100, "Норма", False)
-    balance = _num(body.initial_balance_l, "Початковий залишок", False)
     if rate <= 0:
         raise HTTPException(400, "Норма має бути більшою за нуль")
+    existing = await pool.fetchrow(
+        "SELECT initial_balance_l, initial_balance_date FROM vehicle_fuel_settings WHERE vehicle_id=$1",
+        vehicle_id)
+    balance = _num(body.initial_balance_l, "Початковий залишок") \
+        if body.initial_balance_l is not None else (existing["initial_balance_l"] if existing else None)
+    balance_date = body.initial_balance_date or (existing["initial_balance_date"] if existing else None)
     await pool.execute("""INSERT INTO vehicle_fuel_settings
         (vehicle_id,rate_l_per_100,initial_balance_l,initial_balance_date)
         VALUES ($1,$2,$3,$4) ON CONFLICT(vehicle_id) DO UPDATE SET
         rate_l_per_100=EXCLUDED.rate_l_per_100,initial_balance_l=EXCLUDED.initial_balance_l,
         initial_balance_date=EXCLUDED.initial_balance_date,updated_at=now()""",
-        vehicle_id, rate, balance, body.initial_balance_date)
-    await pool.execute("""UPDATE transport_sheets SET opening_balance_l=$1,updated_at=now()
-        WHERE vehicle_id=$2 AND work_date=$3 AND status='draft'""", balance, vehicle_id, body.initial_balance_date)
+        vehicle_id, rate, balance, balance_date)
+    # v55: перерахувати всі непідтверджені листи від дати стартової точки
+    await _recalc_chain(vehicle_id, balance_date or datetime.now(KYIV_TZ).date(),
+                        "Оновлення налаштувань")
+    updated = await pool.fetchval(
+        "SELECT updated_at FROM vehicle_fuel_settings WHERE vehicle_id=$1", vehicle_id)
+    return {"ok": True, "updated_at": updated.isoformat() if updated else None}
+
+
+# ---------- v55: датовані коригування залишку ----------
+
+async def _recalc_chain(vehicle_id: int, from_date: date, reason: str):
+    """Перерахувати ланцюжок залишків уперед від from_date.
+
+    Підтверджені листи не чіпаємо (їх цифри вже пішли в облік) — вони
+    залишаються опорними точками; перераховуються draft/submitted/revision.
+    """
+    sheets = await pool.fetch("""
+        SELECT id, work_date, status, opening_balance_l FROM transport_sheets
+        WHERE vehicle_id=$1 AND work_date>=$2 ORDER BY work_date""", vehicle_id, from_date)
+    for s in sheets:
+        if s["status"] == "approved":
+            continue
+        opening = await _derive_opening(vehicle_id, s["work_date"])
+        if opening != s["opening_balance_l"]:
+            await pool.execute("""INSERT INTO transport_sheet_changes
+                (sheet_id,actor_role,actor_name,field_name,old_value,new_value,reason)
+                VALUES ($1,'system','Система','opening_balance_l',$2,$3,$4)""",
+                s["id"],
+                str(s["opening_balance_l"]) if s["opening_balance_l"] is not None else None,
+                str(opening) if opening is not None else None, reason)
+        await pool.execute(
+            "UPDATE transport_sheets SET opening_balance_l=$1,updated_at=now() WHERE id=$2",
+            opening, s["id"])
+        await _recalculate(s["id"])
+
+
+class AdjustmentIn(BaseModel):
+    vehicle_id: int
+    adjust_date: date
+    balance_l: str | float
+    reason: str
+
+
+@router.post("/api/transport-sheets/adjustments")
+async def add_adjustment(body: AdjustmentIn):
+    balance = _num(body.balance_l, "Залишок", False)
+    reason = (body.reason or "").strip()
+    if not reason:
+        raise HTTPException(400, "Вкажіть причину коригування")
+    await pool.execute("""INSERT INTO fuel_balance_adjustments
+        (vehicle_id,adjust_date,balance_l,reason) VALUES ($1,$2,$3,$4)""",
+        body.vehicle_id, body.adjust_date, balance, reason)
+    await _recalc_chain(body.vehicle_id, body.adjust_date, f"Коригування залишку: {reason}")
     return {"ok": True}
+
+
+@router.get("/api/transport-sheets/balance/{vehicle_id}")
+async def fuel_balance(vehicle_id: int):
+    last = await pool.fetchrow("""
+        SELECT work_date, closing_balance_l, status FROM transport_sheets
+        WHERE vehicle_id=$1 AND closing_balance_l IS NOT NULL
+        ORDER BY work_date DESC LIMIT 1""", vehicle_id)
+    settings = await pool.fetchrow(
+        "SELECT initial_balance_l, initial_balance_date FROM vehicle_fuel_settings WHERE vehicle_id=$1",
+        vehicle_id)
+    adjustments = await pool.fetch("""
+        SELECT id, adjust_date, balance_l, reason, created_at
+        FROM fuel_balance_adjustments WHERE vehicle_id=$1
+        ORDER BY adjust_date DESC, id DESC LIMIT 20""", vehicle_id)
+    return {"current": dict(last) if last else None,
+            "start_point": dict(settings) if settings else None,
+            "adjustments": [dict(a) for a in adjustments]}
 
 
 def _sheet_dict(r):
@@ -327,9 +451,9 @@ async def edit_sheet(sheet_id: int, body: LogistSheetIn):
     reason = (body.reason or "").strip()
     if not reason:
         raise HTTPException(400, "Вкажіть причину зміни")
+    # v55: opening_balance_l ігнорується — ним керує ланцюжок і коригування
     vals = {"odometer_start": _num(body.odometer_start, "Початок"),
-            "odometer_end": _num(body.odometer_end, "Кінець"),
-            "opening_balance_l": _num(body.opening_balance_l, "Залишок")}
+            "odometer_end": _num(body.odometer_end, "Кінець")}
     if vals["odometer_start"] is not None and vals["odometer_end"] is not None and vals["odometer_end"] < vals["odometer_start"]:
         raise HTTPException(400, "Кінцевий одометр не може бути меншим")
     async with pool.acquire() as c:
@@ -342,8 +466,8 @@ async def edit_sheet(sheet_id: int, body: LogistSheetIn):
                         str(sheet[field]) if sheet[field] is not None else None,
                         str(new) if new is not None else None, reason)
             await c.execute("""UPDATE transport_sheets SET odometer_start=$1,odometer_end=$2,
-                opening_balance_l=$3,status='submitted',updated_at=now() WHERE id=$4""",
-                vals["odometer_start"], vals["odometer_end"], vals["opening_balance_l"], sheet_id)
+                status='submitted',updated_at=now() WHERE id=$3""",
+                vals["odometer_start"], vals["odometer_end"], sheet_id)
     await _recalculate(sheet_id)
     return {"ok": True}
 

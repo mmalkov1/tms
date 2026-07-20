@@ -47,8 +47,39 @@ async def _route_autoclose_loop():
     Ручна кнопка «Завершив» завжди пріоритетніша — автоматика лише доганяє.
     """
     from .driver import _haversine_km
+    pilot_code = os.getenv("FUEL_PILOT_DRIVER_CODE_1C", "000000653")
     while True:
         try:
+            # --- v55: авто «прибув на склад» для пілота ТЛ (кнопки в UI немає) ---
+            arr = await pool.fetch("""
+                SELECT r.id AS route_id, dr.id AS driver_id,
+                       COALESCE(r.start_lat, d.lat) AS slat,
+                       COALESCE(r.start_lon, d.lon) AS slon
+                FROM routes r
+                JOIN depots d ON d.id = r.depot_id
+                JOIN drivers dr ON dr.id = COALESCE(r.driver_id,
+                     (SELECT driver_id FROM vehicles v WHERE v.id=r.vehicle_id))
+                WHERE r.plan_date = (now() AT TIME ZONE 'Europe/Kyiv')::date
+                  AND COALESCE(r.start_kind,'depot') = 'depot'
+                  AND trim(COALESCE(dr.code_1c,'')) = $1
+                  AND NOT EXISTS (SELECT 1 FROM route_events e
+                                  WHERE e.route_id=r.id AND e.event='depot_arrive')
+                  AND NOT EXISTS (SELECT 1 FROM route_events f
+                                  WHERE f.route_id=r.id AND f.event='finish')""", pilot_code)
+            for cd in arr:
+                pts = list(await pool.fetch("""
+                    SELECT ts, lat, lon FROM gps_points
+                    WHERE driver_id = $1 AND ts > now() - interval '15 minutes'
+                      AND (accuracy_m IS NULL OR accuracy_m <= 80)
+                    ORDER BY ts DESC""", cd["driver_id"]))
+                entry = _stable_geofence_entry(pts, cd["slat"], cd["slon"], _haversine_km)
+                if entry:
+                    await pool.execute("""
+                        INSERT INTO route_events (route_id, driver_id, event, ts, lat, lon, source)
+                        VALUES ($1,$2,'depot_arrive',$3,$4,$5,'auto')
+                        ON CONFLICT (route_id, event) DO NOTHING""",
+                        cd["route_id"], cd["driver_id"], entry["ts"],
+                        entry["lat"], entry["lon"])
             # --- рівень 1: геозона складу ---
             cand = await pool.fetch("""
                 SELECT re.route_id, re.driver_id,

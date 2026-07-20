@@ -161,8 +161,10 @@ async function loadTracks() {
   const data = await r.json();
   trackLayer.clearLayers(); tracks = {};
   data.forEach(t => {
-    if (t.points.length < 2) return;
-    tracks[t.route_id] = L.polyline(t.points, {color:t.color,
+    const segments = (t.segments||[]).filter(s => s.length > 1);
+    const latlngs = segments.length ? segments : (t.points.length > 1 ? [t.points] : []);
+    if (!latlngs.length) return;
+    tracks[t.route_id] = L.polyline(latlngs, {color:t.color,
       weight:t.matched?3:2.5, dashArray:t.matched?null:'6 5',
       opacity:(focusRoute===null||t.route_id===focusRoute)?.8:.5})
       .addTo(trackLayer);

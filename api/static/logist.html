@@ -64,9 +64,11 @@ function renderMap(){
   trackLayer.clearLayers();stopLayer.clearLayers();markerLayer.clearLayers();tracks={};markers={};stopMarkers={};const bounds=[];
   routes.forEach(rt=>{
     const pts=rt.track?.points||[];
-    if(pts.length>1){
-      tracks[rt.route_id]=L.polyline(pts,{color:rt.color||'#00356B',weight:rt.track?.matched?4:3,dashArray:rt.track?.matched?null:'7 6',opacity:(selected==null||selected===rt.route_id) ? .82 : .5}).addTo(trackLayer);
-      pts.forEach(p=>bounds.push(p));
+    const segments=(rt.track?.segments||[]).filter(s=>s.length>1);
+    const latlngs=segments.length?segments:(pts.length>1?[pts]:[]);
+    if(latlngs.length){
+      tracks[rt.route_id]=L.polyline(latlngs,{color:rt.color||'#00356B',weight:rt.track?.matched?4:3,dashArray:rt.track?.matched?null:'7 6',opacity:(selected==null||selected===rt.route_id) ? .82 : .5}).addTo(trackLayer);
+      latlngs.forEach(segment=>segment.forEach(p=>bounds.push(p)));
     }
     if(rt.last_gps){
       const ll=[rt.last_gps.lat,rt.last_gps.lon];bounds.push(ll);

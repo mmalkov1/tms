@@ -602,9 +602,9 @@ async function mark(ids, event, force = false) {
   await load();
 }
 
-// --- GPS поки сторінка відкрита (фаза 1; надійний фоновий трек — в APK, фаза 2) ---
-let lastPos = null, queue = [];
-try { queue = JSON.parse(localStorage.getItem('gpsq')||'[]'); } catch(e) {}
+// --- v52: браузер визначає позицію лише для кнопок, трек передає тільки APK ---
+let lastPos = null;
+localStorage.removeItem('gpsq');                    // прибрати чергу старих web-точок
 
 function setGps(bars, txt) {
   const b = document.querySelectorAll('#hGps .bars i');
@@ -621,28 +621,12 @@ if (NATIVE) setGps(0, 'додаток');
 if (navigator.geolocation && TOKEN && !NATIVE) {
   navigator.geolocation.watchPosition(p => {
     lastPos = {lat:p.coords.latitude, lon:p.coords.longitude};
-    queue.push({ts:p.timestamp, lat:p.coords.latitude, lon:p.coords.longitude,
-      speed_kmh: p.coords.speed!=null ? p.coords.speed*3.6 : null,
-      accuracy_m: p.coords.accuracy});
-    if (queue.length>1000) queue = queue.slice(-1000);
-    localStorage.setItem('gpsq', JSON.stringify(queue));
     const acc = p.coords.accuracy;                    // менше метрів = кращий сигнал
     const bars = acc<=15?4 : acc<=40?3 : acc<=100?2 : 1;
     setGps(bars, '±' + Math.round(acc) + ' м');
   }, e => { setGps(0, 'вимкнено'); },
   {enableHighAccuracy:true, maximumAge:10000});
 }
-
-setInterval(async () => {          // досилання пачкою кожні 20 с
-  if (!queue.length || !TOKEN) return;
-  const batch = queue.splice(0, 500);
-  try {
-    const r = await fetch(`/api/driver/${TOKEN}/position`, {method:'POST',
-      headers:{'Content-Type':'application/json'}, body: JSON.stringify({points:batch})});
-    if (!r.ok) throw 0;
-    localStorage.setItem('gpsq', JSON.stringify(queue));
-  } catch(e) { queue = batch.concat(queue); }   // не вийшло — повернути в чергу
-}, 20000);
 
 setInterval(load, 60000);          // автооновлення плану
 load();

@@ -9,7 +9,7 @@ import secrets
 from datetime import date, datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel
 
 from . import osrm
@@ -668,16 +668,30 @@ class GpsBatch(BaseModel):
 
 
 @router.post("/api/driver/{token}/position")
-async def position(token: str, body: GpsBatch):
+async def position(token: str, body: GpsBatch, request: Request):
     drv = await _driver_by_token(token)
+    # v52: звичайний браузер з посиланням водія — лише режим перегляду.
+    # Старі відкриті вкладки продовжують викликати /position до перезавантаження,
+    # тому захист дублюємо на backend. Нативний LocationService Android має
+    # User-Agent Dalvik/Android, а WebView/desktop/mobile browser — Mozilla.
+    if "mozilla/" in request.headers.get("user-agent", "").lower():
+        return {"saved": 0, "ignored": "browser_read_only"}
     if not body.points:
         return {"saved": 0}
     route_id = await pool.fetchval("""
-        SELECT id FROM routes WHERE plan_date=$2
-          AND project_id IN (SELECT id FROM projects WHERE is_released)
-          AND (driver_id=$1
-               OR vehicle_id IN (SELECT id FROM vehicles WHERE driver_id=$1 AND is_active))
-        ORDER BY id DESC LIMIT 1""", drv["id"], kyiv_today())
+        SELECT r.id
+        FROM routes r
+        LEFT JOIN route_events rs ON rs.route_id=r.id AND rs.event='start'
+        LEFT JOIN route_events rf ON rf.route_id=r.id AND rf.event='finish'
+        WHERE r.plan_date=$2
+          AND r.project_id IN (SELECT id FROM projects WHERE is_released)
+          AND (r.driver_id=$1
+               OR r.vehicle_id IN (SELECT id FROM vehicles WHERE driver_id=$1 AND is_active))
+        -- v52: при кількох рейсах спочатку активний (старт є, фінішу немає),
+        -- потім останній розпочатий; id більше не визначає поточний рейс.
+        ORDER BY (rs.ts IS NOT NULL AND rf.ts IS NULL) DESC,
+                 rs.ts DESC NULLS LAST, r.depart_time NULLS LAST, r.id
+        LIMIT 1""", drv["id"], kyiv_today())
     rows = [(drv["id"], route_id,
              datetime.fromtimestamp(p.ts / 1000, tz=timezone.utc),
              p.lat, p.lon, p.speed_kmh, p.accuracy_m) for p in body.points[:500]]
@@ -810,6 +824,7 @@ async def facts_tracks(plan_date: date = Query(...)):
                     "source": track["source"] if track else None,
                     "coverage": track.get("coverage", 0) if track else 0,
                     "boundary_ok": track.get("boundary_ok", False) if track else False,
+                    "segments": track.get("segments", []) if track else [],
                     "points": track["points"] if track else []})
     return out
 
@@ -826,7 +841,8 @@ async def logist_dashboard(token: str, plan_date: date | None = Query(None)):
     tracks = {row["route_id"]: row for row in track_rows}
     for route in routes:
         track = tracks.get(route["route_id"])
-        route["track"] = track or {"points": [], "source": None, "gps_km": None}
+        route["track"] = track or {
+            "points": [], "segments": [], "source": None, "gps_km": None}
     return {"access_name": access["name"], "date": day.isoformat(), "routes": routes}
 
 
@@ -964,6 +980,69 @@ def _haversine_km(lat1, lon1, lat2, lon2):
     return 12742 * asin(sqrt(a))
 
 
+def _gps_leg_kmh(a, b):
+    """Швидкість між двома GPS-точками; inf для однакових/зворотних ts."""
+    seconds = (b["ts"] - a["ts"]).total_seconds()
+    if seconds <= 0:
+        return float("inf")
+    return _haversine_km(a["lat"], a["lon"], b["lat"], b["lon"]) * 3600 / seconds
+
+
+def _impossible_gps_leg(a, b):
+    """Стрибок, який автомобіль фізично не міг проїхати."""
+    distance = _haversine_km(a["lat"], a["lon"], b["lat"], b["lon"])
+    return distance >= 2 and _gps_leg_kmh(a, b) > 180
+
+
+def _drop_returning_teleports(points):
+    """Прибрати короткий стрибок на другий пристрій з поверненням у реальний трек.
+
+    Типовий випадок: логіст відкрив URL водія на ПК, браузер відправив свою
+    координату, а через кілька секунд прийшла наступна точка з Android водія.
+    Шукаємо повернення до фізично досяжної точки не далі ніж за 120 секунд.
+    Односторонній GPS-розрив не видаляємо — його лише розірве відмальовка.
+    """
+    if len(points) < 3:
+        return list(points)
+    out = [points[0]]
+    i = 1
+    while i < len(points):
+        current = points[i]
+        previous = out[-1]
+        if _impossible_gps_leg(previous, current):
+            returned_at = None
+            for j in range(i + 1, min(len(points), i + 9)):
+                if (points[j]["ts"] - previous["ts"]).total_seconds() > 120:
+                    break
+                if not _impossible_gps_leg(previous, points[j]):
+                    returned_at = j
+                    break
+            if returned_at is not None:
+                i = returned_at
+                continue
+        out.append(current)
+        i += 1
+    return out
+
+
+def _gps_segments(points):
+    """Розбити fallback-трек на частини, не малюючи телепорти і GPS-паузи."""
+    if not points:
+        return []
+    segments, current = [], [points[0]]
+    for previous, point in zip(points, points[1:]):
+        gap_sec = (point["ts"] - previous["ts"]).total_seconds()
+        if gap_sec > 180 or _impossible_gps_leg(previous, point):
+            if len(current) >= 2:
+                segments.append([[p["lat"], p["lon"]] for p in current])
+            current = [point]
+        else:
+            current.append(point)
+    if len(current) >= 2:
+        segments.append([[p["lat"], p["lon"]] for p in current])
+    return segments
+
+
 def _collapse_stationary(points):
     """Згорнути GPS-шум на стоянці в одну найточнішу координату.
 
@@ -1062,7 +1141,8 @@ async def _route_actual_track(route_id: int, driver_ids: list[int]):
     if cached and cached[0] == signature:
         return cached[1]
 
-    clean = _collapse_stationary(raw)
+    filtered = _drop_returning_teleports(raw)
+    clean = _collapse_stationary(filtered)
     # Спершу прибираємо стоянки, потім рівномірно обмежуємо запит OSRM.
     step = max(1, (len(clean) + 399) // 400)
     thin = clean[::step]
@@ -1079,13 +1159,15 @@ async def _route_actual_track(route_id: int, driver_ids: list[int]):
          min(50, max(10, int(p["accuracy_m"] or 25))))
         for p in thin])
     if matched and matched[2] >= 0.9:
-        geometry, km, coverage = matched
+        geometry, km, coverage, segments = matched
         result = {"points": geometry, "km": round(km, 1), "source": "osrm",
-                  "coverage": round(coverage, 3), "boundary_ok": boundary_ok}
+                  "segments": segments, "coverage": round(coverage, 3),
+                  "boundary_ok": boundary_ok}
     else:
         km = sum(seg for a, b in zip(clean, clean[1:])
                  if (seg := _haversine_km(a["lat"], a["lon"], b["lat"], b["lon"])) < 2)
         result = {"points": [[p["lat"], p["lon"]] for p in thin],
+                  "segments": _gps_segments(thin),
                   "km": round(km, 1),
                   "source": "gps_fallback_partial" if matched else "gps_fallback",
                   "coverage": round(matched[2], 3) if matched else 0,

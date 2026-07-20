@@ -59,8 +59,9 @@ APK потрібен лише для нативного: GPS-сервіс, до�
 
 ## Архітектура
 
-- `MainActivity` — екран токена / WebView (UA-суфікс `TMSKultApp` вимикає web-GPS
-  на сторінці, щоб не було дублів точок).
+- `MainActivity` — екран токена / WebView (UA-суфікс `TMSKultApp` позначає
+  режим застосунку; звичайний браузер може показувати інтерфейс, але не передає
+  фоновий GPS-трек).
 - `LocationService` — FusedLocation 15 с, черга до 1000 точок у SharedPreferences,
   батч ≤500 кожні 20 с на `POST /api/driver/{token}/position`.
 - `Updater` — `GET /api/app/version`, порівняння versionCode, скачування

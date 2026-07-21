@@ -110,18 +110,29 @@ function toast(t){$('toast').textContent=t;$('toast').style.display='block';setT
 async function api(url,opt){const r=await fetch(url,opt),j=await r.json().catch(()=>({}));if(!r.ok)throw new Error(j.detail||'Помилка');return j}
 
 async function loadMeta(){
-  meta=await api('/api/transport-sheets/meta');const m=meta.drivers[0];
+  meta=await api('/api/transport-sheets/meta');
   $('ddpop').innerHTML=meta.drivers.map(x=>`<label><input type="checkbox" value="${x.driver_id}" checked onchange="ddChanged()">${x.name}</label>`).join('')
-    ||'<div style="padding:8px;font-size:12px;color:var(--muted)">Немає водіїв</div>';
+    ||'<div style="padding:8px;font-size:12px;color:var(--muted)">Немає водіїв із закріпленим авто</div>';
   ddChanged(false);
-  if(!m){$('carBody').textContent='Водія з кодом '+meta.pilot_code+' не знайдено';$('balBody').textContent='—';return}
+}
+// v57: картки показують авто ОДНОГО вибраного водія
+function renderCards(){
+  const ids=selected().split(',').filter(Boolean);
+  const m=ids.length===1?meta.drivers.find(x=>String(x.driver_id)===ids[0]):null;
+  if(!m){
+    vehId=null;
+    const hint=meta.drivers.length?'Оберіть одного водія у списку зверху, щоб керувати нормою і паливним балансом його авто.':'Немає водіїв із закріпленим авто';
+    $('carBody').innerHTML=`<div style="font-size:12.5px;color:var(--muted);padding:6px 0">${hint}</div>`;
+    $('balBody').innerHTML=`<div style="font-size:12.5px;color:var(--muted);padding:6px 0">${meta.drivers.length?'Баланс показується для одного вибраного водія.':'—'}</div>`;
+    return;
+  }
   vehId=m.vehicle_id;
-  $('carBody').innerHTML=`<div class="vh">${m.vehicle_name||'Автомобіль не закріплено'}<small>${m.name} · код 1С ${m.code_1c}</small></div>
+  $('carBody').innerHTML=`<div class="vh">${m.vehicle_name||'Автомобіль не закріплено'}<small>${m.name} · код 1С ${m.code_1c||'—'}</small></div>
     ${vehId?`<div class="frow"><div class="field"><label>Норма, л/100 км</label><input id="rate" type="number" step="0.001" style="width:120px" value="${m.rate_l_per_100??''}"></div>
     <button class="btn" onclick="saveRate()">Зберегти</button></div>
     <div class="saved" id="rateSaved"></div>
     <div style="font-size:11px;color:var(--muted)">Норма — постійне налаштування. Зміна впливає на нові розрахунки; підтверджені листи не перераховуються.</div>`:''}`;
-  if(vehId)await loadBalance();
+  if(vehId)loadBalance();
 }
 async function loadBalance(){
   const b=await api('/api/transport-sheets/balance/'+vehId);
@@ -163,6 +174,7 @@ function ddChanged(reload=true){
   $('ddlabel').textContent=!all.length?'Водії':sel.length===0?'Водії: нікого'
     :sel.length===1?sel[0].parentElement.textContent.trim()
     :sel.length===all.length?`Всі водії (${all.length})`:`Водії: ${sel.length}`;
+  if(meta)renderCards();                 // v57: картки слідують за вибором
   if(reload)load();
 }
 function toggleDd(e){e.stopPropagation();$('ddpop').classList.toggle('open')}

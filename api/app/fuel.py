@@ -1,6 +1,6 @@
 """v54: пілот транспортних листів для одного водія.
 
-Пілот вмикається тільки для drivers.code_1c=FUEL_PILOT_DRIVER_CODE_1C.
+v57: транспортні листи увімкнено для всіх активних водіїв із закріпленим авто.
 Пробіг для списання пального — різниця одометра; GPS лише довідковий.
 """
 import io
@@ -18,7 +18,6 @@ from pydantic import BaseModel
 router = APIRouter(tags=["fuel"])
 pool = None
 KYIV_TZ = ZoneInfo("Europe/Kyiv")
-PILOT_DRIVER_CODE = os.getenv("FUEL_PILOT_DRIVER_CODE_1C", "000000653")
 
 
 async def init(db_pool):
@@ -206,12 +205,10 @@ async def _payload(sheet, vehicle):
 @router.get("/api/driver/{token}/transport-sheet")
 async def driver_sheet(token: str, d: date | None = Query(None)):
     driver = await _driver(token)
-    if (driver["code_1c"] or "").strip() != PILOT_DRIVER_CODE:
-        return {"enabled": False}
     day = d or datetime.now(KYIV_TZ).date()
     sheet, vehicle = await _ensure_sheet(driver, day)
     if not sheet:
-        return {"enabled": True, "sheet": None, "error": "За водієм не закріплено автомобіль"}
+        return {"enabled": False}          # v57: без авто — інтерфейс ТЛ не показуємо
     return {"enabled": True, "sheet": await _payload(sheet, vehicle)}
 
 
@@ -224,8 +221,6 @@ class OdometerIn(BaseModel):
 
 async def _pilot_sheet(token, day=None):
     driver = await _driver(token)
-    if (driver["code_1c"] or "").strip() != PILOT_DRIVER_CODE:
-        raise HTTPException(404, "Функція не активована")
     sheet, vehicle = await _ensure_sheet(driver, day or datetime.now(KYIV_TZ).date())
     if not sheet:
         raise HTTPException(400, "За водієм не закріплено автомобіль")
@@ -432,8 +427,8 @@ async def sheet_meta():
                f.rate_l_per_100,f.initial_balance_l,f.initial_balance_date
         FROM drivers d LEFT JOIN vehicles v ON v.driver_id=d.id AND v.is_active
         LEFT JOIN vehicle_fuel_settings f ON f.vehicle_id=v.id
-        WHERE d.is_active AND d.code_1c=$1 ORDER BY v.id LIMIT 1""", PILOT_DRIVER_CODE)
-    return {"pilot_code": PILOT_DRIVER_CODE, "drivers": [dict(r) for r in rows]}
+        WHERE d.is_active AND v.id IS NOT NULL ORDER BY d.name""")
+    return {"drivers": [dict(r) for r in rows]}
 
 
 class LogistSheetIn(BaseModel):

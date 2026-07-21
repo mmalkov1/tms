@@ -47,10 +47,9 @@ async def _route_autoclose_loop():
     Ручна кнопка «Завершив» завжди пріоритетніша — автоматика лише доганяє.
     """
     from .driver import _haversine_km
-    pilot_code = os.getenv("FUEL_PILOT_DRIVER_CODE_1C", "000000653")
     while True:
         try:
-            # --- v55: авто «прибув на склад» для пілота ТЛ (кнопки в UI немає) ---
+            # --- v55/v57: авто «прибув на склад» для всіх водіїв (кнопки в UI немає) ---
             arr = await pool.fetch("""
                 SELECT r.id AS route_id, dr.id AS driver_id,
                        COALESCE(r.start_lat, d.lat) AS slat,
@@ -61,11 +60,10 @@ async def _route_autoclose_loop():
                      (SELECT driver_id FROM vehicles v WHERE v.id=r.vehicle_id))
                 WHERE r.plan_date = (now() AT TIME ZONE 'Europe/Kyiv')::date
                   AND COALESCE(r.start_kind,'depot') = 'depot'
-                  AND trim(COALESCE(dr.code_1c,'')) = $1
                   AND NOT EXISTS (SELECT 1 FROM route_events e
                                   WHERE e.route_id=r.id AND e.event='depot_arrive')
                   AND NOT EXISTS (SELECT 1 FROM route_events f
-                                  WHERE f.route_id=r.id AND f.event='finish')""", pilot_code)
+                                  WHERE f.route_id=r.id AND f.event='finish')""")
             for cd in arr:
                 pts = list(await pool.fetch("""
                     SELECT ts, lat, lon FROM gps_points

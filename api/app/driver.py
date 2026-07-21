@@ -375,10 +375,8 @@ async def driver_trip(token: str, d: date | None = Query(None),
         "routes": [{"id": r["id"], "depart": _hm(r["depart_time"]),
                     "return": _hm(r["return_time"]), "stops": r["n_stops"],
                     "started": bool(r["start_ts"]), "finished": bool(r["finish_ts"]),
-                    # v55: GPS-пробіг для вечірнього передзаповнення (лише пілот ТЛ)
-                    "gps_km": (await _route_worklog(r["id"], [drv["id"]]))[3]
-                        if (drv["code_1c"] or "").strip() ==
-                           os.getenv("FUEL_PILOT_DRIVER_CODE_1C", "000000653") else None}
+                    # v55/v57: GPS-пробіг для вечірнього передзаповнення
+                    "gps_km": (await _route_worklog(r["id"], [drv["id"]]))[3]}
                    for r in rr],
         "route": {"id": route["id"], "vehicle": route["vehicle_name"], "plate": route["plate"],
                   "color": route["color"], "total_km": float(route["total_km"] or 0),
@@ -958,16 +956,12 @@ async def route_event(token: str, route_id: int, body: RouteEventIn):
         arrived = await pool.fetchval(               # v38/v51: склад-крок лише
             "SELECT 1 FROM route_events WHERE route_id=$1 AND event='depot_arrive'", route_id)
         if not arrived:
-            # v55: пілот ТЛ — кнопки складу немає, подію дописуємо на виїзді
-            pilot_code = os.getenv("FUEL_PILOT_DRIVER_CODE_1C", "000000653")
-            if (drv["code_1c"] or "").strip() == pilot_code:
-                await pool.execute("""
-                    INSERT INTO route_events (route_id, driver_id, event, lat, lon, source)
-                    VALUES ($1,$2,'depot_arrive',$3,$4,'auto')
-                    ON CONFLICT (route_id, event) DO NOTHING""",
-                    route_id, drv["id"], body.lat, body.lon)
-            else:
-                raise HTTPException(400, "Спочатку познач прибуття на склад")
+            # v55/v57: кнопки складу немає — подію дописуємо на виїзді
+            await pool.execute("""
+                INSERT INTO route_events (route_id, driver_id, event, lat, lon, source)
+                VALUES ($1,$2,'depot_arrive',$3,$4,'auto')
+                ON CONFLICT (route_id, event) DO NOTHING""",
+                route_id, drv["id"], body.lat, body.lon)
     if body.event == "finish":
         started = await pool.fetchval(
             "SELECT 1 FROM route_events WHERE route_id=$1 AND event='start'", route_id)

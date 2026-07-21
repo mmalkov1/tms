@@ -657,9 +657,11 @@ function switchNext(i) {                          // v40
   renderNext();
 }
 
+let _scrollTop = false;                           // v58
 function switchRoute(id) {                        // v39
   if (id === selRoute) return;
   selRoute = id;
+  _scrollTop = true;                              // v58: зміна рейсу — вгору свідомо
   load();
 }
 
@@ -700,6 +702,8 @@ let selRoute = null;                               // v39: обраний рей
 let nextTrips = [], selNextIdx = 0;                // v40: рейси завтрашнього дня
 async function load() {
   if (!TOKEN) { $('list').innerHTML='<div class="empty">Немає токена в посиланні</div>'; return; }
+  const keepY = _scrollTop ? 0 : window.scrollY;   // v58: не скидати скрол при оновленні
+  _scrollTop = false;
   let r;
   try { r = await fetch(`/api/driver/${TOKEN}/trip` + (selRoute ? `?route_id=${selRoute}` : '')); }
   catch(e) { toast('Немає зв’язку'); return; }
@@ -709,6 +713,7 @@ async function load() {
   if (MODE==='today') render();
   await loadTransportSheet();                     // v54: для інших водіїв enabled=false
   loadNext();
+  requestAnimationFrame(() => window.scrollTo(0, keepY));   // v58: після вставки чипа ТЛ
 }
 
 function render() {
@@ -744,20 +749,26 @@ function render() {
     }).join('') + `</div>`;
   }
   const fromDepot = (rt.start_kind || 'depot') === 'depot';   // v51: старт може бути не зі складу
+  // v58: людські підписи звідки/куди — щоб водій знав, чи їхати на склад
+  const kindLabel = (kind, addr) => (kind||'depot')==='depot' ? 'склад'
+      : kind==='home' ? 'дім' : (addr || 'інша адреса');
+  const startLbl = kindLabel(rt.start_kind, rt.start_address);
+  const finLbl   = kindLabel(rt.finish_kind, rt.finish_address);
+  const PIN = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" style="vertical-align:-2px"><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0z"/><circle cx="12" cy="10" r="3"/></svg>';
   if (fromDepot && !rt.depot_arrive_ts && !fuelPilot) {   // v38; v55: пілот — склад авто
-    head = `<button class="b-route go" onclick="routeEvent('depot_arrive')"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-3px"><path d="M3 21V8l9-5 9 5v13"/><path d="M7 21v-8h10v8"/><path d="M7 17h10"/></svg> Прибув на склад</button>`;
+    head = `<div class="onroute">${PIN} Старт: <b>склад</b> → Фініш: <b>${finLbl}</b></div>
+      <button class="b-route go" onclick="routeEvent('depot_arrive')"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-3px"><path d="M3 21V8l9-5 9 5v13"/><path d="M7 21v-8h10v8"/><path d="M7 17h10"/></svg> Прибув на склад</button>`;
   } else if (!rt.start_ts) {
     const autoBadge = rt.depot_arrive_auto ? ' <span style="font-size:10.5px;font-weight:800;color:#1D9E75;border:1px solid #1D9E75;border-radius:999px;padding:1px 7px;vertical-align:1px">GPS·авто</span>' : '';
     const from = fromDepot
       ? (rt.depot_arrive_ts
           ? `На складі з <b>${hm(rt.depot_arrive_ts)}</b>${autoBadge}`
-          : `Старт: <b>зі складу</b>`)
-      : `Старт: <b>${rt.start_kind==='home' ? 'з дому' : (rt.start_address || 'інша адреса')}</b>`;
-    head = `<div class="onroute">${from}</div>
+          : `${PIN} Старт: <b>зі складу</b>`)
+      : `${PIN} Старт: <b>${startLbl}</b>`;
+    head = `<div class="onroute">${from}<br><span style="font-size:12px;color:#5F5E5A">Фініш: <b>${finLbl}</b>${(rt.finish_kind||'depot')!=='depot'?' — на склад повертатися не треба':''}</span></div>
       <button class="b-route go" onclick="routeEvent('start')"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-3px"><rect x="1.5" y="6" width="13" height="9"/><path d="M14.5 9h4l3 3.5V15h-7z"/><circle cx="6" cy="18" r="1.8"/><circle cx="17.5" cy="18" r="1.8"/></svg> Виїхав на маршрут${(trip.routes||[]).length>1?` · ${trip.routes.findIndex(x=>x.id===rt.id)+1} з ${trip.routes.length}`:''}</button>`;
   } else if (!rt.finish_ts) {
-    const finHint = (rt.finish_kind && rt.finish_kind !== 'depot')   // v51
-      ? `<br><span style="font-size:12px;color:#5F5E5A">Фініш: <b>${rt.finish_kind==='home' ? 'дім' : (rt.finish_address || 'інша адреса')}</b></span>` : '';
+    const finHint = `<br><span style="font-size:12px;color:#5F5E5A">Фініш: <b>${finLbl}</b>${(rt.finish_kind||'depot')!=='depot'?' — на склад повертатися не треба':''}</span>`;   // v51/v58: завжди
     head = `<div class="onroute">У рейсі з <b>${hm(rt.start_ts)}</b>${finHint}</div>`;
     tail = `<button class="b-route fin" onclick="routeEvent('finish')"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-3px"><path d="M5 21V4"/><path d="M5 4h13l-3 4 3 4H5"/></svg> Завершив маршрут</button>`;
   } else {
@@ -767,7 +778,7 @@ function render() {
     const dMin = (planMin!=null && rt.work_min!=null) ? rt.work_min-planMin : null;
     const dKm  = (rt.gps_km!=null && rt.total_km) ? +(rt.gps_km-rt.total_km).toFixed(1) : null;
     const sig = v => (v>0?'+':'')+v;
-    head = `<div class="routedone">Рейс завершено <b>${hm(rt.finish_ts)}</b><br>
+    head = `<div class="routedone">Рейс завершено <b>${hm(rt.finish_ts)}</b> · фініш: <b>${finLbl}</b><br>
       <span style="color:#5F5E5A">Час: <b>${fmtDur(rt.work_min)}</b>${planMin!=null?` · план ${fmtDur(planMin)}`:''}${dMin!=null?` <b style="color:${dMin>15?'var(--red)':'var(--green)'}">(${sig(dMin)} хв)</b>`:''}</span><br>
       <span style="color:#5F5E5A">Шлях: <b>${rt.gps_km!=null?rt.gps_km+' км':'—'}</b>${rt.total_km?` · план ${rt.total_km.toFixed(1)} км`:''}${dKm!=null?` <b style="color:${dKm>10?'var(--red)':'var(--green)'}">(${sig(dKm)} км)</b>`:''}</span></div>`;
   }

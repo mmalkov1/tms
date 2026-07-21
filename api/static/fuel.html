@@ -54,9 +54,33 @@ dialog::backdrop{background:rgba(0,20,50,.5)}
 .history{margin-top:12px;padding-top:10px;border-top:1px solid var(--c2);max-height:160px;overflow:auto;font-size:10.5px}
 .history .h1{padding:6px 0;border-bottom:1px solid var(--c2)}
 #toast{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);background:var(--navy);color:#fff;padding:10px 16px;border-radius:10px;display:none;z-index:50}
+/* v56: дропдаун водіїв у шапці */
+.ddwrap{position:relative}
+.ddbtn{display:flex;align-items:center;gap:7px;padding:7px 11px;border-radius:8px;border:1px solid rgba(255,255,255,.3);background:rgba(255,255,255,.12);color:#fff;font:600 12px 'Open Sans';cursor:pointer;max-width:210px}
+.ddbtn span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ddbtn:hover{background:rgba(255,255,255,.2)}
+.ddpop{display:none;position:absolute;top:calc(100% + 6px);left:0;z-index:40;background:#fff;color:var(--text);border-radius:11px;box-shadow:0 10px 34px rgba(0,20,50,.28);padding:8px;min-width:220px;max-height:280px;overflow:auto}
+.ddpop.open{display:block}
+.ddpop label{display:flex;align-items:center;gap:8px;padding:7px 9px;border-radius:8px;font-size:13px;cursor:pointer}
+.ddpop label:hover{background:var(--c2)}
+.ddpop input{accent-color:var(--navy);width:15px;height:15px}
+/* v56: рядки заправок у діалозі */
+.refrow{display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--c2);font-size:12px}
+.refrow .rt{color:var(--muted);width:92px;flex:none}
+.refrow input{border:1.5px solid var(--c3);border-radius:8px;padding:6px 8px;font:inherit;font-size:12.5px;width:90px}
+.refrow .del{border:1.5px solid var(--c3);background:#fff;color:var(--red);border-radius:8px;width:30px;height:30px;display:flex;align-items:center;justify-content:center;cursor:pointer;flex:none}
+.refrow .del:hover{border-color:var(--red)}
 </style></head><body>
 <header><h1>TMS</h1><nav class="tabs"><a href="/index.html">Планування</a><a href="/facts.html">План / Факт</a><a class="on">Транспортні листи</a></nav>
-<input type="date" id="from"><input type="date" id="to"><select id="drv" multiple title="Водії"></select>
+<input type="date" id="from"><input type="date" id="to">
+<div class="ddwrap" id="ddwrap">
+  <button class="ddbtn" id="ddbtn" onclick="toggleDd(event)">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+    <span id="ddlabel">Водії</span>
+    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M6 9l6 6 6-6"/></svg>
+  </button>
+  <div class="ddpop" id="ddpop"></div>
+</div>
 <button class="btn light" onclick="load()">Оновити</button><button class="btn red" onclick="exportXlsx()">Excel</button>
 <span id="stat" style="margin-left:auto;font-size:11px"></span></header>
 <main>
@@ -87,7 +111,9 @@ async function api(url,opt){const r=await fetch(url,opt),j=await r.json().catch(
 
 async function loadMeta(){
   meta=await api('/api/transport-sheets/meta');const m=meta.drivers[0];
-  $('drv').innerHTML=meta.drivers.map(x=>`<option value="${x.driver_id}" selected>${x.name}</option>`).join('');
+  $('ddpop').innerHTML=meta.drivers.map(x=>`<label><input type="checkbox" value="${x.driver_id}" checked onchange="ddChanged()">${x.name}</label>`).join('')
+    ||'<div style="padding:8px;font-size:12px;color:var(--muted)">Немає водіїв</div>';
+  ddChanged(false);
   if(!m){$('carBody').textContent='Водія з кодом '+meta.pilot_code+' не знайдено';$('balBody').textContent='—';return}
   vehId=m.vehicle_id;
   $('carBody').innerHTML=`<div class="vh">${m.vehicle_name||'Автомобіль не закріплено'}<small>${m.name} · код 1С ${m.code_1c}</small></div>
@@ -131,7 +157,16 @@ async function saveAdjust(){
     dlg.close();toast('Коригування застосовано, ланцюжок перераховано');await load();await loadBalance()}catch(e){toast(e.message)}
 }
 
-function selected(){return [...$('drv').selectedOptions].map(o=>o.value).join(',')}
+function selected(){return [...document.querySelectorAll('#ddpop input:checked')].map(o=>o.value).join(',')}
+function ddChanged(reload=true){
+  const all=[...document.querySelectorAll('#ddpop input')],sel=all.filter(x=>x.checked);
+  $('ddlabel').textContent=!all.length?'Водії':sel.length===0?'Водії: нікого'
+    :sel.length===1?sel[0].parentElement.textContent.trim()
+    :sel.length===all.length?`Всі водії (${all.length})`:`Водії: ${sel.length}`;
+  if(reload)load();
+}
+function toggleDd(e){e.stopPropagation();$('ddpop').classList.toggle('open')}
+document.addEventListener('click',e=>{if(!$('ddwrap').contains(e.target))$('ddpop').classList.remove('open')});
 async function load(){try{
   data=await api(`/api/transport-sheets?date_from=${$('from').value}&date_to=${$('to').value}&driver_ids=${selected()}`);
   $('stat').textContent=`${data.length} листів`;render()}catch(e){toast(e.message)}}
@@ -162,15 +197,23 @@ function render(){
 async function openSheet(id){
   active=await api('/api/transport-sheets/'+id);const changes=active.changes||[];
   $('dlgTitle').textContent='Транспортний лист · '+active.work_date;
+  const refs=(active.refuels||[]);
+  const refRows=refs.length?refs.map(x=>`<div class="refrow" data-rid="${x.id}">
+      <span class="rt">${dt(x.refuel_at)}</span>
+      <input inputmode="decimal" value="${x.liters}" data-old="${x.liters}"> л
+      <button class="del" title="Видалити заправку" onclick="delRefuel(${x.id})"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14M10 11v6M14 11v6"/></svg></button>
+    </div>`).join(''):'<div style="font-size:12px;color:var(--muted);padding:4px 0">Заправок не було</div>';
   $('dlgBody').innerHTML=`
     <div class="dgrid">
       <div class="field"><label>Одометр початок</label><input id="edStart" value="${active.odometer_start??''}"></div>
       <div class="field"><label>Одометр кінець</label><input id="edEnd" value="${active.odometer_end??''}"></div>
       <div class="field"><label>Залишок на початок, л</label><input disabled value="${active.opening_balance_l??'—'}" title="Керується ланцюжком і коригуваннями"></div>
-      <div class="field"><label>Заправлено, л</label><input disabled value="${active.refueled_l??0}"></div>
+      <div class="field"><label>Заправлено разом, л</label><input disabled value="${active.refueled_l??0}"></div>
     </div>
+    <div style="font-size:11px;color:var(--navy);font-weight:700;margin-top:10px">Заправки</div>
+    <div id="refList">${refRows}</div>
     <div style="font-size:11px;color:var(--muted);margin-top:6px">Залишок редагується лише через «Скоригувати залишок на дату» — так зберігається ланцюжок.</div>
-    <div class="field" style="margin-top:10px"><label>Причина зміни</label><textarea id="edReason" placeholder="Обов'язково при редагуванні"></textarea></div>
+    <div class="field" style="margin-top:10px"><label>Причина зміни</label><textarea id="edReason" placeholder="Обов'язково при редагуванні показників або заправок"></textarea></div>
     <div style="display:flex;gap:8px"><button class="btn light" onclick="dlg.close()">Закрити</button>
       <button class="btn" onclick="saveEdit()">Зберегти зміни</button>
       ${active.status!=='approved'?`<button class="btn red" onclick="approve(${id})">Підтвердити</button>`:''}</div>
@@ -178,9 +221,33 @@ async function openSheet(id){
     <div class="history">${changes.length?changes.map(c=>`<div class="h1"><b>${c.actor_name||c.actor_role}</b> · ${c.field_name}: ${c.old_value||'—'} → ${c.new_value||'—'}<br>${c.reason||''}</div>`).join(''):'Змін ще не було.'}</div>`;
   $('dlg').showModal();
 }
+async function delRefuel(rid){
+  const reason=($('edReason').value||'').trim();
+  if(!reason){toast('Спершу вкажіть причину зміни внизу діалогу');return}
+  if(!confirm('Видалити цю заправку?'))return;
+  try{await api(`/api/transport-sheets/${active.id}/refuels/${rid}?reason=${encodeURIComponent(reason)}`,{method:'DELETE'});
+    toast('Заправку видалено');await openSheet(active.id);load();loadBalance()}catch(e){toast(e.message)}
+}
 async function saveEdit(){
-  try{await api('/api/transport-sheets/'+active.id,{method:'PATCH',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({odometer_start:$('edStart').value||null,odometer_end:$('edEnd').value||null,reason:$('edReason').value})});
+  const reason=($('edReason').value||'').trim();
+  // v56: спершу — змінені заправки
+  const edited=[...document.querySelectorAll('#refList .refrow')].filter(r=>{
+    const i=r.querySelector('input');return i.value.trim()!==''&&i.value.replace(',','.')!==String(i.dataset.old)});
+  if(edited.length&&!reason){toast('Вкажіть причину зміни');return}
+  try{
+    for(const r of edited){
+      await api(`/api/transport-sheets/${active.id}/refuels/${r.dataset.rid}`,{method:'PATCH',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({liters:r.querySelector('input').value,reason})});
+    }
+    const os=$('edStart').value.trim(),oe=$('edEnd').value.trim();
+    const odoChanged=os!==String(active.odometer_start??'')||oe!==String(active.odometer_end??'');
+    if(odoChanged){
+      if(!reason){toast('Вкажіть причину зміни одометра');return}
+      await api('/api/transport-sheets/'+active.id,{method:'PATCH',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({odometer_start:os||null,odometer_end:oe||null,reason})});
+    }
+    if(!edited.length&&!odoChanged){dlg.close();return}
     dlg.close();toast('Зміни збережено');load();loadBalance()}catch(e){toast(e.message)}
 }
 async function approve(id){

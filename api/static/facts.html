@@ -218,6 +218,16 @@ async function load() {
   _routesData = routes;                             // v51
   layers.clearLayers(); markers = {};
   const pts = [];
+  // v56: один маркер авто на транспортний засіб — колір рейсу, в якому воно зараз
+  const vehBest = {};
+  routes.forEach(rt => {
+    if (!rt.last_gps) return;
+    const cur = vehBest[rt.vehicle];
+    const act = rt.start_ts && !rt.finish_ts, curAct = cur && cur.start_ts && !cur.finish_ts;
+    if (!cur || (act && !curAct) ||
+        (!!act === !!curAct && new Date(rt.last_gps.ts) > new Date(cur.last_gps.ts)))
+      vehBest[rt.vehicle] = rt;
+  });
   $('panel').innerHTML = routes.map(rt => {
     const done = rt.stops.filter(s=>s.depart_ts).length;
     const fails = rt.stops.filter(s=>s.fail_ts).length;
@@ -235,12 +245,12 @@ async function load() {
                     : `План ${s.eta||'—'} · Факт ${hm(s.arrive_ts)||'—'}`))
        .addTo(layers);
     });
-    if (rt.last_gps) {
+    if (rt.last_gps && vehBest[rt.vehicle] === rt) {   // v56: єдиний маркер авто
       pts.push([rt.last_gps.lat, rt.last_gps.lon]);
       L.marker([rt.last_gps.lat, rt.last_gps.lon], {icon: L.divIcon({className:'',
         html:`<div style="display:flex;align-items:center;gap:5px;cursor:pointer">
           <div style="width:32px;height:32px;border-radius:50%;background:${rt.color};box-shadow:0 0 0 2.5px #fff,0 1px 4px rgba(0,0,0,.35);display:flex;align-items:center;justify-content:center;flex:none">${TRUCK}</div>
-          <div style="background:var(--navy);color:#fff;border-radius:5px;padding:2px 6px;font-size:11px;font-weight:700;white-space:nowrap;box-shadow:0 0 0 1.5px #fff">${rt.vehicle}</div></div>`,
+          <div style="background:${rt.color};color:#fff;border-radius:5px;padding:2px 6px;font-size:11px;font-weight:700;white-space:nowrap;box-shadow:0 0 0 1.5px #fff;text-shadow:0 1px 2px rgba(0,0,0,.35)">${rt.vehicle}</div></div>`,
         iconSize:null, iconAnchor:[16,16]})})
        .bindTooltip(`${rt.driver||''} · ${hm(rt.last_gps.ts)}`)
        .on('click', ()=>focus(rt.route_id))

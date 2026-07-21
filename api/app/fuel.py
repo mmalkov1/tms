@@ -472,6 +472,71 @@ async def edit_sheet(sheet_id: int, body: LogistSheetIn):
     return {"ok": True}
 
 
+# ---------- v56: логіст редагує заправки ----------
+
+class RefuelEditIn(BaseModel):
+    liters: str | float
+    reason: str
+
+
+async def _touch_after_refuel_edit(sheet):
+    """Після зміни заправки: перерахунок; підтверджений лист повертається на перевірку."""
+    if sheet["status"] == "approved":
+        await pool.execute("""UPDATE transport_sheets SET status='submitted',
+            approved_at=NULL,approved_by=NULL,updated_at=now() WHERE id=$1""", sheet["id"])
+    await _recalculate(sheet["id"])
+
+
+@router.patch("/api/transport-sheets/{sheet_id}/refuels/{refuel_id}")
+async def logist_edit_refuel(sheet_id: int, refuel_id: int, body: RefuelEditIn):
+    sheet = await pool.fetchrow("SELECT * FROM transport_sheets WHERE id=$1", sheet_id)
+    if not sheet:
+        raise HTTPException(404, "Лист не знайдено")
+    ref = await pool.fetchrow(
+        "SELECT * FROM transport_sheet_refuels WHERE id=$1 AND sheet_id=$2", refuel_id, sheet_id)
+    if not ref:
+        raise HTTPException(404, "Заправку не знайдено")
+    liters = _num(body.liters, "Літри", False)
+    if liters <= 0:
+        raise HTTPException(400, "Кількість літрів має бути більшою за нуль")
+    reason = (body.reason or "").strip()
+    if not reason:
+        raise HTTPException(400, "Вкажіть причину зміни")
+    if liters == ref["liters"]:
+        return {"ok": True}
+    async with pool.acquire() as c:
+        async with c.transaction():
+            await c.execute(
+                "UPDATE transport_sheet_refuels SET liters=$1 WHERE id=$2", liters, refuel_id)
+            await c.execute("""INSERT INTO transport_sheet_changes
+                (sheet_id,actor_role,actor_name,field_name,old_value,new_value,reason)
+                VALUES ($1,'logist','Логіст','refuel',$2,$3,$4)""",
+                sheet_id, str(ref["liters"]), str(liters), reason)
+    await _touch_after_refuel_edit(sheet)
+    return {"ok": True}
+
+
+@router.delete("/api/transport-sheets/{sheet_id}/refuels/{refuel_id}")
+async def logist_delete_refuel(sheet_id: int, refuel_id: int,
+                               reason: str = Query(..., min_length=1)):
+    sheet = await pool.fetchrow("SELECT * FROM transport_sheets WHERE id=$1", sheet_id)
+    if not sheet:
+        raise HTTPException(404, "Лист не знайдено")
+    ref = await pool.fetchrow(
+        "SELECT * FROM transport_sheet_refuels WHERE id=$1 AND sheet_id=$2", refuel_id, sheet_id)
+    if not ref:
+        raise HTTPException(404, "Заправку не знайдено")
+    async with pool.acquire() as c:
+        async with c.transaction():
+            await c.execute("DELETE FROM transport_sheet_refuels WHERE id=$1", refuel_id)
+            await c.execute("""INSERT INTO transport_sheet_changes
+                (sheet_id,actor_role,actor_name,field_name,old_value,new_value,reason)
+                VALUES ($1,'logist','Логіст','refuel',$2,NULL,$3)""",
+                sheet_id, str(ref["liters"]), reason.strip())
+    await _touch_after_refuel_edit(sheet)
+    return {"ok": True}
+
+
 @router.post("/api/transport-sheets/{sheet_id}/approve")
 async def approve_sheet(sheet_id: int):
     sheet = await pool.fetchrow("SELECT * FROM transport_sheets WHERE id=$1", sheet_id)
@@ -542,6 +607,10 @@ async def sheet_detail(sheet_id: int):
         raise HTTPException(404, "Лист не знайдено")
     changes = await pool.fetch("""SELECT actor_role,actor_name,field_name,old_value,new_value,reason,created_at
         FROM transport_sheet_changes WHERE sheet_id=$1 ORDER BY created_at DESC""", sheet_id)
+    refuels = await pool.fetch(                                     # v56
+        "SELECT id,liters,refuel_at FROM transport_sheet_refuels WHERE sheet_id=$1 ORDER BY refuel_at,id",
+        sheet_id)
     result = _sheet_dict(row)
     result["changes"] = [dict(c) for c in changes]
+    result["refuels"] = [dict(x) for x in refuels]
     return result

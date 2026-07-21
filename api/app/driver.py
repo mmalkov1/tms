@@ -25,6 +25,19 @@ async def init(db_pool):
     """Создание таблиц (идемпотентно). Вызывается из startup."""
     global pool
     pool = db_pool
+    # v59: трекінг використання кнопок (Подзвонити / Google Maps / Waze)
+    await pool.execute("""
+        CREATE TABLE IF NOT EXISTS ui_events (
+            id        BIGSERIAL PRIMARY KEY,
+            driver_id INT NOT NULL REFERENCES drivers(id) ON DELETE CASCADE,
+            route_id  INT REFERENCES routes(id) ON DELETE SET NULL,
+            order_id  BIGINT,
+            event     TEXT NOT NULL CHECK (event IN ('call','nav_google','nav_waze')),
+            ts        TIMESTAMPTZ NOT NULL DEFAULT now())""")
+    await pool.execute(
+        "CREATE INDEX IF NOT EXISTS idx_ui_events_event_ts ON ui_events(event, ts)")
+    await pool.execute(
+        "CREATE INDEX IF NOT EXISTS idx_ui_events_driver_ts ON ui_events(driver_id, ts)")
     await pool.execute("""
         CREATE TABLE IF NOT EXISTS driver_tokens (
             token      TEXT PRIMARY KEY,
@@ -714,6 +727,8 @@ async def facts(plan_date: date = Query(...)):
         SELECT r.id, r.color, r.plan_date, r.project_id,
                r.total_km, r.depart_time,
                COALESCE(r.return_time_manual, r.return_time) AS return_time,   -- v51
+               COALESCE(r.start_kind,'depot')  AS start_kind,  r.start_address,   -- v59
+               COALESCE(r.finish_kind,'depot') AS finish_kind, r.finish_address,
                v.name AS vehicle_name, v.driver_id AS veh_driver_id,
                d.id AS driver_id, d.name AS driver_name
         FROM routes r JOIN vehicles v ON v.id=r.vehicle_id
@@ -784,6 +799,8 @@ async def facts(plan_date: date = Query(...)):
             "gps_boundary_ok": track.get("boundary_ok", False) if track else False,
             "gps_complete": gps_issue is None, "gps_issue": gps_issue,
             "plan_km": float(r["total_km"] or 0),
+            "start_kind": r["start_kind"], "start_address": r["start_address"],     # v59
+            "finish_kind": r["finish_kind"], "finish_address": r["finish_address"],
             "plan_depart": _hm(r["depart_time"]), "plan_return": _hm(r["return_time"]),
             "delay_min": delay_min, "plan_finish": plan_finish,
             "forecast_finish": forecast_finish,
@@ -923,6 +940,47 @@ async def driver_next_trip(token: str):
 
 
 # ---------- v30: «виїхав / завершив маршрут» ----------
+
+
+# ---------- v59: трекінг кнопок Подзвонити / Google Maps / Waze ----------
+
+class UiEventIn(BaseModel):
+    event: str
+    route_id: int | None = None
+    order_id: int | None = None
+
+
+@router.post("/api/driver/{token}/ui-event")
+async def driver_ui_event(token: str, body: UiEventIn):
+    drv = await _driver_by_token(token)
+    if body.event not in ("call", "nav_google", "nav_waze"):
+        raise HTTPException(400, "Невідома подія")
+    await pool.execute(
+        "INSERT INTO ui_events (driver_id, route_id, order_id, event) VALUES ($1,$2,$3,$4)",
+        drv["id"], body.route_id, body.order_id, body.event)
+    return {"ok": True}
+
+
+@router.get("/api/ui-events/stats")
+async def ui_events_stats(date_from: date = Query(...), date_to: date = Query(...)):
+    """Зведення для логіста: скільки разів тиснули дзвінок/навігацію."""
+    totals = await pool.fetch("""
+        SELECT event, count(*) AS n FROM ui_events
+        WHERE ts >= $1::date AND ts < $2::date + 1 GROUP BY event ORDER BY event""",
+        date_from, date_to)
+    by_driver = await pool.fetch("""
+        SELECT d.name AS driver, e.event, count(*) AS n
+        FROM ui_events e JOIN drivers d ON d.id = e.driver_id
+        WHERE e.ts >= $1::date AND e.ts < $2::date + 1
+        GROUP BY d.name, e.event ORDER BY d.name, e.event""", date_from, date_to)
+    by_day = await pool.fetch("""
+        SELECT (ts AT TIME ZONE 'Europe/Kyiv')::date AS day, event, count(*) AS n
+        FROM ui_events WHERE ts >= $1::date AND ts < $2::date + 1
+        GROUP BY day, event ORDER BY day""", date_from, date_to)
+    return {"totals": {r["event"]: r["n"] for r in totals},
+            "by_driver": [dict(r) for r in by_driver],
+            "by_day": [{"day": r["day"].isoformat(), "event": r["event"], "n": r["n"]}
+                       for r in by_day]}
 
 class RouteEventIn(BaseModel):
     event: str                     # depot_arrive | start | finish

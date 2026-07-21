@@ -566,6 +566,16 @@ async function unfail(ids) {
 }
 
 // показать/скрыть навигаторы: замещают кнопку «Подзвонити»
+// v59: трекінг кліків (не блокує перехід за посиланням)
+function trackUi(event, orderId) {
+  try {
+    const body = JSON.stringify({event, route_id: trip?.route?.id||null, order_id: orderId||null});
+    const url = `/api/driver/${TOKEN}/ui-event`;
+    if (navigator.sendBeacon)
+      navigator.sendBeacon(url, new Blob([body], {type:'application/json'}));
+    else fetch(url, {method:'POST', headers:{'Content-Type':'application/json'}, body, keepalive:true});
+  } catch(e) {}
+}
 function toggleNav(gi) {
   const act = $('act' + gi);
   const open = act.classList.toggle('open-nav');
@@ -636,6 +646,10 @@ function renderNext() {
     `<div class="preview-note">Перегляд рейсу на ${nextTrip.date.split('-').reverse().join('.')}` +
     ` · ${nextTrip.vehicle}${nextTrip.plate?' · '+nextTrip.plate:''}` +
     `${nextTrip.depart?' · виїзд ~'+nextTrip.depart:''}. Кнопки з'являться у день рейсу.</div>` +
+    // v59: звідки старт і де фініш — щоб водій знав, чи їхати на склад
+    ((nextTrip.depot||nextTrip.finish) ? `<div class="onroute" style="margin-top:8px">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" style="vertical-align:-2px"><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0z"/><circle cx="12" cy="10" r="3"/></svg>
+      Старт: <b>${nextTrip.depot?.name||'склад'}</b> → Фініш: <b>${nextTrip.finish?.name||'склад'}</b>${(nextTrip.finish?.kind||'depot')!=='depot'?'<br><span style="font-size:12px;color:#5F5E5A">На склад повертатися не треба</span>':''}</div>` : '') +
     groups.map((g,gi)=>{
       const w = g.items.reduce((a,s)=>a+(s.weight_kg||0),0);
       const kindBadge = g.kind==='pickup' ? '<span class="kind pick">ЗАБІР</span>'
@@ -811,7 +825,7 @@ function render() {
     const phone = (g.phone || '').trim();
     const tel = phone.replace(/[^\d+]/g, '');
     const call = phone
-      ? `<a class="b-call on" id="call${gi}" href="tel:${tel}">${NAV_PHONE} Подзвонити</a>`
+      ? `<a class="b-call on" id="call${gi}" href="tel:${tel}" onclick="trackUi('call',${g.items[0].order_id||null})">${NAV_PHONE} Подзвонити</a>`
       : `<span class="b-call off" id="call${gi}">${NAV_PHONE} Подзвонити</span>`;
     const seats = g.items.reduce((a,s)=>a+(s.seats||0),0);
     const ids = g.items.map(s=>s.order_id).join(',');
@@ -829,8 +843,8 @@ function render() {
       <div class="actions" id="act${gi}">
         <button class="b-nav" onclick="toggleNav(${gi})" aria-label="Навігація">${NAV_ARROW}</button>
         ${call}
-        <a class="b-map gmap" href="${gmap}" target="_blank" rel="noopener" style="display:none">Google Maps</a>
-        <a class="b-map waze" href="${waze}" target="_blank" rel="noopener" style="display:none">Waze</a>
+        <a class="b-map gmap" href="${gmap}" target="_blank" rel="noopener" style="display:none" onclick="trackUi('nav_google',${g.items[0].order_id||null})">Google Maps</a>
+        <a class="b-map waze" href="${waze}" target="_blank" rel="noopener" style="display:none" onclick="trackUi('nav_waze',${g.items[0].order_id||null})">Waze</a>
       </div>
       <div class="btns">
         <button class="b-arr" onclick="mark('${ids}','arrive')" ${arrived?'disabled':''}>Прибув</button>

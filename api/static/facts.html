@@ -242,8 +242,25 @@ async function load() {
           iconSize:[24,24], iconAnchor:[12,12]})})
        .bindTooltip(`<b>${s.seq}. ${s.client}</b><br>${s.address||''}<br>` +
          (s.fail_ts ? `<b style="color:#B8860B">✗ ${s.fail_reason||'відмова'}</b> · ${hm(s.fail_ts)}`
-                    : `План ${s.eta||'—'} · Факт ${hm(s.arrive_ts)||'—'}`))
+                    : `План ${s.eta||'—'} · Факт ${hm(s.arrive_ts)||'—'}`) +
+         '<br><i style="color:#888">2× клік — перемістити точку</i>')
        .addTo(layers);
+      const _mk = markers[rt.route_id + '-' + s.order_id];   // v61: переміщення точки
+      _mk.on('dblclick', e => {
+        L.DomEvent.stop(e);
+        window._movingStop = true;                      // v61: пауза автооновлення
+        _mk.dragging.enable();
+        _mk.setTooltipContent('Перетягніть маркер у потрібне місце');
+      });
+      _mk.on('dragend', async () => {
+        window._movingStop = false;
+        const ll = _mk.getLatLng();
+        if (!confirm('Зберегти нове розташування точки? Координати запам\'ятаються і для майбутніх імпортів.')) { load(); return; }
+        await fetch(`/api/orders/${s.order_id}`, {method:'PATCH',
+          headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({lat:+ll.lat.toFixed(6), lon:+ll.lng.toFixed(6)})});
+        load();
+      });
     });
     if (rt.last_gps && vehBest[rt.vehicle] === rt) {   // v56: єдиний маркер авто
       pts.push([rt.last_gps.lat, rt.last_gps.lon]);
@@ -308,7 +325,7 @@ async function load() {
 }
 $('d').addEventListener('change', () => { window._fitted = false; focusRoute = null; load(); });
 if (showTrack) $('trk').classList.add('on');
-setInterval(load, 30000);
+setInterval(() => { if (!window._movingStop) load(); }, 30000);   // v61: не збивати перетягування
 load();
 </script>
 <dialog id="stopDlg">

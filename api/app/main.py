@@ -744,6 +744,12 @@ async def patch_order(order_id: int, b: OrderPatch):
     await geo_cache_put(new_addr, new_lat, new_lon, "manual")
     # v60: і під оригінальним ключем 1С — завтрашній імпорт того ж рядка влучить у кеш
     await geo_cache_put(cur["address_1c"], new_lat, new_lon, "manual")
+    # v61: точка вже в рейсі — перебудувати геометрію/ETA зачеплених рейсів
+    if (new_lat, new_lon) != (cur["lat"], cur["lon"]):
+        rids = await pool.fetch(
+            "SELECT DISTINCT route_id FROM route_stops WHERE order_id=$1", order_id)
+        for r in rids:
+            await _rebuild_route(r["route_id"])
     return {"ok": True}
 
 

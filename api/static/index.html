@@ -1392,6 +1392,7 @@ async function loadAll() {
       const s0 = g.items[0], sN = g.items[g.items.length-1];
       pins.push({
         lat: g.lat, lon: g.lon, color: r.color,
+        oids: g.items.map(i => i.order_id),          // v61: для переміщення точки
         label: g.items.length>1 ? `${s0.seq}-${sN.seq}` : `${s0.seq}`,
         rounded: g.items.length>1,
         tip: tipHtml(g.client, g.address,
@@ -1416,9 +1417,27 @@ async function loadAll() {
     }
     group.forEach(p => {
       const html = `<div class="pin-wrap"><div class="pin" style="--pc:${p.color};border-radius:${p.rounded?'11px':'50% 50% 50% 0'};${p.rounded?'':'transform:rotate(-45deg)'}"><span style="${p.rounded?'':'transform:rotate(45deg)'}">${p.label}</span></div></div>`;
-      L.marker([p.lat, p.lon], {icon: L.divIcon({
+      const mk = L.marker([p.lat, p.lon], {icon: L.divIcon({
           html, className:'', iconSize:[28,28], iconAnchor:p.rounded?[14,14]:[14,26]})})
-        .bindTooltip(p.tip, {sticky:true}).addTo(layers);
+        .bindTooltip(p.tip + '<br><i style="color:#888">2× клік — перемістити точку</i>', {sticky:true})
+        .addTo(layers);
+      // v61: переміщення точки на карті (адреса вірна, а геокод «промазав»)
+      mk.on('dblclick', e => {
+        L.DomEvent.stop(e);
+        window._movingStop = true;
+        mk.dragging.enable();
+        mk.setTooltipContent('Перетягніть маркер у потрібне місце');
+      });
+      mk.on('dragend', async () => {
+        window._movingStop = false;
+        const ll = mk.getLatLng();
+        if (!confirm('Зберегти нове розташування точки? Координати запам\'ятаються і для майбутніх імпортів.')) { loadAll(); return; }
+        for (const oid of (p.oids || []))
+          await fetch(`/api/orders/${oid}`, {method:'PATCH',
+            headers:{'Content-Type':'application/json'},
+            body: JSON.stringify({lat:+ll.lat.toFixed(6), lon:+ll.lng.toFixed(6)})});
+        loadAll();
+      });
     });
   });
 

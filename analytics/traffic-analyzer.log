@@ -14,3 +14,7 @@
 2026-07-19: маршрутов 0, перегонов 0, usable=0, suspect=0, rejected=0
 2026-07-20: маршрутов 1, перегонов 1, usable=0, suspect=0, rejected=1
 Итого: legs_rejected=1, legs_suspect=0, legs_total=1, legs_usable=0, routes_accepted=0, routes_total=1
+2026-07-19: маршрутов 0, перегонов 0, usable=0, suspect=0, rejected=0
+2026-07-20: маршрутов 1, перегонов 1, usable=0, suspect=0, rejected=1
+2026-07-21: маршрутов 3, перегонов 22, usable=8, suspect=6, rejected=8
+Итого: legs_rejected=9, legs_suspect=6, legs_total=23, legs_usable=8, routes_accepted=3, routes_total=4

@@ -18,6 +18,7 @@ route_events — для фоновой синхронизации статусо
   склад-возврат: 4 после «Завершив маршрут», иначе 1
 Все фактические времена — Europe/Kyiv.
 """
+import asyncio
 import os
 import secrets
 import xml.etree.ElementTree as ET
@@ -276,10 +277,12 @@ async def import_orders(request: Request,
             res = await c.execute("""
                 INSERT INTO orders (plan_date, doc_number, doc_ref, kind, client, address,
                     address_extra, lat, lon, tw_from, tw_to, service_min, weight_kg, volume_m3,
-                    status_1c, project_id, phone, seats, contact_person, break_from, break_to)
-                VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21)
+                    status_1c, project_id, phone, seats, contact_person, break_from, break_to,
+                    address_1c)
+                VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$6)
                 ON CONFLICT (project_id, doc_number) DO UPDATE SET
                     kind=EXCLUDED.kind, client=EXCLUDED.client, address=EXCLUDED.address,
+                    address_1c=EXCLUDED.address_1c,
                     address_extra=EXCLUDED.address_extra,
                     lat=COALESCE(EXCLUDED.lat, orders.lat),
                     lon=COALESCE(EXCLUDED.lon, orders.lon),
@@ -303,6 +306,8 @@ async def import_orders(request: Request,
     try:
         from . import main as _main
         await _main.geo_cache_fill(project_id)
+        # v60: решту адрес геокодуємо у фоні — відповідь 1С не чекає
+        asyncio.create_task(_main.geocode_missing_bg(project_id))
     except Exception:
         pass
 

@@ -116,6 +116,18 @@ async def init(db_pool):
         "ALTER TABLE stop_events ADD COLUMN IF NOT EXISTS dist_m INT")
     await pool.execute(
         "ALTER TABLE route_events ADD COLUMN IF NOT EXISTS dist_m INT")
+    # v62 (migrate_028): точна GPS-фіксація, використана для геоперевірки.
+    # lat/lon тепер зберігають саме вибрану сервером позицію, а target_* —
+    # координати цілі на момент натискання (вони можуть бути виправлені пізніше).
+    for table in ("stop_events", "route_events"):
+        await pool.execute(f"""
+            ALTER TABLE {table}
+                ADD COLUMN IF NOT EXISTS gps_point_id BIGINT
+                    REFERENCES gps_points(id) ON DELETE SET NULL,
+                ADD COLUMN IF NOT EXISTS gps_accuracy_m REAL,
+                ADD COLUMN IF NOT EXISTS gps_age_sec INT,
+                ADD COLUMN IF NOT EXISTS target_lat DOUBLE PRECISION,
+                ADD COLUMN IF NOT EXISTS target_lon DOUBLE PRECISION""")
     # v38 (migrate_017): «прибув на склад» перед виїздом
     await pool.execute(
         "ALTER TABLE route_events DROP CONSTRAINT IF EXISTS route_events_event_check")
@@ -422,28 +434,62 @@ async def driver_trip(token: str, d: date | None = Query(None),
 
 
 GEO_CONFIRM_M = 500      # v44: поріг м'якого підтвердження натискань здалеку
+GPS_CONFIRM_MAX_AGE_S = 180
+GPS_CONFIRM_LOOKBACK_S = 600
+GPS_CONFIRM_MAX_ACCURACY_M = 100
 
 
-async def _press_distance_m(driver_id: int, tgt_lat, tgt_lon,
-                            body_lat=None, body_lon=None):
-    """Відстань водія до цілі в момент натискання, м.
+def _latest_trusted_fix(points, now=None):
+    """Остання фізично правдоподібна GPS-точка з послідовності.
 
-    Джерело позиції: найсвіжіша GPS-точка водія (≤3 хв, точність ≤100 м) —
-    в APK web-геолокація вимкнена і координати в тілі запиту порожні;
-    fallback — координати з запиту (web-режим). Немає ні того, ні того — None.
+    Рухаємось від старих точок до нових і не змінюємо опорну позицію після
+    стрибка ≥2 км зі швидкістю понад 180 км/год. Тому одна або кілька точок
+    іншого пристрою/країни не витісняють нормальний трек водія.
     """
-    if tgt_lat is None or tgt_lon is None:
+    now = now or datetime.now(timezone.utc)
+    trusted = None
+    for point in points:
+        if trusted is not None and _impossible_gps_leg(trusted, point):
+            continue
+        trusted = point
+    if trusted is None:
         return None
-    fix = await pool.fetchrow("""
-        SELECT lat, lon FROM gps_points
-        WHERE driver_id = $1 AND ts > now() - interval '3 minutes'
-          AND (accuracy_m IS NULL OR accuracy_m <= 100)
-        ORDER BY ts DESC LIMIT 1""", driver_id)
-    lat = fix["lat"] if fix else body_lat
-    lon = fix["lon"] if fix else body_lon
-    if lat is None or lon is None:
-        return None
-    return int(round(_haversine_km(lat, lon, tgt_lat, tgt_lon) * 1000))
+    age_sec = max(0, int(round((now - trusted["ts"]).total_seconds())))
+    return trusted if age_sec <= GPS_CONFIRM_MAX_AGE_S else None
+
+
+async def _press_location(driver_id: int, tgt_lat, tgt_lon,
+                          body_lat=None, body_lon=None):
+    """Позиція і відстань, які сервер фактично використав при натисканні.
+
+    Для APK беремо свіжу точку з журналу, попередньо відкидаючи фізично
+    неможливі стрибки. Для браузера лишається fallback на координати запиту.
+    Повертаємо повний знімок, щоб подію можна було точно перевірити згодом.
+    """
+    now = datetime.now(timezone.utc)
+    points = await pool.fetch("""
+        SELECT id, ts, lat, lon, accuracy_m
+        FROM gps_points
+        WHERE driver_id = $1
+          AND ts > now() - make_interval(secs => $2)
+          AND ts <= now() + interval '30 seconds'
+          AND (accuracy_m IS NULL OR accuracy_m <= $3)
+        ORDER BY ts, id""", driver_id, GPS_CONFIRM_LOOKBACK_S,
+        GPS_CONFIRM_MAX_ACCURACY_M)
+    fix = _latest_trusted_fix(points, now)
+    if fix:
+        lat, lon = fix["lat"], fix["lon"]
+        age_sec = max(0, int(round((now - fix["ts"]).total_seconds())))
+        point_id, accuracy_m = fix["id"], fix["accuracy_m"]
+    else:
+        lat, lon = body_lat, body_lon
+        age_sec = point_id = accuracy_m = None
+    dist = None
+    if lat is not None and lon is not None and tgt_lat is not None and tgt_lon is not None:
+        dist = int(round(_haversine_km(lat, lon, tgt_lat, tgt_lon) * 1000))
+    return {"lat": lat, "lon": lon, "dist_m": dist,
+            "gps_point_id": point_id, "gps_accuracy_m": accuracy_m,
+            "gps_age_sec": age_sec, "target_lat": tgt_lat, "target_lon": tgt_lon}
 
 
 # ---------- факты «прибув / поїхав» ----------
@@ -455,6 +501,10 @@ class StopEvent(BaseModel):
     force: bool = False        # v44: водій підтвердив натискання здалеку
 
 
+class StopGroupEvent(StopEvent):
+    order_ids: list[int]
+
+
 async def _require_route_started(route_id: int):
     """Не дозволяти факти точки до фактичного виїзду зі складу."""
     started = await pool.fetchval(
@@ -463,37 +513,76 @@ async def _require_route_started(route_id: int):
         raise HTTPException(409, "Спочатку натисни «Виїхав на маршрут»")
 
 
-@router.post("/api/driver/{token}/stops/{order_id}/event")
-async def stop_event(token: str, order_id: int, body: StopEvent):
+async def _save_stop_events(drv, order_ids: list[int], body: StopEvent):
     if body.event not in ("arrive", "depart"):
         raise HTTPException(400, "event: arrive | depart")
-    drv = await _driver_by_token(token)
+    order_ids = list(dict.fromkeys(order_ids))
+    if not order_ids or len(order_ids) > 100:
+        raise HTTPException(400, "order_ids: від 1 до 100 заявок")
     rs = await pool.fetchrow("""
         SELECT s.route_id FROM route_stops s
         JOIN routes r ON r.id = s.route_id
         WHERE s.order_id = $1
           AND (r.driver_id = $2
                OR r.vehicle_id IN (SELECT id FROM vehicles WHERE driver_id = $2 AND is_active))
-        ORDER BY r.plan_date DESC, r.id DESC LIMIT 1""", order_id, drv["id"])
+        ORDER BY r.plan_date DESC, r.id DESC LIMIT 1""", order_ids[0], drv["id"])
     if not rs:
         raise HTTPException(404, "Точка не на твоєму маршруті")
+    targets = await pool.fetch("""
+        SELECT o.id, o.client, o.address, o.lat, o.lon
+        FROM route_stops s JOIN orders o ON o.id=s.order_id
+        WHERE s.route_id=$1 AND o.id=ANY($2::int[])
+        ORDER BY array_position($2::int[], o.id)""", rs["route_id"], order_ids)
+    if len(targets) != len(order_ids):
+        raise HTTPException(404, "Не всі заявки належать цій зупинці")
+    group_keys = {(t["client"], t["address"]) for t in targets}
+    if len(group_keys) != 1:
+        raise HTTPException(400, "Заявки належать різним зупинкам")
     await _require_route_started(rs["route_id"])
-    tgt = await pool.fetchrow("SELECT lat, lon FROM orders WHERE id=$1", order_id)  # v44
-    dist = await _press_distance_m(drv["id"], tgt["lat"] if tgt else None,
-                                   tgt["lon"] if tgt else None, body.lat, body.lon)
-    if dist is not None and dist > GEO_CONFIRM_M and not body.force:
-        return {"ok": False, "confirm_required": True, "dist_m": dist}
-    # первый зафиксированный факт — истина; повторная отправка идемпотентна
-    row = await pool.fetchrow("""
-        INSERT INTO stop_events (route_id, order_id, event, lat, lon, dist_m)
-        VALUES ($1,$2,$3,$4,$5,$6)
-        ON CONFLICT (route_id, order_id, event) DO NOTHING
-        RETURNING ts""", rs["route_id"], order_id, body.event, body.lat, body.lon, dist)
-    if row is None:
-        row = await pool.fetchrow(
-            "SELECT ts FROM stop_events WHERE route_id=$1 AND order_id=$2 AND event=$3",
-            rs["route_id"], order_id, body.event)
-    return {"ok": True, "ts": _iso(row["ts"])}
+    target = targets[0]              # UI групує саме за client+address і показує першу координату
+    press = await _press_location(drv["id"], target["lat"], target["lon"],
+                                  body.lat, body.lon)
+    arrived = 0
+    if body.event == "depart":
+        arrived = await pool.fetchval("""
+            SELECT count(DISTINCT order_id) FROM stop_events
+            WHERE route_id=$1 AND event='arrive' AND order_id=ANY($2::int[])""",
+            rs["route_id"], order_ids)
+    already_arrived = arrived == len(order_ids)
+    if (press["dist_m"] is not None and press["dist_m"] > GEO_CONFIRM_M
+            and not body.force and not (body.event == "depart" and already_arrived)):
+        return {"ok": False, "confirm_required": True, "dist_m": press["dist_m"]}
+
+    rows = [(rs["route_id"], order_id, body.event, press["lat"], press["lon"],
+             press["dist_m"], press["gps_point_id"], press["gps_accuracy_m"],
+             press["gps_age_sec"], press["target_lat"], press["target_lon"])
+            for order_id in order_ids]
+    # executemany в asyncpg атомарний: або записується вся згрупована зупинка, або жодна заявка.
+    await pool.executemany("""
+        INSERT INTO stop_events
+            (route_id, order_id, event, lat, lon, dist_m, gps_point_id,
+             gps_accuracy_m, gps_age_sec, target_lat, target_lon)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+        ON CONFLICT (route_id, order_id, event) DO NOTHING""", rows)
+    ts = await pool.fetchval("""
+        SELECT min(ts) FROM stop_events
+        WHERE route_id=$1 AND event=$2 AND order_id=ANY($3::int[])""",
+        rs["route_id"], body.event, order_ids)
+    return {"ok": True, "ts": _iso(ts), "saved": len(order_ids)}
+
+
+@router.post("/api/driver/{token}/stops/events")
+async def stop_group_event(token: str, body: StopGroupEvent):
+    """v62: одна геоперевірка та одна атомарна дія для всієї зупинки."""
+    drv = await _driver_by_token(token)
+    return await _save_stop_events(drv, body.order_ids, body)
+
+
+@router.post("/api/driver/{token}/stops/{order_id}/event")
+async def stop_event(token: str, order_id: int, body: StopEvent):
+    """Сумісність зі старими відкритими сторінками водія."""
+    drv = await _driver_by_token(token)
+    return await _save_stop_events(drv, [order_id], body)
 
 
 # ---------- відмова «не виконано» ----------
@@ -532,13 +621,18 @@ async def stop_fail(token: str, order_id: int, body: FailIn):
     if not body.reason_id and not txt:
         raise HTTPException(400, "Вкажи причину")
     tgt = await pool.fetchrow("SELECT lat, lon FROM orders WHERE id=$1", order_id)  # v44
-    dist = await _press_distance_m(drv["id"], tgt["lat"] if tgt else None,
-                                   tgt["lon"] if tgt else None, body.lat, body.lon)
+    press = await _press_location(drv["id"], tgt["lat"] if tgt else None,
+                                  tgt["lon"] if tgt else None, body.lat, body.lon)
     row = await pool.fetchrow("""
-        INSERT INTO stop_events (route_id, order_id, event, lat, lon, reason_id, reason_text, dist_m)
-        VALUES ($1,$2,'fail',$3,$4,$5,$6,$7)
+        INSERT INTO stop_events
+            (route_id, order_id, event, lat, lon, reason_id, reason_text, dist_m,
+             gps_point_id, gps_accuracy_m, gps_age_sec, target_lat, target_lon)
+        VALUES ($1,$2,'fail',$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
         ON CONFLICT (route_id, order_id, event) DO NOTHING
-        RETURNING ts""", rs["route_id"], order_id, body.lat, body.lon, body.reason_id, txt, dist)
+        RETURNING ts""", rs["route_id"], order_id, press["lat"], press["lon"],
+        body.reason_id, txt, press["dist_m"], press["gps_point_id"],
+        press["gps_accuracy_m"], press["gps_age_sec"], press["target_lat"],
+        press["target_lon"])
     if row is None:
         row = await pool.fetchrow(
             "SELECT ts FROM stop_events WHERE route_id=$1 AND order_id=$2 AND event='fail'",
@@ -1010,16 +1104,6 @@ async def route_event(token: str, route_id: int, body: RouteEventIn):
                COALESCE(r.start_kind, 'depot') AS start_kind
         FROM routes r JOIN depots d ON d.id=r.depot_id
         WHERE r.id=$1""", route_id)                                                # v47
-    if body.event == "start" and dep and dep["start_kind"] == "depot":
-        arrived = await pool.fetchval(               # v38/v51: склад-крок лише
-            "SELECT 1 FROM route_events WHERE route_id=$1 AND event='depot_arrive'", route_id)
-        if not arrived:
-            # v55/v57: кнопки складу немає — подію дописуємо на виїзді
-            await pool.execute("""
-                INSERT INTO route_events (route_id, driver_id, event, lat, lon, source)
-                VALUES ($1,$2,'depot_arrive',$3,$4,'auto')
-                ON CONFLICT (route_id, event) DO NOTHING""",
-                route_id, drv["id"], body.lat, body.lon)
     if body.event == "finish":
         started = await pool.fetchval(
             "SELECT 1 FROM route_events WHERE route_id=$1 AND event='start'", route_id)
@@ -1027,14 +1111,33 @@ async def route_event(token: str, route_id: int, body: RouteEventIn):
             raise HTTPException(400, "Спочатку познач виїзд")
     tgt_lat = (dep["f_lat"] if body.event == "finish" else dep["s_lat"]) if dep else None
     tgt_lon = (dep["f_lon"] if body.event == "finish" else dep["s_lon"]) if dep else None
-    dist = await _press_distance_m(drv["id"], tgt_lat, tgt_lon, body.lat, body.lon)
-    if dist is not None and dist > GEO_CONFIRM_M and not body.force:
-        return {"confirm_required": True, "dist_m": dist}
+    press = await _press_location(drv["id"], tgt_lat, tgt_lon, body.lat, body.lon)
+    if press["dist_m"] is not None and press["dist_m"] > GEO_CONFIRM_M and not body.force:
+        return {"confirm_required": True, "dist_m": press["dist_m"]}
+    if body.event == "start" and dep and dep["start_kind"] == "depot":
+        arrived = await pool.fetchval(               # v38/v51: склад-крок лише
+            "SELECT 1 FROM route_events WHERE route_id=$1 AND event='depot_arrive'", route_id)
+        if not arrived:
+            # v55/v57/v62: авто-подію пишемо лише після пройденої геоперевірки.
+            await pool.execute("""
+                INSERT INTO route_events
+                    (route_id, driver_id, event, lat, lon, source, dist_m,
+                     gps_point_id, gps_accuracy_m, gps_age_sec, target_lat, target_lon)
+                VALUES ($1,$2,'depot_arrive',$3,$4,'auto',$5,$6,$7,$8,$9,$10)
+                ON CONFLICT (route_id, event) DO NOTHING""",
+                route_id, drv["id"], press["lat"], press["lon"], press["dist_m"],
+                press["gps_point_id"], press["gps_accuracy_m"], press["gps_age_sec"],
+                press["target_lat"], press["target_lon"])
     # перше натискання перемагає, повторне — ігнорується
     await pool.execute("""
-        INSERT INTO route_events (route_id, driver_id, event, lat, lon, dist_m)
-        VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT (route_id, event) DO NOTHING""",
-        route_id, drv["id"], body.event, body.lat, body.lon, dist)
+        INSERT INTO route_events
+            (route_id, driver_id, event, lat, lon, dist_m, gps_point_id,
+             gps_accuracy_m, gps_age_sec, target_lat, target_lon)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+        ON CONFLICT (route_id, event) DO NOTHING""",
+        route_id, drv["id"], body.event, press["lat"], press["lon"], press["dist_m"],
+        press["gps_point_id"], press["gps_accuracy_m"], press["gps_age_sec"],
+        press["target_lat"], press["target_lon"])
     evs = await pool.fetch(
         "SELECT event, ts FROM route_events WHERE route_id=$1", route_id)
     return {e["event"]: _iso(e["ts"]) for e in evs}

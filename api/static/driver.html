@@ -862,20 +862,20 @@ function render() {
 
 async function mark(ids, event, force = false) {
   const pos = lastPos ? {lat:lastPos.lat, lon:lastPos.lon} : {};
-  for (const id of ids.split(',')) {
-    try {
-      const r = await fetch(`/api/driver/${TOKEN}/stops/${id}/event`, {method:'POST',
-        headers:{'Content-Type':'application/json'}, body: JSON.stringify({event, force, ...pos})});
-      const j = await r.json().catch(() => ({}));
-      if (!r.ok) { toast(j.detail || 'Помилка — спробуй ще раз'); return; }
-      if (j.confirm_required) {                        // v44: натискання здалеку
-        const what = event === 'arrive' ? 'Точно прибув?' : 'Точно поїхав звідти?';
-        if (await askYes(`Ти за ${fmtDist(j.dist_m)} від точки. ${what}`))
-          return mark(ids, event, true);
-        return;
-      }
-    } catch(e) { toast('Немає зв’язку — спробуй ще раз'); return; }
-  }
+  try {
+    const order_ids = ids.split(',').map(Number).filter(Number.isFinite);
+    const r = await fetch(`/api/driver/${TOKEN}/stops/events`, {method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({order_ids, event, force, ...pos})});
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) { toast(j.detail || 'Помилка — спробуй ще раз'); return; }
+    if (j.confirm_required) {                          // v62: один діалог на всю зупинку
+      const what = event === 'arrive' ? 'Точно прибув?' : 'Точно поїхав звідти?';
+      if (await askYes(`Ти за ${fmtDist(j.dist_m)} від точки. ${what}`))
+        return mark(ids, event, true);
+      return;
+    }
+  } catch(e) { toast('Немає зв’язку — спробуй ще раз'); return; }
   toast(event==='arrive' ? 'Прибуття зафіксовано' : 'Виїзд зафіксовано');
   await load();
 }

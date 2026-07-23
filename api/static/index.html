@@ -1228,13 +1228,15 @@ function openEdit(o) {
   $('edMsg').textContent = '';
   $('editDlg').showModal();
 }
+function edNum(v){ v=(v||'').toString().trim().replace(',','.'); return v && !isNaN(+v) ? +v : null; }   // v64: кома → крапка
 async function edSave() {
   const body = { address: $('edAddr').value || null,
-    lat: $('edLat').value ? +$('edLat').value : null,
-    lon: $('edLon').value ? +$('edLon').value : null };
+    lat: edNum($('edLat').value),
+    lon: edNum($('edLon').value) };
   await fetch(`/api/orders/${edOrder.id}`, {method:'PATCH',
     headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
-  $('editDlg').close(); st('Збережено'); loadAll();
+  $('editDlg').close(); st('Збережено'); await loadAll();
+  if (body.lat != null && body.lon != null) highlightPoint(body.lat, body.lon);   // v64: фокус на точку
 }
 async function edGeocode() {
   const msg = $('edMsg');
@@ -1252,6 +1254,7 @@ async function edGeocode() {
   $('edLat').value = j.lat; $('edLon').value = j.lon;
   msg.style.color = '#2E8B57';
   msg.textContent = 'Знайдено — перевір точку і натисни «Зберегти»';
+  highlightPoint(j.lat, j.lon);   // v64: одразу показати, куди влучив геокодер
 }
 let hlMarker = null;
 function highlightPoint(lat, lon, name) {

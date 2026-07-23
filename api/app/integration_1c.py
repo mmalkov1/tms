@@ -306,6 +306,7 @@ async def import_orders(request: Request,
     try:
         from . import main as _main
         await _main.geo_cache_fill(project_id)
+        await _main.geo_cache_apply_manual(project_id)   # v63: ручні правки понад GeoX/GeoY з 1С
         # v60: решту адрес геокодуємо у фоні — відповідь 1С не чекає
         asyncio.create_task(_main.geocode_missing_bg(project_id))
     except Exception:

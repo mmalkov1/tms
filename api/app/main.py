@@ -167,6 +167,7 @@ async def startup():
     await pool.execute("ALTER TABLE projects ADD COLUMN IF NOT EXISTS warehouse_code_1c TEXT")
     # v60 (migrate_027): оригінальна адреса 1С — стабільний ключ кешу геокодування
     await pool.execute("ALTER TABLE orders ADD COLUMN IF NOT EXISTS address_1c TEXT")
+    await pool.execute("UPDATE orders SET address_1c=address WHERE address_1c IS NULL")
     # v15 (migrate_010): кеш геокодирования — исправленные вручную адреса/координаты переживают реимпорт
     await pool.execute("""
         CREATE TABLE IF NOT EXISTS geo_cache (
@@ -249,6 +250,24 @@ async def geo_cache_put(address: str | None, lat, lon, source: str):
         ON CONFLICT (address_norm) DO UPDATE
             SET lat=EXCLUDED.lat, lon=EXCLUDED.lon, source=EXCLUDED.source, updated_at=now()""",
         key, float(lat), float(lon), source)
+
+
+async def geo_cache_apply_manual(project_id: int) -> int:
+    """v63: ручні виправлення (перетягнутий маркер, ручний геокод) сильніші за
+    координати з 1С — примусово повертаємо їх після кожного імпорту."""
+    res = await pool.execute("""
+        UPDATE orders o SET lat=g.lat, lon=g.lon
+        FROM geo_cache g
+        WHERE o.project_id=$1 AND g.source='manual'
+          AND g.address_norm IN (
+              btrim(lower(regexp_replace(replace(COALESCE(o.address,''), ',', ' '), '\\s+', ' ', 'g'))),
+              btrim(lower(regexp_replace(replace(COALESCE(o.address_1c,''), ',', ' '), '\\s+', ' ', 'g'))))
+          AND (o.lat IS DISTINCT FROM g.lat OR o.lon IS DISTINCT FROM g.lon)""",
+        project_id)
+    try:
+        return int(res.split()[-1])
+    except Exception:
+        return 0
 
 
 async def geo_cache_fill(project_id: int) -> int:
@@ -380,7 +399,8 @@ async def import_excel(plan_date: date = Query(...), file: UploadFile = File(...
                 ON CONFLICT (project_id, doc_number) DO UPDATE SET
                     kind=EXCLUDED.kind, client=EXCLUDED.client, address=EXCLUDED.address,
                     address_1c=EXCLUDED.address_1c,
-                    lat=EXCLUDED.lat, lon=EXCLUDED.lon, tw_from=EXCLUDED.tw_from,
+                    lat=COALESCE(EXCLUDED.lat, orders.lat),
+                    lon=COALESCE(EXCLUDED.lon, orders.lon), tw_from=EXCLUDED.tw_from,
                     tw_to=EXCLUDED.tw_to, weight_kg=EXCLUDED.weight_kg,
                     volume_m3=EXCLUDED.volume_m3, status_1c=EXCLUDED.status_1c
             """, date.fromisoformat(r["plan_date"]), r["doc_number"], r["doc_ref"],
@@ -393,6 +413,7 @@ async def import_excel(plan_date: date = Query(...), file: UploadFile = File(...
                 upd += 1
     # координаты из кеша (исправленные ранее адреса) — до подсчета "без координат"
     await geo_cache_fill(project_id)
+    await geo_cache_apply_manual(project_id)   # v63: ручні правки понад координати імпорту
     asyncio.create_task(geocode_missing_bg(project_id))   # v60: автогеокодинг у фоні
     no_geo = await pool.fetchval(
         "SELECT count(*) FROM orders WHERE project_id=$1 AND lat IS NULL", project_id)

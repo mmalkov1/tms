@@ -14,7 +14,8 @@
           --text:#1D2B3A; --muted:#9A948A; --green:#2E8B57; --amber:#B8860B; }
   * { box-sizing:border-box; margin:0; }
   body { font-family:'Open Sans',system-ui,sans-serif; color:var(--text); background:var(--cream); height:100vh; display:flex; flex-direction:column; }
-  header { background:var(--navy); color:#fff; padding:9px 16px; display:flex; gap:14px; align-items:center; }
+  header { position:relative; z-index:1000; background:var(--navy); color:#fff; padding:9px 16px;
+           display:flex; gap:14px; align-items:center; }
   header h1 { font-size:15px; font-weight:800; display:flex; align-items:center; gap:9px; }
   header input { padding:7px 11px; border:1.5px solid rgba(246,244,245,.28); border-radius:9px; font:inherit; font-size:13px; background:rgba(246,244,245,.14); color:#fff; }
   header input::-webkit-calendar-picker-indicator { filter:invert(1); }
@@ -35,9 +36,9 @@
   .sound-toggle { gap:6px; }
   .sound-toggle > svg { width:17px; height:17px; flex:none; }
   .info-btn { width:24px; height:24px; padding:0; display:inline-flex; align-items:center; justify-content:center;
-              border:1.5px solid rgba(255,255,255,.48); border-radius:50%; background:transparent; color:#fff;
+              border:none; border-radius:50%; background:transparent; color:#fff;
               cursor:pointer; }
-  .info-btn:hover { border-color:#fff; background:rgba(255,255,255,.10); }
+  .info-btn:hover { background:rgba(255,255,255,.10); }
   .info-btn:focus-visible { outline:none; box-shadow:0 0 0 3px rgba(255,255,255,.22); }
   .info-btn svg { width:14px; height:14px; }
   .sound-info { display:none; position:absolute; z-index:100; top:34px; right:0; width:275px;

@@ -443,6 +443,8 @@ async def edit_sheet(sheet_id: int, body: LogistSheetIn):
     sheet = await pool.fetchrow("SELECT * FROM transport_sheets WHERE id=$1", sheet_id)
     if not sheet:
         raise HTTPException(404, "Лист не знайдено")
+    if sheet["status"] == "approved":
+        raise HTTPException(409, "Спочатку скасуйте підтвердження листа")
     reason = (body.reason or "").strip()
     if not reason:
         raise HTTPException(400, "Вкажіть причину зміни")
@@ -487,6 +489,8 @@ async def logist_edit_refuel(sheet_id: int, refuel_id: int, body: RefuelEditIn):
     sheet = await pool.fetchrow("SELECT * FROM transport_sheets WHERE id=$1", sheet_id)
     if not sheet:
         raise HTTPException(404, "Лист не знайдено")
+    if sheet["status"] == "approved":
+        raise HTTPException(409, "Спочатку скасуйте підтвердження листа")
     ref = await pool.fetchrow(
         "SELECT * FROM transport_sheet_refuels WHERE id=$1 AND sheet_id=$2", refuel_id, sheet_id)
     if not ref:
@@ -517,6 +521,8 @@ async def logist_delete_refuel(sheet_id: int, refuel_id: int,
     sheet = await pool.fetchrow("SELECT * FROM transport_sheets WHERE id=$1", sheet_id)
     if not sheet:
         raise HTTPException(404, "Лист не знайдено")
+    if sheet["status"] == "approved":
+        raise HTTPException(409, "Спочатку скасуйте підтвердження листа")
     ref = await pool.fetchrow(
         "SELECT * FROM transport_sheet_refuels WHERE id=$1 AND sheet_id=$2", refuel_id, sheet_id)
     if not ref:
@@ -529,6 +535,36 @@ async def logist_delete_refuel(sheet_id: int, refuel_id: int,
                 VALUES ($1,'logist','Логіст','refuel',$2,NULL,$3)""",
                 sheet_id, str(ref["liters"]), reason.strip())
     await _touch_after_refuel_edit(sheet)
+    return {"ok": True}
+
+
+@router.post("/api/transport-sheets/{sheet_id}/reopen")
+async def reopen_sheet(sheet_id: int):
+    """v67: логіст скасовує останнє підтвердження без втрати введених даних."""
+    async with pool.acquire() as c:
+        async with c.transaction():
+            sheet = await c.fetchrow(
+                "SELECT * FROM transport_sheets WHERE id=$1 FOR UPDATE", sheet_id)
+            if not sheet:
+                raise HTTPException(404, "Лист не знайдено")
+            if sheet["status"] != "approved":
+                raise HTTPException(409, "Лист уже не підтверджений")
+            later = await c.fetchrow("""
+                SELECT work_date FROM transport_sheets
+                WHERE vehicle_id=$1 AND work_date>$2 AND status='approved'
+                ORDER BY work_date DESC LIMIT 1""",
+                sheet["vehicle_id"], sheet["work_date"])
+            if later:
+                raise HTTPException(
+                    409,
+                    f"Спочатку скасуйте підтвердження за {later['work_date'].isoformat()}")
+            await c.execute("""INSERT INTO transport_sheet_changes
+                (sheet_id,actor_role,actor_name,field_name,old_value,new_value)
+                VALUES ($1,'logist','Логіст','status','approved','submitted')""", sheet_id)
+            await c.execute("""UPDATE transport_sheets SET status='submitted',
+                approved_at=NULL,approved_by=NULL,updated_at=now()
+                WHERE id=$1""", sheet_id)
+    await _recalculate(sheet_id)
     return {"ok": True}
 
 

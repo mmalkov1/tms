@@ -45,6 +45,11 @@ tr.gap td{background:#FFF7E6;color:#854F0B;font-size:11px;border-bottom:1px soli
 .status{font-size:10px;font-weight:800;border-radius:999px;padding:3px 8px;background:#e9eff7;color:var(--blue)}
 .status.approved{background:#e1f5ee;color:#087355}.status.revision{background:#fdebec;color:var(--red)}.status.submitted{background:#fff3d9;color:#855f00}
 .actions{display:flex;gap:5px}
+.reopen-btn{width:34px;height:34px;padding:0;display:inline-flex;align-items:center;justify-content:center;
+  border:1.5px solid var(--red);border-radius:9px;background:transparent;color:var(--red);cursor:pointer}
+.reopen-btn:hover{background:#fff0f0}.reopen-btn:focus-visible{outline:none;box-shadow:0 0 0 3px rgba(232,42,44,.18)}
+.reopen-btn svg{width:15px;height:15px}
+.locked-note{margin-top:10px;padding:9px 11px;border-radius:9px;background:#fff3d9;color:#855f00;font-size:11.5px;line-height:1.45}
 .empty{text-align:center;padding:40px;color:var(--muted)}
 dialog{border:0;border-radius:14px;padding:0;width:min(460px,94vw);box-shadow:0 15px 50px rgba(0,20,50,.35)}
 dialog::backdrop{background:rgba(0,20,50,.5)}
@@ -200,38 +205,61 @@ function render(){
       <td><span class="flow">${n(x.opening_balance_l,1)} ${ARROW} <b>${n(x.closing_balance_l,1)}</b></span>${x.opening_balance_l==null?' <span style="color:var(--amber);font-weight:800">немає ланцюжка</span>':''}</td>
       <td><span class="status ${x.status}">${statusName[x.status]||x.status}</span></td>
       <td><div class="actions"><button class="btn light" onclick="openSheet(${x.id})">Відкрити</button>
-      ${x.status!=='approved'?`<button class="btn" onclick="approve(${x.id})">Підтвердити</button>`:''}</div></td></tr>`;
+      ${x.status!=='approved'?`<button class="btn" onclick="approve(${x.id})">Підтвердити</button>`
+        :reopenButton(x.id)}</div></td></tr>`;
     prev=x;
   }
   $('rows').innerHTML=html;
 }
 
 async function openSheet(id){
-  active=await api('/api/transport-sheets/'+id);const changes=active.changes||[];
+  active=await api('/api/transport-sheets/'+id);const changes=active.changes||[],locked=active.status==='approved';
   $('dlgTitle').textContent='Транспортний лист · '+active.work_date;
   const refs=(active.refuels||[]);
   const refRows=refs.length?refs.map(x=>`<div class="refrow" data-rid="${x.id}">
       <span class="rt">${dt(x.refuel_at)}</span>
-      <input inputmode="decimal" value="${x.liters}" data-old="${x.liters}"> л
-      <button class="del" title="Видалити заправку" onclick="delRefuel(${x.id})"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14M10 11v6M14 11v6"/></svg></button>
+      <input inputmode="decimal" value="${x.liters}" data-old="${x.liters}" ${locked?'disabled':''}> л
+      ${locked?'':`<button class="del" title="Видалити заправку" onclick="delRefuel(${x.id})"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14M10 11v6M14 11v6"/></svg></button>`}
     </div>`).join(''):'<div style="font-size:12px;color:var(--muted);padding:4px 0">Заправок не було</div>';
   $('dlgBody').innerHTML=`
     <div class="dgrid">
-      <div class="field"><label>Одометр початок</label><input id="edStart" value="${active.odometer_start??''}"></div>
-      <div class="field"><label>Одометр кінець</label><input id="edEnd" value="${active.odometer_end??''}"></div>
+      <div class="field"><label>Одометр початок</label><input id="edStart" value="${active.odometer_start??''}" ${locked?'disabled':''}></div>
+      <div class="field"><label>Одометр кінець</label><input id="edEnd" value="${active.odometer_end??''}" ${locked?'disabled':''}></div>
       <div class="field"><label>Залишок на початок, л</label><input disabled value="${active.opening_balance_l??'—'}" title="Керується ланцюжком і коригуваннями"></div>
       <div class="field"><label>Заправлено разом, л</label><input disabled value="${active.refueled_l??0}"></div>
     </div>
     <div style="font-size:11px;color:var(--navy);font-weight:700;margin-top:10px">Заправки</div>
     <div id="refList">${refRows}</div>
     <div style="font-size:11px;color:var(--muted);margin-top:6px">Залишок редагується лише через «Скоригувати залишок на дату» — так зберігається ланцюжок.</div>
-    <div class="field" style="margin-top:10px"><label>Причина зміни</label><textarea id="edReason" placeholder="Обов'язково при редагуванні показників або заправок"></textarea></div>
+    ${locked?'<div class="locked-note">Лист підтверджено. Щоб змінити одометр або заправки, спочатку скасуйте підтвердження.</div>'
+      :'<div class="field" style="margin-top:10px"><label>Причина зміни</label><textarea id="edReason" placeholder="Обов&#39;язково при редагуванні показників або заправок"></textarea></div>'}
     <div style="display:flex;gap:8px"><button class="btn light" onclick="dlg.close()">Закрити</button>
-      <button class="btn" onclick="saveEdit()">Зберегти зміни</button>
-      ${active.status!=='approved'?`<button class="btn red" onclick="approve(${id})">Підтвердити</button>`:''}</div>
+      ${locked?reopenButton(id):`<button class="btn" onclick="saveEdit()">Зберегти зміни</button>
+      <button class="btn red" onclick="approve(${id})">Підтвердити</button>`}</div>
     ${active.revision_reason?`<div style="font-size:11px;color:var(--red);margin-top:8px"><b>Причина водія:</b> ${active.revision_reason}</div>`:''}
     <div class="history">${changes.length?changes.map(c=>`<div class="h1"><b>${c.actor_name||c.actor_role}</b> · ${c.field_name}: ${c.old_value||'—'} → ${c.new_value||'—'}<br>${c.reason||''}</div>`).join(''):'Змін ще не було.'}</div>`;
   $('dlg').showModal();
+}
+function reopenButton(id){
+  return `<button class="reopen-btn" onclick="confirmReopen(${id})" title="Скасувати підтвердження" aria-label="Скасувати підтвердження">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
+  </button>`;
+}
+function confirmReopen(id){
+  const x=data.find(s=>s.id===id)||active;
+  $('dlgTitle').textContent='Скасувати підтвердження';
+  $('dlgBody').innerHTML=`<div style="font-size:13px;font-weight:700;color:var(--navy);margin-bottom:9px">${x?.work_date||''} · ${x?.vehicle_name||x?.vehicle||''}</div>
+    <div style="font-size:12.5px;color:var(--muted);line-height:1.55">Показники одометра та заправки не видаляються. Лист повернеться на перевірку та одразу відкриється для редагування.</div>
+    <div style="display:flex;gap:8px;margin-top:14px"><button class="btn light" onclick="dlg.close()">Залишити</button>
+      <button class="btn red" onclick="doReopen(${id})">Скасувати підтвердження</button></div>`;
+  $('dlg').showModal();
+}
+async function doReopen(id){
+  try{
+    await api(`/api/transport-sheets/${id}/reopen`,{method:'POST'});
+    dlg.close();await load();if(vehId)await loadBalance();
+    toast('Підтвердження скасовано');await openSheet(id);
+  }catch(e){toast(e.message)}
 }
 async function delRefuel(rid){
   const reason=($('edReason').value||'').trim();

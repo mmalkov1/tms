@@ -31,6 +31,25 @@
   .sw { width:36px; height:20px; background:rgba(255,255,255,.3); border-radius:99px; position:relative; transition:background .15s; }
   .sw i { position:absolute; left:2px; top:2px; width:16px; height:16px; background:#fff; border-radius:50%; transition:left .15s; box-shadow:0 1px 3px rgba(0,53,107,.25); }
   .trk.on .sw { background:var(--green); } .trk.on .sw i { left:18px; }
+  .sound-wrap { display:flex; align-items:center; gap:5px; position:relative; }
+  .sound-toggle { gap:6px; }
+  .sound-toggle > svg { width:17px; height:17px; flex:none; }
+  .info-btn { width:24px; height:24px; padding:0; display:inline-flex; align-items:center; justify-content:center;
+              border:1.5px solid rgba(255,255,255,.48); border-radius:50%; background:transparent; color:#fff;
+              cursor:pointer; }
+  .info-btn:hover { border-color:#fff; background:rgba(255,255,255,.10); }
+  .info-btn:focus-visible { outline:none; box-shadow:0 0 0 3px rgba(255,255,255,.22); }
+  .info-btn svg { width:14px; height:14px; }
+  .sound-info { display:none; position:absolute; z-index:100; top:34px; right:0; width:275px;
+                padding:11px 13px; border-radius:10px; background:#fff; color:var(--text);
+                box-shadow:0 5px 22px rgba(0,20,50,.28); font-size:12px; line-height:1.45; }
+  .sound-info.open { display:block; }
+  .sound-info b { display:block; color:var(--navy); margin-bottom:5px; }
+  .sound-info div { display:flex; gap:7px; margin:3px 0; }
+  .sound-info div::before { content:''; width:5px; height:5px; margin-top:6px; border-radius:50%;
+                            background:var(--blue); flex:none; }
+  .sound-info small { display:block; color:#5F5E5A; margin-top:7px; padding-top:7px;
+                      border-top:1px solid var(--cream-200); line-height:1.35; }
   #layout { flex:1; display:flex; min-height:0; }
   #map { flex:1; }
   #panel { width:520px; overflow:auto; padding:10px; }
@@ -85,6 +104,27 @@
   </nav>
   <input type="date" id="d">
   <span class="trk" id="trk" onclick="toggleTrack()"><span class="sw"><i></i></span>Показувати трек</span>
+  <div class="sound-wrap">
+    <span class="trk sound-toggle" id="soundToggle" onclick="toggleSound()" role="switch" aria-checked="true" tabindex="0"
+          title="Увімкнути або вимкнути звукові сповіщення">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M5 9v6h4l5 4V5L9 9H5z"/><path d="M17 9.5a4 4 0 0 1 0 5"/><path d="M19.5 7a7.5 7.5 0 0 1 0 10"/>
+      </svg>
+      <span class="sw"><i></i></span>Звук
+    </span>
+    <button class="info-btn" id="soundInfoBtn" onclick="toggleSoundInfo(event)" title="Які звукові сигнали встановлені" aria-label="Опис звукових сигналів">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
+        <circle cx="12" cy="12" r="9"/><path d="M12 11v5"/><path d="M12 8h.01"/>
+      </svg>
+    </button>
+    <div class="sound-info" id="soundInfo">
+      <b>Звукові сповіщення</b>
+      <div>Виїзд зі складу — один короткий сигнал</div>
+      <div>Прибуття на точку — два короткі сигнали</div>
+      <div>Повернення на склад — один довгий сигнал</div>
+      <small>Сигнал лунає лише для нових подій після відкриття сторінки. Після ввімкнення прозвучить тестовий сигнал.</small>
+    </div>
+  </div>
   <span id="status" style="font-size:12px;margin-left:auto"></span>
   <button class="icon-btn" id="bellBtn" onclick="toggleIssues()" title="Повідомлення від водіїв" aria-label="Повідомлення від водіїв" style="position:relative">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -120,6 +160,9 @@ let tracks = {};                                    // route_id -> polyline
 let markers = {};                                   // v41: route-order -> маркер точки
 let focusRoute = null;                              // підсвічений рейс
 let showTrack = localStorage.getItem('tmsTrack') === '1';
+let soundEnabled = localStorage.getItem('tmsSound') !== '0';   // v65: за замовчуванням увімкнено
+let audioCtx = null;
+let knownEventIds = null;                           // null = перше завантаження, без сигналів
 const hm = ts => ts ? new Date(ts).toLocaleTimeString('uk-UA',{hour:'2-digit',minute:'2-digit'}) : '';
 const toMin = s => { if(!s) return null; const [h,m]=String(s).split(':'); return +h*60 + +m; };
 const tsMin = ts => { if(!ts) return null; const t=new Date(ts); return t.getHours()*60+t.getMinutes(); };
@@ -139,6 +182,109 @@ function toggleTrack() {
   $('trk').classList.toggle('on', showTrack);
   if (showTrack) loadTracks(); else { trackLayer.clearLayers(); tracks = {}; }
 }
+
+function ensureAudio() {
+  if (!audioCtx) {
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return null;
+    audioCtx = new AC();
+  }
+  if (audioCtx.state === 'suspended') audioCtx.resume().catch(()=>{});
+  return audioCtx;
+}
+
+function tone(ctx, at, freq, duration) {
+  const osc = ctx.createOscillator();
+  const gain = ctx.createGain();
+  osc.type = 'sine';
+  osc.frequency.setValueAtTime(freq, at);
+  gain.gain.setValueAtTime(.0001, at);
+  gain.gain.exponentialRampToValueAtTime(.075, at + .015);
+  gain.gain.exponentialRampToValueAtTime(.0001, at + duration);
+  osc.connect(gain); gain.connect(ctx.destination);
+  osc.start(at); osc.stop(at + duration + .03);
+}
+
+function playSignal(kind, at) {
+  const ctx = ensureAudio();
+  if (!ctx) return;
+  at = at || ctx.currentTime + .03;
+  if (kind === 'arrive') {
+    tone(ctx, at,       660, .13);
+    tone(ctx, at + .20, 820, .15);
+  } else if (kind === 'finish') {
+    tone(ctx, at, 520, .48);
+  } else {
+    tone(ctx, at, 740, .17);                         // start / тест
+  }
+}
+
+function playNewEvents(events) {
+  if (!soundEnabled || !events.length) return;
+  const ctx = ensureAudio();
+  if (!ctx || ctx.state === 'suspended') return;     // браузер ще не отримав жест користувача
+  events.slice(0, 10).forEach((event, i) =>
+    playSignal(event.kind, ctx.currentTime + .05 + i * .72));
+}
+
+function routeEvents(routes) {
+  const events = [];
+  routes.forEach(rt => {
+    if (rt.start_ts)
+      events.push({id:`route:${rt.route_id}:start:${rt.start_ts}`, kind:'start', ts:rt.start_ts});
+    if (rt.finish_ts)
+      events.push({id:`route:${rt.route_id}:finish:${rt.finish_ts}`, kind:'finish', ts:rt.finish_ts});
+    const stopIds = new Set();                       // v62: група замовлень = один звуковий сигнал
+    rt.stops.forEach(s => {
+      if (!s.arrive_ts) return;
+      const key = `${rt.route_id}|${s.arrive_ts}|${s.client||''}|${s.address||''}`;
+      if (stopIds.has(key)) return;
+      stopIds.add(key);
+      events.push({id:`stop:${key}`, kind:'arrive', ts:s.arrive_ts});
+    });
+  });
+  return events.sort((a,b) => new Date(a.ts) - new Date(b.ts));
+}
+
+function detectNewEvents(routes) {
+  const events = routeEvents(routes);
+  const next = new Set(events.map(e => e.id));
+  if (knownEventIds !== null)
+    playNewEvents(events.filter(e => !knownEventIds.has(e.id)));
+  knownEventIds = next;                              // під час вимкненого звуку старе не накопичується
+}
+
+function renderSoundState() {
+  $('soundToggle').classList.toggle('on', soundEnabled);
+  $('soundToggle').setAttribute('aria-checked', soundEnabled ? 'true' : 'false');
+}
+
+function toggleSound() {
+  soundEnabled = !soundEnabled;
+  localStorage.setItem('tmsSound', soundEnabled ? '1' : '0');
+  renderSoundState();
+  if (soundEnabled) {
+    ensureAudio();
+    playSignal('test');
+  }
+}
+
+function toggleSoundInfo(event) {
+  event.stopPropagation();
+  $('soundInfo').classList.toggle('open');
+}
+
+$('soundToggle').addEventListener('keydown', event => {
+  if (event.key === 'Enter' || event.key === ' ') {
+    event.preventDefault(); toggleSound();
+  }
+});
+document.addEventListener('pointerdown', () => {
+  if (soundEnabled) ensureAudio();                   // дозвіл браузера після першого жесту
+}, {once:true});
+document.addEventListener('click', event => {
+  if (!event.target.closest('.sound-wrap')) $('soundInfo').classList.remove('open');
+});
 
 function focus(rid) {                               // клік по шапці рейсу
   focusRoute = focusRoute === rid ? null : rid;
@@ -215,6 +361,7 @@ function stopInfo(rid, oid) {
 async function load() {
   const r = await fetch(`/api/facts?plan_date=${$('d').value}`);
   const routes = await r.json();
+  detectNewEvents(routes);                          // v65: тільки події після попереднього poll
   _routesData = routes;                             // v51
   layers.clearLayers(); markers = {};
   const pts = [];
@@ -323,8 +470,11 @@ async function load() {
   loadTracks();
   $('status').textContent = 'Оновлено ' + new Date().toLocaleTimeString('uk-UA');
 }
-$('d').addEventListener('change', () => { window._fitted = false; focusRoute = null; load(); });
+$('d').addEventListener('change', () => {
+  window._fitted = false; focusRoute = null; knownEventIds = null; load();
+});
 if (showTrack) $('trk').classList.add('on');
+renderSoundState();
 setInterval(() => { if (!window._movingStop) load(); }, 30000);   // v61: не збивати перетягування
 load();
 </script>

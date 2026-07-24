@@ -164,17 +164,31 @@ async def _recalculate(sheet_id):
                COALESCE((SELECT sum(liters) FROM transport_sheet_refuels x WHERE x.sheet_id=s.id),0) refueled_l
         FROM transport_sheets s LEFT JOIN vehicle_fuel_settings f ON f.vehicle_id=s.vehicle_id
         WHERE s.id=$1""", sheet_id)
+    if not row:
+        raise HTTPException(404, "Лист не знайдено")
     km = None
     if row["odometer_start"] is not None and row["odometer_end"] is not None:
         km = row["odometer_end"] - row["odometer_start"]
         if km < 0:
             raise HTTPException(400, "Кінцевий одометр не може бути меншим за початковий")
     opening = row["opening_balance_l"]
-    if opening is None and row["status"] != "approved":          # v55: самолікування
+    if row["status"] != "approved":                              # v68: завжди звіряти з ланцюжком
         opening = await _derive_opening(row["vehicle_id"], row["work_date"])
+        if opening != row["opening_balance_l"]:
+            await pool.execute("""INSERT INTO transport_sheet_changes
+                (sheet_id,actor_role,actor_name,field_name,old_value,new_value,reason)
+                VALUES ($1,'system','Система','opening_balance_l',$2,$3,
+                        'Автоматичне відновлення паливного ланцюжка')""",
+                sheet_id,
+                str(row["opening_balance_l"]) if row["opening_balance_l"] is not None else None,
+                str(opening) if opening is not None else None)
     used = km * row["rate_l_per_100"] / 100 if km is not None and row["rate_l_per_100"] is not None else None
     closing = (opening + row["refueled_l"] - used
                if opening is not None and used is not None else None)
+    if (opening == row["opening_balance_l"]
+            and used == row["fuel_used_l"]
+            and closing == row["closing_balance_l"]):
+        return row
     return await pool.fetchrow("""
         UPDATE transport_sheets SET opening_balance_l=$1,fuel_used_l=$2,closing_balance_l=$3,updated_at=now()
         WHERE id=$4 RETURNING *""", opening, used, closing, sheet_id)
@@ -375,6 +389,14 @@ async def add_adjustment(body: AdjustmentIn):
     reason = (body.reason or "").strip()
     if not reason:
         raise HTTPException(400, "Вкажіть причину коригування")
+    blocking = await pool.fetchrow("""
+        SELECT work_date FROM transport_sheets
+        WHERE vehicle_id=$1 AND work_date>=$2 AND status='approved'
+        ORDER BY work_date DESC LIMIT 1""", body.vehicle_id, body.adjust_date)
+    if blocking:
+        raise HTTPException(
+            409,
+            f"Спочатку скасуйте підтвердження за {blocking['work_date'].isoformat()}")
     await pool.execute("""INSERT INTO fuel_balance_adjustments
         (vehicle_id,adjust_date,balance_l,reason) VALUES ($1,$2,$3,$4)""",
         body.vehicle_id, body.adjust_date, balance, reason)
@@ -407,6 +429,14 @@ def _sheet_dict(r):
 @router.get("/api/transport-sheets")
 async def list_sheets(date_from: date, date_to: date, driver_ids: str | None = None):
     ids = [int(x) for x in (driver_ids or "").split(",") if x.strip().isdigit()]
+    # v68: самовідновлення відкритих листів після коригування або скасування підтвердження.
+    open_rows = await pool.fetch("""
+        SELECT id FROM transport_sheets
+        WHERE work_date BETWEEN $1 AND $2 AND status<>'approved'
+          AND ($3::int[] IS NULL OR driver_id=ANY($3))""",
+        date_from, date_to, ids or None)
+    for row in open_rows:
+        await _recalculate(row["id"])
     rows = await pool.fetch("""
         SELECT s.*,d.name driver_name,d.code_1c,v.name vehicle_name,v.plate,
                f.rate_l_per_100,COALESCE(sum(rf.liters),0) refueled_l
@@ -564,7 +594,8 @@ async def reopen_sheet(sheet_id: int):
             await c.execute("""UPDATE transport_sheets SET status='submitted',
                 approved_at=NULL,approved_by=NULL,updated_at=now()
                 WHERE id=$1""", sheet_id)
-    await _recalculate(sheet_id)
+    await _recalc_chain(
+        sheet["vehicle_id"], sheet["work_date"], "Скасування підтвердження")
     return {"ok": True}
 
 
@@ -626,6 +657,7 @@ async def export_sheets(date_from: date, date_to: date, driver_ids: str | None =
 
 @router.get("/api/transport-sheets/{sheet_id}")
 async def sheet_detail(sheet_id: int):
+    await _recalculate(sheet_id)                    # v68: актуальний залишок перед відкриттям
     row = await pool.fetchrow("""
         SELECT s.*,d.name driver_name,v.name vehicle_name,v.plate,
                f.rate_l_per_100,COALESCE(sum(rf.liters),0) refueled_l

@@ -422,56 +422,63 @@ async def fuel_balance(vehicle_id: int):
             "adjustments": [dict(a) for a in adjustments]}
 
 
-async def _gps_km_map(date_from: date, date_to: date, ids: list[int] | None):
-    """v69/v70: повний GPS-пробіг за добу (без обрізки геозоною складу).
+async def _day_gps_km(driver_id: int, day: date) -> float | None:
+    """v72: GPS за день = сума рейсів (перевірений _route_worklog, як у План/Факт)
+    + «плечі» поза рейсами (дім→склад, склад→дім, між рейсами).
 
-    Фільтри (підтверджені аналізом треків Базя за 22-25.07):
-      * accuracy <= 20 м — 85% точок і так у цій межі, а мусорні фікси
-        (мережеве позиціювання по вишках) мають accuracy у сотні метрів;
-      * рух: швидкість від FusedLocationProvider >= 3 км/год — інакше на
-        стоянках дрейф координат підсумовувався як пробіг (+50-60% за день);
-      * v71: сегмент відкидається, якщо розрахункова швидкість (відстань/час)
-        або заявлена швидкість перевищує 130 км/год. Саме такі «телепорти»
-        всередині 3 км давали десятки зайвих кілометрів (о 04:00 трек
-        «пролітав» тисячі км при нерухомій машині).
-    Точність методу — близько +-20% від одометра: сирий трек із телефона
-    зрізає повороти й губить ділянки при втраті зв'язку. Колонка інформаційна.
+    Тіло рейсу рахує worklog — той самий алгоритм, що тижнями сходиться у
+    План/Факт (accuracy<=60, сегменти<2 км, кліпінг геозоною складу), тож
+    жорсткі v71-фільтри більше не ріжуть трек «слабших» телефонів. Плечі
+    короткі, для них рух-фільтр: розрахункова швидкість сегмента 5-130 км/год —
+    дрейф нічної стоянки (~3-4 км/год) не проходить, реальна їзда проходить
+    незалежно від того, чи прислав телефон speed_kmh.
     """
-    rows = await pool.fetch("""
-        WITH pts AS (
-            SELECT driver_id,
-                   (ts AT TIME ZONE 'Europe/Kyiv')::date AS day,
-                   lat, lon, speed_kmh, ts,
-                   lag(lat)       OVER w AS plat,
-                   lag(lon)       OVER w AS plon,
-                   lag(speed_kmh) OVER w AS pspeed,
-                   lag(ts)        OVER w AS pts
-            FROM gps_points
-            WHERE ts >= $1::date AND ts < ($2::date + 1)
-              AND ($3::int[] IS NULL OR driver_id = ANY($3))
-              AND accuracy_m IS NOT NULL AND accuracy_m <= 20
-            WINDOW w AS (PARTITION BY driver_id, (ts AT TIME ZONE 'Europe/Kyiv')::date ORDER BY ts)
-        ), seg AS (
-            SELECT driver_id, day, speed_kmh, pspeed,
-                   EXTRACT(epoch FROM ts - pts) AS dt,
-                   CASE WHEN plat IS NULL THEN 0 ELSE
-                        2 * 6371 * asin(sqrt(
-                            power(sin(radians(lat - plat) / 2), 2) +
-                            cos(radians(plat)) * cos(radians(lat)) *
-                            power(sin(radians(lon - plon) / 2), 2)))
-                   END AS km
-            FROM pts
-        )
-        SELECT driver_id, day, round(sum(km)::numeric, 1) AS km
-        FROM seg
-        WHERE km < 3
-          -- рух, а не дрейф на стоянці
-          AND GREATEST(COALESCE(speed_kmh, 0), COALESCE(pspeed, 0)) BETWEEN 3 AND 130
-          -- v71: відкидаємо фізично неможливі стрибки координат
-          AND COALESCE(km / NULLIF(dt, 0) * 3600, 0) <= 130
-        GROUP BY driver_id, day""",
-        date_from, date_to, ids or None)
-    return {(r["driver_id"], r["day"]): float(r["km"] or 0) for r in rows}
+    from . import driver as drv_mod
+    routes = await pool.fetch("""
+        SELECT r.id FROM routes r
+        LEFT JOIN vehicles v ON v.id = r.vehicle_id
+        WHERE r.plan_date = $2 AND COALESCE(r.driver_id, v.driver_id) = $1""",
+        driver_id, day)
+    total, windows, has_route_km = 0.0, [], False
+    for r in routes:
+        try:
+            _st, _fn, _m, km = await drv_mod._route_worklog(r["id"], [driver_id])
+        except Exception:
+            continue
+        if km:
+            total += km
+            has_route_km = True
+        evs = await pool.fetchrow(
+            "SELECT min(ts) FILTER (WHERE event='start') s, "
+            "       max(ts) FILTER (WHERE event='finish') f "
+            "FROM route_events WHERE route_id=$1", r["id"])
+        if evs and evs["s"]:
+            windows.append((evs["s"], evs["f"]))
+
+    pts = await pool.fetch("""
+        SELECT ts, lat, lon FROM gps_points
+        WHERE driver_id = $1
+          AND (ts AT TIME ZONE 'Europe/Kyiv')::date = $2
+          AND (accuracy_m IS NULL OR accuracy_m <= 60)
+        ORDER BY ts""", driver_id, day)
+    if not pts and not has_route_km:
+        return None
+
+    def _in_route(ts):
+        return any(a <= ts <= (b or ts) for a, b in windows)
+
+    legs, prev = 0.0, None
+    for p in pts:
+        if _in_route(p["ts"]):
+            prev = None                      # не «мостити» сегмент крізь рейс
+            continue
+        if prev is not None:
+            seg = drv_mod._haversine_km(prev["lat"], prev["lon"], p["lat"], p["lon"])
+            dt = (p["ts"] - prev["ts"]).total_seconds()
+            if 0 < seg < 2 and dt > 0 and 5 <= (seg / dt * 3600) <= 130:
+                legs += seg
+        prev = p
+    return round(total + legs, 1)
 
 
 def _sheet_dict(r):
@@ -499,11 +506,16 @@ async def list_sheets(date_from: date, date_to: date, driver_ids: str | None = N
         WHERE s.work_date BETWEEN $1 AND $2 AND ($3::int[] IS NULL OR s.driver_id=ANY($3))
         GROUP BY s.id,d.name,d.code_1c,v.name,v.plate,f.rate_l_per_100
         ORDER BY s.work_date DESC,d.name""", date_from, date_to, ids or None)
-    gps = await _gps_km_map(date_from, date_to, ids)          # v69
-    out = []
+    out, gps_cache = [], {}                                   # v72
     for r in rows:
+        key = (r["driver_id"], r["work_date"])
+        if key not in gps_cache:
+            try:
+                gps_cache[key] = await _day_gps_km(*key)
+            except Exception:
+                gps_cache[key] = None
         d = _sheet_dict(r)
-        d["gps_km"] = gps.get((r["driver_id"], r["work_date"]))
+        d["gps_km"] = gps_cache[key]
         out.append(d)
     return out
 

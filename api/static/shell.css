@@ -1,0 +1,60 @@
+/* v69: спільна оболонка — єдина шапка, панель налаштувань, анімація «переїзду».
+   Підключається ПІСЛЯ власного <style> сторінки, щоб перекрити фон активної вкладки. */
+
+/* ---- вкладки з пілюлею, що переїжджає ---- */
+.tabs { position: relative; }
+.tabs .pill {
+  position: absolute; top: 3px; bottom: 3px; left: 0; width: 0;
+  background: #fff; border-radius: 8px; z-index: 0;
+  transition: transform .34s cubic-bezier(.34,.9,.3,1),
+              width     .34s cubic-bezier(.34,.9,.3,1);
+}
+.tabs a { position: relative; z-index: 1; transition: color .22s; }
+.tabs a.on { background: transparent; color: var(--navy); font-weight: 700; }
+
+/* ---- панель налаштувань під шапкою ---- */
+.toolbar {
+  background: #fff; border-bottom: 1px solid var(--c3, #E2DFDA);
+  padding: 9px 16px; display: flex; align-items: center; gap: 9px; flex-wrap: wrap;
+  box-shadow: 0 1px 3px rgba(0,53,107,.06); position: relative; z-index: 5;
+}
+.toolbar .tlabel {
+  font-size: 11px; font-weight: 800; color: #77736D;
+  text-transform: uppercase; letter-spacing: .5px; margin-right: 2px;
+}
+.toolbar .sep { width: 1px; height: 24px; background: var(--c3, #E2DFDA); margin: 0 3px; }
+.toolbar .tspacer { margin-left: auto; font-size: 12px; color: #77736D; }
+.toolbar input[type=date], .toolbar select, .toolbar input[type=number], .toolbar input[type=text] {
+  border: 1.5px solid var(--c3, #E2DFDA); border-radius: 9px; padding: 7px 10px;
+  font: inherit; font-size: 13px; background: #fff; color: var(--text, #1D2B3A);
+}
+.toolbar button {
+  border: 0; border-radius: 9px; padding: 8px 14px;
+  font: 700 13px 'Open Sans', system-ui, sans-serif; cursor: pointer;
+  background: var(--navy, #00356B); color: #fff;
+}
+.toolbar button.light { background: #fff; color: var(--navy, #00356B); border: 1.5px solid var(--c3, #E2DFDA); }
+.toolbar button.red { background: var(--red, #E82A2C); color: #fff; }
+
+/* перемикачі (трек, звук) у світлій панелі */
+.toolbar .trk {
+  display: inline-flex; align-items: center; gap: 7px; font-size: 12.5px;
+  color: var(--text, #1D2B3A); cursor: pointer; background: #fff;
+  border: 1.5px solid var(--c3, #E2DFDA); border-radius: 9px; padding: 6px 11px;
+}
+.toolbar .trk svg { width: 15px; height: 15px; }
+
+/* ---- анімація «переїзду» контенту ---- */
+.shell-inR  { animation: shellInR  .30s cubic-bezier(.22,.61,.36,1); }
+.shell-inL  { animation: shellInL  .30s cubic-bezier(.22,.61,.36,1); }
+.shell-outL { animation: shellOutL .20s cubic-bezier(.5,0,.9,.4) forwards; }
+.shell-outR { animation: shellOutR .20s cubic-bezier(.5,0,.9,.4) forwards; }
+@keyframes shellInR  { from { opacity: 0; transform: translateX(34px);  } to { opacity: 1; transform: none; } }
+@keyframes shellInL  { from { opacity: 0; transform: translateX(-34px); } to { opacity: 1; transform: none; } }
+@keyframes shellOutL { to { opacity: 0; transform: translateX(-26px); } }
+@keyframes shellOutR { to { opacity: 0; transform: translateX(26px);  } }
+
+@media (prefers-reduced-motion: reduce) {
+  .tabs .pill { transition: none; }
+  .shell-inR, .shell-inL, .shell-outL, .shell-outR { animation: none; }
+}

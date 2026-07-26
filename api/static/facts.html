@@ -29,14 +29,14 @@
   .icon-btn:focus-visible { outline:none; border-color:#fff; box-shadow:0 0 0 3px rgba(255,255,255,.22); }
   .icon-btn svg { width:20px; height:20px; }
   .trk { display:flex; align-items:center; gap:7px; font-size:13px; cursor:pointer; user-select:none; }
-  .sw { width:36px; height:20px; background:rgba(255,255,255,.3); border-radius:99px; position:relative; transition:background .15s; }
+  .sw { width:36px; height:20px; background:var(--c3,#E2DFDA); border-radius:99px; position:relative; transition:background .15s; flex:none; }
   .sw i { position:absolute; left:2px; top:2px; width:16px; height:16px; background:#fff; border-radius:50%; transition:left .15s; box-shadow:0 1px 3px rgba(0,53,107,.25); }
   .trk.on .sw { background:var(--green); } .trk.on .sw i { left:18px; }
   .sound-wrap { display:flex; align-items:center; gap:5px; position:relative; }
   .sound-toggle { gap:6px; }
   .sound-toggle > svg { width:17px; height:17px; flex:none; }
   .info-btn { width:24px; height:24px; padding:0; display:inline-flex; align-items:center; justify-content:center;
-              border:none; border-radius:50%; background:transparent; color:#fff;
+              border:none; border-radius:50%; background:transparent; color:var(--navy);
               cursor:pointer; }
   .info-btn:hover { background:rgba(255,255,255,.10); }
   .info-btn:focus-visible { outline:none; box-shadow:0 0 0 3px rgba(255,255,255,.22); }
@@ -94,6 +94,7 @@
   .sd-pf { border-top:1px solid var(--cream-200); margin-top:8px; padding-top:8px;
            display:flex; gap:14px; flex-wrap:wrap; font-size:12px; color:var(--muted); }
 </style>
+<link rel="stylesheet" href="/shell.css">
 </head>
 <body>
 <header>
@@ -103,7 +104,24 @@
     <a class="on">План / Факт</a>
     <a href="/fuel.html">Транспортні листи <span id="fuelNotice" style="display:none;background:var(--red);color:#fff;border-radius:999px;padding:0 5px;font-size:10px"></span></a>
   </nav>
+  <span id="status" style="font-size:12px;margin-left:auto"></span>
+  <button class="icon-btn" id="bellBtn" onclick="toggleIssues()" title="Повідомлення від водіїв" aria-label="Повідомлення від водіїв" style="position:relative">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/>
+    </svg>
+    <span id="bellCnt" style="display:none;position:absolute;top:-4px;right:-4px;background:var(--red);color:#fff;font-size:10px;font-weight:800;border-radius:8px;padding:1px 5px;min-width:16px"></span>
+  </button>
+  <button class="icon-btn" id="gearBtn" onclick="location.href='/index.html?settings=1'" title="Налаштування" aria-label="Відкрити налаштування">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <circle cx="12" cy="12" r="3"/>
+      <path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06-2.83 2.83-.06-.06A1.7 1.7 0 0 0 15 19.4a1.7 1.7 0 0 0-1 .6 1.7 1.7 0 0 0-.4 1.1V21h-4v-.09A1.7 1.7 0 0 0 8.6 19.4a1.7 1.7 0 0 0-1.88.34l-.06.06-2.83-2.83.06-.06A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-.6-1 1.7 1.7 0 0 0-1.1-.4H3v-4h.09A1.7 1.7 0 0 0 4.6 8.6a1.7 1.7 0 0 0-.34-1.88l-.06-.06 2.83-2.83.06.06A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-.6 1.7 1.7 0 0 0 .4-1.1V3h4v.09A1.7 1.7 0 0 0 15.4 4.6a1.7 1.7 0 0 0 1.88-.34l.06-.06 2.83 2.83-.06.06A1.7 1.7 0 0 0 19.4 9c.14.37.35.7.6 1 .3.28.68.42 1.1.4h.09v4h-.09c-.42-.02-.8.12-1.1.4-.25.3-.46.63-.6 1z"/>
+    </svg>
+  </button>
+</header>
+<div class="toolbar">
+  <span class="tlabel">Дата</span>
   <input type="date" id="d">
+  <div class="sep"></div>
   <span class="trk" id="trk" onclick="toggleTrack()"><span class="sw"><i></i></span>Показувати трек</span>
   <div class="sound-wrap">
     <span class="trk sound-toggle" id="soundToggle" onclick="toggleSound()" role="switch" aria-checked="true" tabindex="0"
@@ -126,20 +144,7 @@
       <small>Сигнал лунає лише для нових подій після відкриття сторінки. Після ввімкнення прозвучить тестовий сигнал.</small>
     </div>
   </div>
-  <span id="status" style="font-size:12px;margin-left:auto"></span>
-  <button class="icon-btn" id="bellBtn" onclick="toggleIssues()" title="Повідомлення від водіїв" aria-label="Повідомлення від водіїв" style="position:relative">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-      <path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/>
-    </svg>
-    <span id="bellCnt" style="display:none;position:absolute;top:-4px;right:-4px;background:var(--red);color:#fff;font-size:10px;font-weight:800;border-radius:8px;padding:1px 5px;min-width:16px"></span>
-  </button>
-  <button class="icon-btn" id="gearBtn" onclick="location.href='/index.html?settings=1'" title="Налаштування" aria-label="Відкрити налаштування">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-      <circle cx="12" cy="12" r="3"/>
-      <path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06-2.83 2.83-.06-.06A1.7 1.7 0 0 0 15 19.4a1.7 1.7 0 0 0-1 .6 1.7 1.7 0 0 0-.4 1.1V21h-4v-.09A1.7 1.7 0 0 0 8.6 19.4a1.7 1.7 0 0 0-1.88.34l-.06.06-2.83-2.83.06-.06A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-.6-1 1.7 1.7 0 0 0-1.1-.4H3v-4h.09A1.7 1.7 0 0 0 4.6 8.6a1.7 1.7 0 0 0-.34-1.88l-.06-.06 2.83-2.83.06.06A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-.6 1.7 1.7 0 0 0 .4-1.1V3h4v.09A1.7 1.7 0 0 0 15.4 4.6a1.7 1.7 0 0 0 1.88-.34l.06-.06 2.83 2.83-.06.06A1.7 1.7 0 0 0 19.4 9c.14.37.35.7.6 1 .3.28.68.42 1.1.4h.09v4h-.09c-.42-.02-.8.12-1.1.4-.25.3-.46.63-.6 1z"/>
-    </svg>
-  </button>
-</header>
+</div>
 <script>
 fetch('/api/transport-sheets/notifications/count').then(r=>r.json()).then(j=>{
   const b=document.getElementById('fuelNotice'); if(b&&j.count){b.textContent=j.count;b.style.display='inline'}
@@ -532,5 +537,6 @@ document.addEventListener('click', e => {
 setInterval(pollIssues, 30000);
 pollIssues();
 </script>
+<script src="/shell.js"></script>
 </body>
 </html>

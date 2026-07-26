@@ -61,9 +61,9 @@ dialog::backdrop{background:rgba(0,20,50,.5)}
 #toast{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);background:var(--navy);color:#fff;padding:10px 16px;border-radius:10px;display:none;z-index:50}
 /* v56: дропдаун водіїв у шапці */
 .ddwrap{position:relative}
-.ddbtn{display:flex;align-items:center;gap:7px;padding:7px 11px;border-radius:8px;border:1px solid rgba(255,255,255,.3);background:rgba(255,255,255,.12);color:#fff;font:600 12px 'Open Sans';cursor:pointer;max-width:210px}
+.ddbtn{display:flex;align-items:center;gap:7px;padding:7px 11px;border-radius:9px;border:1.5px solid var(--c3);background:#fff;color:var(--navy);font:700 13px 'Open Sans';cursor:pointer;max-width:230px}
 .ddbtn span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.ddbtn:hover{background:rgba(255,255,255,.2)}
+.ddbtn:hover{border-color:var(--navy)}
 .ddpop{display:none;position:absolute;top:calc(100% + 6px);left:0;z-index:40;background:#fff;color:var(--text);border-radius:11px;box-shadow:0 10px 34px rgba(0,20,50,.28);padding:8px;min-width:220px;max-height:280px;overflow:auto}
 .ddpop.open{display:block}
 .ddpop label{display:flex;align-items:center;gap:8px;padding:7px 9px;border-radius:8px;font-size:13px;cursor:pointer}
@@ -75,19 +75,26 @@ dialog::backdrop{background:rgba(0,20,50,.5)}
 .refrow input{border:1.5px solid var(--c3);border-radius:8px;padding:6px 8px;font:inherit;font-size:12.5px;width:90px}
 .refrow .del{border:1.5px solid var(--c3);background:#fff;color:var(--red);border-radius:8px;width:30px;height:30px;display:flex;align-items:center;justify-content:center;cursor:pointer;flex:none}
 .refrow .del:hover{border-color:var(--red)}
-</style></head><body>
+</style>
+<link rel="stylesheet" href="/shell.css"></head><body>
 <header><h1>TMS</h1><nav class="tabs"><a href="/index.html">Планування</a><a href="/facts.html">План / Факт</a><a class="on">Транспортні листи</a></nav>
-<input type="date" id="from"><input type="date" id="to">
-<div class="ddwrap" id="ddwrap">
-  <button class="ddbtn" id="ddbtn" onclick="toggleDd(event)">
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
-    <span id="ddlabel">Водії</span>
-    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M6 9l6 6 6-6"/></svg>
-  </button>
-  <div class="ddpop" id="ddpop"></div>
-</div>
-<button class="btn light" onclick="load()">Оновити</button><button class="btn red" onclick="exportXlsx()">Excel</button>
 <span id="stat" style="margin-left:auto;font-size:11px"></span></header>
+<div class="toolbar">
+  <span class="tlabel">Період</span>
+  <input type="date" id="from"><input type="date" id="to">
+  <div class="sep"></div>
+  <span class="tlabel">Водій</span>
+  <div class="ddwrap" id="ddwrap">
+    <button class="ddbtn" id="ddbtn" onclick="toggleDd(event)">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+      <span id="ddlabel">Водій</span>
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M6 9l6 6 6-6"/></svg>
+    </button>
+    <div class="ddpop" id="ddpop"></div>
+  </div>
+  <div class="sep"></div>
+  <button class="btn light" onclick="load()">Оновити</button><button class="btn red" onclick="exportXlsx()">Excel</button>
+</div>
 <main>
 <div class="grid2">
   <section class="card" id="carCard">
@@ -99,8 +106,8 @@ dialog::backdrop{background:rgba(0,20,50,.5)}
     <div id="balBody" style="font-size:12px;color:var(--muted);margin-top:8px">Завантаження…</div>
   </section>
 </div>
-<section class="tablebox"><table><thead><tr><th>Дата</th><th>Автомобіль</th><th>Водій</th><th>Одометр</th><th>Пробіг</th><th>Заправлено</th><th>Норма</th><th>Витрата</th><th>Залишок поч → кін</th><th>Статус</th><th></th></tr></thead>
-<tbody id="rows"><tr><td colspan="11" class="empty">Завантаження…</td></tr></tbody></table></section>
+<section class="tablebox"><table><thead><tr><th>Дата</th><th>Автомобіль</th><th>Водій</th><th>Одометр</th><th>Пробіг</th><th title="Повний GPS-трек за добу — інформаційно">GPS за день</th><th>Заправлено</th><th>Норма</th><th>Витрата</th><th>Залишок поч → кін</th><th>Статус</th><th></th></tr></thead>
+<tbody id="rows"><tr><td colspan="12" class="empty">Завантаження…</td></tr></tbody></table></section>
 </main>
 <dialog id="dlg"><div class="dh"><span id="dlgTitle">Транспортний лист</span><span onclick="dlg.close()" style="cursor:pointer">×</span></div><div class="db" id="dlgBody"></div></dialog>
 <div id="toast"></div>
@@ -116,19 +123,23 @@ async function api(url,opt){const r=await fetch(url,opt),j=await r.json().catch(
 
 async function loadMeta(){
   meta=await api('/api/transport-sheets/meta');
-  $('ddpop').innerHTML=meta.drivers.map(x=>`<label><input type="checkbox" value="${x.driver_id}" checked onchange="ddChanged()">${x.name}</label>`).join('')
+  // v69: рівно один водій; вибір пам'ятається між сесіями
+  const saved=localStorage.getItem('tmsFuelDriver');
+  const known=meta.drivers.some(x=>String(x.driver_id)===saved);
+  const pick=known?saved:(meta.drivers[0]?String(meta.drivers[0].driver_id):null);
+  $('ddpop').innerHTML=meta.drivers.map(x=>`<label><input type="radio" name="fuelDrv" value="${x.driver_id}"${String(x.driver_id)===pick?' checked':''} onchange="ddChanged()">${x.name}</label>`).join('')
     ||'<div style="padding:8px;font-size:12px;color:var(--muted)">Немає водіїв із закріпленим авто</div>';
   ddChanged(false);
 }
 // v57: картки показують авто ОДНОГО вибраного водія
 function renderCards(){
-  const ids=selected().split(',').filter(Boolean);
-  const m=ids.length===1?meta.drivers.find(x=>String(x.driver_id)===ids[0]):null;
+  const id=selected();
+  const m=id?meta.drivers.find(x=>String(x.driver_id)===id):null;
   if(!m){
     vehId=null;
-    const hint=meta.drivers.length?'Оберіть одного водія у списку зверху, щоб керувати нормою і паливним балансом його авто.':'Немає водіїв із закріпленим авто';
+    const hint=meta.drivers.length?'Оберіть водія у панелі зверху.':'Немає водіїв із закріпленим авто';
     $('carBody').innerHTML=`<div style="font-size:12.5px;color:var(--muted);padding:6px 0">${hint}</div>`;
-    $('balBody').innerHTML=`<div style="font-size:12.5px;color:var(--muted);padding:6px 0">${meta.drivers.length?'Баланс показується для одного вибраного водія.':'—'}</div>`;
+    $('balBody').innerHTML=`<div style="font-size:12.5px;color:var(--muted);padding:6px 0">${meta.drivers.length?'Оберіть водія, щоб побачити баланс.':'—'}</div>`;
     return;
   }
   vehId=m.vehicle_id;
@@ -173,12 +184,12 @@ async function saveAdjust(){
     dlg.close();toast('Коригування застосовано, ланцюжок перераховано');await load();await loadBalance()}catch(e){toast(e.message)}
 }
 
-function selected(){return [...document.querySelectorAll('#ddpop input:checked')].map(o=>o.value).join(',')}
+function selected(){const o=document.querySelector('#ddpop input:checked');return o?o.value:''}
 function ddChanged(reload=true){
-  const all=[...document.querySelectorAll('#ddpop input')],sel=all.filter(x=>x.checked);
-  $('ddlabel').textContent=!all.length?'Водії':sel.length===0?'Водії: нікого'
-    :sel.length===1?sel[0].parentElement.textContent.trim()
-    :sel.length===all.length?`Всі водії (${all.length})`:`Водії: ${sel.length}`;
+  const sel=document.querySelector('#ddpop input:checked');
+  $('ddlabel').textContent=sel?sel.parentElement.textContent.trim():'Немає водіїв';
+  if(sel)localStorage.setItem('tmsFuelDriver',sel.value);   // v69: пам'ять вибору
+  $('ddpop').classList.remove('open');
   if(meta)renderCards();                 // v57: картки слідують за вибором
   if(reload)load();
 }
@@ -188,20 +199,30 @@ async function load(){try{
   data=await api(`/api/transport-sheets?date_from=${$('from').value}&date_to=${$('to').value}&driver_ids=${selected()}`);
   $('stat').textContent=`${data.length} листів`;render()}catch(e){toast(e.message)}}
 
+// v69: GPS за добу + позначка розбіжності з одометром понад 15%
+function gpsCell(x,km){
+  if(x.gps_km==null) return '<span style="color:var(--muted)">—</span>';
+  let mark='';
+  if(km!=null&&km>0){
+    const d=Math.round((x.gps_km-km)/km*100);
+    if(Math.abs(d)>15) mark=` <span style="font-size:10.5px;font-weight:800;color:var(--amber)" title="Розбіжність із одометром">${d>0?'+':''}${d}%</span>`;
+  }
+  return `<b>${n(x.gps_km,1)}</b>${mark}`;
+}
 function render(){
-  if(!data.length){$('rows').innerHTML='<tr><td colspan="11" class="empty">За вибраний період листів немає. Відкрийте кабінет водія, щоб створити перший.</td></tr>';return}
+  if(!data.length){$('rows').innerHTML='<tr><td colspan="12" class="empty">За вибраний період листів немає. Відкрийте кабінет водія, щоб створити перший.</td></tr>';return}
   const asc=[...data].sort((a,b)=>a.work_date<b.work_date?-1:1);
   let html='',prev=null;
   for(const x of asc){
     if(prev){
       const d1=new Date(prev.work_date),d2=new Date(x.work_date),gap=Math.round((d2-d1)/86400000)-1;
-      if(gap>0)html+=`<tr class="gap"><td colspan="11">${gap===1?'1 день без листа':gap+' дн. без листів'} — залишок ${n(prev.closing_balance_l,1)} л переноситься без розриву</td></tr>`;
+      if(gap>0)html+=`<tr class="gap"><td colspan="12">${gap===1?'1 день без листа':gap+' дн. без листів'} — залишок ${n(prev.closing_balance_l,1)} л переноситься без розриву</td></tr>`;
     }
     const km=x.odometer_start!=null&&x.odometer_end!=null?x.odometer_end-x.odometer_start:null;
     html+=`<tr class="${x.status}">
       <td><b>${x.work_date}</b></td><td>${x.vehicle_name}</td><td>${x.driver_name}</td>
       <td style="color:#4d5866">${n(x.odometer_start)} → <b style="color:var(--text)">${n(x.odometer_end)}</b></td>
-      <td><b>${n(km)}</b></td><td>${n(x.refueled_l,2)}</td><td>${n(x.rate_l_per_100,2)}</td><td>${n(x.fuel_used_l,2)}</td>
+      <td><b>${n(km)}</b></td><td>${gpsCell(x,km)}</td><td>${n(x.refueled_l,2)}</td><td>${n(x.rate_l_per_100,2)}</td><td>${n(x.fuel_used_l,2)}</td>
       <td><span class="flow">${n(x.opening_balance_l,1)} ${ARROW} <b>${n(x.closing_balance_l,1)}</b></span>${x.opening_balance_l==null?' <span style="color:var(--amber);font-weight:800">немає ланцюжка</span>':''}</td>
       <td><span class="status ${x.status}">${statusName[x.status]||x.status}</span></td>
       <td><div class="actions"><button class="btn light" onclick="openSheet(${x.id})">Відкрити</button>
@@ -295,4 +316,5 @@ async function approve(id){
 }
 function exportXlsx(){location.href=`/api/transport-sheets/export.xlsx?date_from=${$('from').value}&date_to=${$('to').value}&driver_ids=${selected()}&approved_only=true`}
 (async()=>{await loadMeta();await load()})();
-</script></body></html>
+</script><script src="/shell.js"></script>
+</body></html>

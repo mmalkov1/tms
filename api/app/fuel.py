@@ -422,6 +422,40 @@ async def fuel_balance(vehicle_id: int):
             "adjustments": [dict(a) for a in adjustments]}
 
 
+async def _gps_km_map(date_from: date, date_to: date, ids: list[int] | None):
+    """v69: повний GPS-пробіг за добу (без обрізки геозоною складу).
+
+    Пороги ті самі, що й у фактичному пробігу рейсу: accuracy <= 60 м,
+    сегменти довші за 2 км вважаємо телепортами від збоїв GPS.
+    """
+    rows = await pool.fetch("""
+        WITH pts AS (
+            SELECT driver_id,
+                   (ts AT TIME ZONE 'Europe/Kyiv')::date AS day,
+                   lat, lon,
+                   lag(lat) OVER w AS plat,
+                   lag(lon) OVER w AS plon
+            FROM gps_points
+            WHERE ts >= $1::date AND ts < ($2::date + 1)
+              AND ($3::int[] IS NULL OR driver_id = ANY($3))
+              AND (accuracy_m IS NULL OR accuracy_m <= 60)
+            WINDOW w AS (PARTITION BY driver_id, (ts AT TIME ZONE 'Europe/Kyiv')::date ORDER BY ts)
+        ), seg AS (
+            SELECT driver_id, day,
+                   CASE WHEN plat IS NULL THEN 0 ELSE
+                        2 * 6371 * asin(sqrt(
+                            power(sin(radians(lat - plat) / 2), 2) +
+                            cos(radians(plat)) * cos(radians(lat)) *
+                            power(sin(radians(lon - plon) / 2), 2)))
+                   END AS km
+            FROM pts
+        )
+        SELECT driver_id, day, round(sum(km)::numeric, 1) AS km
+        FROM seg WHERE km < 2 GROUP BY driver_id, day""",
+        date_from, date_to, ids or None)
+    return {(r["driver_id"], r["day"]): float(r["km"] or 0) for r in rows}
+
+
 def _sheet_dict(r):
     return {k: r[k] for k in r.keys()}
 
@@ -447,7 +481,13 @@ async def list_sheets(date_from: date, date_to: date, driver_ids: str | None = N
         WHERE s.work_date BETWEEN $1 AND $2 AND ($3::int[] IS NULL OR s.driver_id=ANY($3))
         GROUP BY s.id,d.name,d.code_1c,v.name,v.plate,f.rate_l_per_100
         ORDER BY s.work_date DESC,d.name""", date_from, date_to, ids or None)
-    return [_sheet_dict(r) for r in rows]
+    gps = await _gps_km_map(date_from, date_to, ids)          # v69
+    out = []
+    for r in rows:
+        d = _sheet_dict(r)
+        d["gps_km"] = gps.get((r["driver_id"], r["work_date"]))
+        out.append(d)
+    return out
 
 
 @router.get("/api/transport-sheets/meta")

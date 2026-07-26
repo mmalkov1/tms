@@ -141,7 +141,8 @@ async def _route_autoclose_loop():
 async def no_html_cache(request, call_next):
     """v29: HTML завжди свіжий — деплой видно без Ctrl+Shift+R, незалежно від проксі."""
     resp = await call_next(request)
-    if request.url.path == "/" or request.url.path.endswith(".html"):
+    p = request.url.path
+    if p == "/" or p.endswith(".html") or p in ("/shell.css", "/shell.js"):   # v69
         resp.headers["Cache-Control"] = "no-cache"
     return resp
 pool: asyncpg.Pool = None

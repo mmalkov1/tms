@@ -423,25 +423,29 @@ async def fuel_balance(vehicle_id: int):
 
 
 async def _gps_km_map(date_from: date, date_to: date, ids: list[int] | None):
-    """v69: повний GPS-пробіг за добу (без обрізки геозоною складу).
+    """v69/v70: повний GPS-пробіг за добу (без обрізки геозоною складу).
 
-    Пороги ті самі, що й у фактичному пробігу рейсу: accuracy <= 60 м,
-    сегменти довші за 2 км вважаємо телепортами від збоїв GPS.
+    v70: телефон шле точку кожні 10-15 с, тож на стоянках координати «пливуть»
+    у межах точності — раніше цей дрейф підсумовувався як пробіг (+50-60% за день).
+    Тепер рухом вважаємо лише сегменти, де швидшість від FusedLocationProvider
+    >= 3 км/год; якщо швидкість невідома — запасний поріг 30 м на сегмент.
+    Телепорти від збоїв GPS (> 2 км між сусідніми точками) не рахуємо, як і раніше.
     """
     rows = await pool.fetch("""
         WITH pts AS (
             SELECT driver_id,
                    (ts AT TIME ZONE 'Europe/Kyiv')::date AS day,
-                   lat, lon,
-                   lag(lat) OVER w AS plat,
-                   lag(lon) OVER w AS plon
+                   lat, lon, speed_kmh,
+                   lag(lat)       OVER w AS plat,
+                   lag(lon)       OVER w AS plon,
+                   lag(speed_kmh) OVER w AS pspeed
             FROM gps_points
             WHERE ts >= $1::date AND ts < ($2::date + 1)
               AND ($3::int[] IS NULL OR driver_id = ANY($3))
               AND (accuracy_m IS NULL OR accuracy_m <= 60)
             WINDOW w AS (PARTITION BY driver_id, (ts AT TIME ZONE 'Europe/Kyiv')::date ORDER BY ts)
         ), seg AS (
-            SELECT driver_id, day,
+            SELECT driver_id, day, speed_kmh, pspeed,
                    CASE WHEN plat IS NULL THEN 0 ELSE
                         2 * 6371 * asin(sqrt(
                             power(sin(radians(lat - plat) / 2), 2) +
@@ -451,7 +455,14 @@ async def _gps_km_map(date_from: date, date_to: date, ids: list[int] | None):
             FROM pts
         )
         SELECT driver_id, day, round(sum(km)::numeric, 1) AS km
-        FROM seg WHERE km < 2 GROUP BY driver_id, day""",
+        FROM seg
+        WHERE km < 2
+          AND CASE
+                WHEN speed_kmh IS NOT NULL OR pspeed IS NOT NULL
+                    THEN GREATEST(COALESCE(speed_kmh, 0), COALESCE(pspeed, 0)) >= 3
+                ELSE km >= 0.03
+              END
+        GROUP BY driver_id, day""",
         date_from, date_to, ids or None)
     return {(r["driver_id"], r["day"]): float(r["km"] or 0) for r in rows}
 

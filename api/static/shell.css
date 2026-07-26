@@ -16,7 +16,7 @@
 .toolbar {
   background: #fff; border-bottom: 1px solid var(--c3, #E2DFDA);
   padding: 9px 16px; display: flex; align-items: center; gap: 9px; flex-wrap: wrap;
-  box-shadow: 0 1px 3px rgba(0,53,107,.06); position: relative; z-index: 5;
+  box-shadow: 0 1px 3px rgba(0,53,107,.06); position: relative; z-index: 900;
 }
 .toolbar .tlabel {
   font-size: 11px; font-weight: 800; color: #77736D;
@@ -28,13 +28,13 @@
   border: 1.5px solid var(--c3, #E2DFDA); border-radius: 9px; padding: 7px 10px;
   font: inherit; font-size: 13px; background: #fff; color: var(--text, #1D2B3A);
 }
-.toolbar button {
+.toolbar > button {
   border: 0; border-radius: 9px; padding: 8px 14px;
   font: 700 13px 'Open Sans', system-ui, sans-serif; cursor: pointer;
   background: var(--navy, #00356B); color: #fff;
 }
-.toolbar button.light { background: #fff; color: var(--navy, #00356B); border: 1.5px solid var(--c3, #E2DFDA); }
-.toolbar button.red { background: var(--red, #E82A2C); color: #fff; }
+.toolbar > button.light { background: #fff; color: var(--navy, #00356B); border: 1.5px solid var(--c3, #E2DFDA); }
+.toolbar > button.red { background: var(--red, #E82A2C); color: #fff; }
 
 /* перемикачі (трек, звук) у світлій панелі */
 .toolbar .trk {

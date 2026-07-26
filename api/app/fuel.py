@@ -425,27 +425,35 @@ async def fuel_balance(vehicle_id: int):
 async def _gps_km_map(date_from: date, date_to: date, ids: list[int] | None):
     """v69/v70: повний GPS-пробіг за добу (без обрізки геозоною складу).
 
-    v70: телефон шле точку кожні 10-15 с, тож на стоянках координати «пливуть»
-    у межах точності — раніше цей дрейф підсумовувався як пробіг (+50-60% за день).
-    Тепер рухом вважаємо лише сегменти, де швидшість від FusedLocationProvider
-    >= 3 км/год; якщо швидкість невідома — запасний поріг 30 м на сегмент.
-    Телепорти від збоїв GPS (> 2 км між сусідніми точками) не рахуємо, як і раніше.
+    Фільтри (підтверджені аналізом треків Базя за 22-25.07):
+      * accuracy <= 20 м — 85% точок і так у цій межі, а мусорні фікси
+        (мережеве позиціювання по вишках) мають accuracy у сотні метрів;
+      * рух: швидкість від FusedLocationProvider >= 3 км/год — інакше на
+        стоянках дрейф координат підсумовувався як пробіг (+50-60% за день);
+      * v71: сегмент відкидається, якщо розрахункова швидкість (відстань/час)
+        або заявлена швидкість перевищує 130 км/год. Саме такі «телепорти»
+        всередині 3 км давали десятки зайвих кілометрів (о 04:00 трек
+        «пролітав» тисячі км при нерухомій машині).
+    Точність методу — близько +-20% від одометра: сирий трек із телефона
+    зрізає повороти й губить ділянки при втраті зв'язку. Колонка інформаційна.
     """
     rows = await pool.fetch("""
         WITH pts AS (
             SELECT driver_id,
                    (ts AT TIME ZONE 'Europe/Kyiv')::date AS day,
-                   lat, lon, speed_kmh,
+                   lat, lon, speed_kmh, ts,
                    lag(lat)       OVER w AS plat,
                    lag(lon)       OVER w AS plon,
-                   lag(speed_kmh) OVER w AS pspeed
+                   lag(speed_kmh) OVER w AS pspeed,
+                   lag(ts)        OVER w AS pts
             FROM gps_points
             WHERE ts >= $1::date AND ts < ($2::date + 1)
               AND ($3::int[] IS NULL OR driver_id = ANY($3))
-              AND (accuracy_m IS NULL OR accuracy_m <= 60)
+              AND accuracy_m IS NOT NULL AND accuracy_m <= 20
             WINDOW w AS (PARTITION BY driver_id, (ts AT TIME ZONE 'Europe/Kyiv')::date ORDER BY ts)
         ), seg AS (
             SELECT driver_id, day, speed_kmh, pspeed,
+                   EXTRACT(epoch FROM ts - pts) AS dt,
                    CASE WHEN plat IS NULL THEN 0 ELSE
                         2 * 6371 * asin(sqrt(
                             power(sin(radians(lat - plat) / 2), 2) +
@@ -456,12 +464,11 @@ async def _gps_km_map(date_from: date, date_to: date, ids: list[int] | None):
         )
         SELECT driver_id, day, round(sum(km)::numeric, 1) AS km
         FROM seg
-        WHERE km < 2
-          AND CASE
-                WHEN speed_kmh IS NOT NULL OR pspeed IS NOT NULL
-                    THEN GREATEST(COALESCE(speed_kmh, 0), COALESCE(pspeed, 0)) >= 3
-                ELSE km >= 0.03
-              END
+        WHERE km < 3
+          -- рух, а не дрейф на стоянці
+          AND GREATEST(COALESCE(speed_kmh, 0), COALESCE(pspeed, 0)) BETWEEN 3 AND 130
+          -- v71: відкидаємо фізично неможливі стрибки координат
+          AND COALESCE(km / NULLIF(dt, 0) * 3600, 0) <= 130
         GROUP BY driver_id, day""",
         date_from, date_to, ids or None)
     return {(r["driver_id"], r["day"]): float(r["km"] or 0) for r in rows}

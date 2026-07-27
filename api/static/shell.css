@@ -58,3 +58,53 @@
   .tabs .pill { transition: none; }
   .shell-inR, .shell-inL, .shell-outL, .shell-outR { animation: none; }
 }
+
+/* ---- v75: пошук на карті ---- */
+.msearch { position: absolute; left: 50px; top: 11px; z-index: 900; font-size: 13px;
+           font-family: 'Open Sans', system-ui, sans-serif; }
+.msearch .ms-btn { width: 34px; height: 34px; border-radius: 9px; background: #fff; border: 0;
+                   display: flex; align-items: center; justify-content: center;
+                   color: var(--navy, #00356B); cursor: pointer;
+                   box-shadow: 0 2px 8px rgba(0,20,50,.25); }
+.msearch .ms-btn:hover { background: #F3F1EF; }
+.msearch.open .ms-btn { display: none; }
+.msearch .ms-box { display: none; background: #fff; border-radius: 11px;
+                   box-shadow: 0 6px 26px rgba(0,20,50,.3); width: 330px; overflow: hidden; }
+.msearch.open .ms-box { display: block; }
+.msearch .ms-in { display: flex; align-items: center; gap: 8px; padding: 9px 11px;
+                  border-bottom: 1px solid var(--c2, #EFEEEC); }
+.msearch .ms-in > svg { color: #77736D; flex: none; }
+.msearch .ms-in input { border: 0; outline: 0; font: inherit; font-size: 13.5px; flex: 1;
+                        min-width: 0; color: var(--text, #1D2B3A); background: transparent; }
+.msearch .ms-x { border: 0; background: transparent; color: #77736D; cursor: pointer;
+                 font-size: 18px; line-height: 1; padding: 0 2px; }
+.msearch .ms-res { max-height: 250px; overflow: auto; }
+.msearch .ms-row { display: flex; align-items: center; gap: 9px; padding: 9px 11px;
+                   cursor: pointer; border-bottom: 1px solid var(--c2, #EFEEEC); }
+.msearch .ms-row:hover { background: var(--c2, #EFEEEC); }
+.msearch .ms-row:last-child { border-bottom: 0; }
+.msearch .ms-seq { width: 22px; height: 22px; border-radius: 50%; background: var(--navy, #00356B);
+                   color: #fff; font-size: 11px; font-weight: 800; display: flex;
+                   align-items: center; justify-content: center; flex: none; }
+.msearch .ms-main { flex: 1; min-width: 0; }
+.msearch .ms-main b { display: block; font-size: 12.5px; color: var(--navy, #00356B);
+                      white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.msearch .ms-main > span { display: block; font-size: 11.5px; color: #77736D;
+                           white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.msearch .ms-tag { font-size: 10px; font-weight: 800; padding: 2px 7px; border-radius: 999px; flex: none; }
+.msearch .ms-hint { padding: 10px 12px; font-size: 11.5px; color: #77736D; line-height: 1.6; }
+.msearch .ms-hint code { background: var(--c2, #EFEEEC); border-radius: 4px; padding: 1px 5px; font-size: 11px; }
+.msearch .ms-act { display: flex; align-items: center; gap: 9px; padding: 10px 11px;
+                   cursor: pointer; background: #F7FAFF; }
+.msearch .ms-act:hover { background: #EEF4FC; }
+.msearch .ms-act > svg { color: var(--navy, #00356B); flex: none; }
+.msearch .ms-act b { font-size: 12.5px; color: var(--navy, #00356B); display: block; }
+.msearch .ms-act span span { font-size: 11.5px; color: #77736D; }
+.msearch .ms-found { padding: 10px 12px; background: #E1F5EE; border-top: 1px solid #b9e3d3; }
+.msearch .ms-found b { font-size: 12.5px; color: #085041; display: block; }
+.msearch .ms-found span { font-size: 11.5px; color: #0b6b52; }
+.ms-tmp { text-align: center; }
+.ms-tmp span { display: inline-block; background: var(--navy, #00356B); color: #fff; font-size: 11px;
+               font-weight: 700; border-radius: 6px; padding: 3px 8px; white-space: nowrap;
+               box-shadow: 0 2px 8px rgba(0,20,50,.35); margin-bottom: 2px;
+               font-family: 'Open Sans', system-ui, sans-serif; }

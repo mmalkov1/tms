@@ -481,6 +481,22 @@ $('d').addEventListener('change', () => {
 });
 if (showTrack) $('trk').classList.add('on');
 renderSoundState();
+// v75: пошук на карті — точки всіх рейсів дня
+MapSearch.init({
+  map,
+  getItems(){
+    const out=[];
+    (_routesData||[]).forEach(rt=>{
+      (rt.stops||[]).forEach(st=>{
+        out.push({client:st.client, address:st.address, doc:st.doc_number, seq:st.seq,
+          label:rt.vehicle, color:rt.color, lat:st.lat, lon:st.lon,
+          pick(){ focusStop(rt.route_id, st.order_id); }});
+      });
+    });
+    return out;
+  }
+});
+
 setInterval(() => { if (!window._movingStop) load(); }, 30000);   // v61: не збивати перетягування
 load();
 </script>
@@ -537,6 +553,7 @@ document.addEventListener('click', e => {
 setInterval(pollIssues, 30000);
 pollIssues();
 </script>
+<script src="/mapsearch.js"></script>
 <script src="/shell.js"></script>
 </body>
 </html>

@@ -1385,6 +1385,7 @@ async function loadAll() {
   ]);
 
   window._routes = routes;                        // v51: для діалогу старт/фініш
+  window._orders = orders;                        // v75: джерело для пошуку на карті
   const routed = new Set(routes.flatMap(r => r.stops.map(s => s.order_id)));
   orders.forEach(o => {
     if (!o.lat || routed.has(o.id)) return;
@@ -1570,9 +1571,33 @@ document.addEventListener('click', e => {
   if (p.style.display !== 'none' && !p.contains(e.target) && !e.target.closest('#bellBtn'))
     p.style.display = 'none';
 });
+// v75: пошук на карті — точки рейсів + буфер
+MapSearch.init({
+  map,
+  getItems(){
+    const out=[];
+    (window._routes||[]).forEach((r,ri)=>{
+      (r.stops||[]).forEach(st=>{
+        out.push({client:st.client, address:st.address, doc:st.doc_number,
+          seq:st.seq, label:`Рейс ${ri+1}`, color:r.color, lat:st.lat, lon:st.lon,
+          pick(){ highlightPoint(st.lat, st.lon, st.client); }});
+      });
+    });
+    const routed=new Set((window._routes||[]).flatMap(r=>(r.stops||[]).map(s=>s.order_id)));
+    (window._orders||[]).forEach(o=>{
+      if(routed.has(o.id)) return;
+      out.push({client:o.client, address:o.address, doc:o.doc_number,
+        seq:null, label:'Буфер', color:'#77736D', lat:o.lat, lon:o.lon,
+        pick(){ highlightPoint(o.lat, o.lon, o.client); }});
+    });
+    return out;
+  }
+});
+
 setInterval(pollIssues, 30000);
 pollIssues();
 </script>
+<script src="/mapsearch.js"></script>
 <script src="/shell.js"></script>
 </body>
 </html>

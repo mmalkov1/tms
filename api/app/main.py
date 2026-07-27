@@ -142,7 +142,8 @@ async def no_html_cache(request, call_next):
     """v29: HTML завжди свіжий — деплой видно без Ctrl+Shift+R, незалежно від проксі."""
     resp = await call_next(request)
     p = request.url.path
-    if p == "/" or p.endswith(".html") or p in ("/shell.css", "/shell.js"):   # v69
+    if p == "/" or p.endswith(".html") or p in ("/shell.css", "/shell.js",
+                                               "/mapsearch.js"):   # v69/v75
         resp.headers["Cache-Control"] = "no-cache"
     return resp
 pool: asyncpg.Pool = None
@@ -1287,6 +1288,7 @@ async def get_routes(project_id: int = Query(...)):
     for r in rr:
         ss = await pool.fetch("""
             SELECT s.seq, s.eta, s.etd, o.id order_id, o.client, o.kind, o.address, o.address_extra, o.seats,
+                   o.doc_number,                                   -- v75: пошук на карті
                    o.lat, o.lon, o.tw_from, o.tw_to, o.break_from, o.break_to,
                    o.weight_kg, o.volume_m3, o.service_min
             FROM route_stops s JOIN orders o ON o.id=s.order_id

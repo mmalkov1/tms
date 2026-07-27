@@ -60,9 +60,11 @@ window.MapSearch = (function () {
       tempMarker = L.marker([lat, lon], {
         icon: L.divIcon({
           className: '',
-          html: `<div class="ms-tmp"><span>${label}</span>
-                 <svg width="26" height="26" viewBox="0 0 24 24" fill="#00356B" stroke="#fff" stroke-width="1.5"><path d="M12 22s8-6 8-12a8 8 0 1 0-16 0c0 6 8 12 8 12z"/><circle cx="12" cy="10" r="2.6" fill="#fff" stroke="none"/></svg></div>`,
-          iconSize: null, iconAnchor: [13, 30]
+          // v77: розмір іконки фіксований, інакше Leaflet не перераховує
+          // позицію при зумі й маркер «пливе». Підпис — absolute поверх.
+          html: `<div class="ms-tmp"><span class="ms-tmp-lbl">${label}</span>
+                 <svg width="26" height="30" viewBox="0 0 24 26" fill="#00356B" stroke="#fff" stroke-width="1.5"><path d="M12 24s8-7 8-13a8 8 0 1 0-16 0c0 6 8 13 8 13z"/><circle cx="12" cy="11" r="2.6" fill="#fff" stroke="none"/></svg></div>`,
+          iconSize: [26, 30], iconAnchor: [13, 30]
         })
       }).addTo(map);
       map.flyTo([lat, lon], Math.max(map.getZoom(), 15), { duration: .5 });

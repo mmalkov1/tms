@@ -76,7 +76,7 @@ dialog::backdrop{background:rgba(0,20,50,.5)}
 .refrow .del{border:1.5px solid var(--c3);background:#fff;color:var(--red);border-radius:8px;width:30px;height:30px;display:flex;align-items:center;justify-content:center;cursor:pointer;flex:none}
 .refrow .del:hover{border-color:var(--red)}
 </style>
-<link rel="stylesheet" href="/shell.css?v=76"></head><body>
+<link rel="stylesheet" href="/shell.css?v=77"></head><body>
 <header><h1>TMS</h1><nav class="tabs"><a href="/index.html">Планування</a><a href="/facts.html">План / Факт</a><a class="on">Транспортні листи</a></nav>
 <span id="stat" style="margin-left:auto;font-size:11px"></span></header>
 <div class="toolbar">
@@ -335,5 +335,5 @@ async function approve(id){
 }
 function exportXlsx(){location.href=`/api/transport-sheets/export.xlsx?date_from=${$('from').value}&date_to=${$('to').value}&driver_ids=${selected()}&approved_only=true`}
 (async()=>{await loadMeta();await load()})();
-</script><script src="/shell.js?v=76"></script>
+</script><script src="/shell.js?v=77"></script>
 </body></html>

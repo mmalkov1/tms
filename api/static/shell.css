@@ -103,8 +103,11 @@
 .msearch .ms-found { padding: 10px 12px; background: #E1F5EE; border-top: 1px solid #b9e3d3; }
 .msearch .ms-found b { font-size: 12.5px; color: #085041; display: block; }
 .msearch .ms-found span { font-size: 11.5px; color: #0b6b52; }
-.ms-tmp { text-align: center; }
-.ms-tmp span { display: inline-block; background: var(--navy, #00356B); color: #fff; font-size: 11px;
+/* v77: булавка має власний фіксований розмір (26x30), підпис висить над нею
+   absolute і не впливає на габарити — інакше маркер зміщується при зумі */
+.ms-tmp { position: relative; width: 26px; height: 30px; }
+.ms-tmp .ms-tmp-lbl { position: absolute; bottom: 32px; left: 50%; transform: translateX(-50%);
+               background: var(--navy, #00356B); color: #fff; font-size: 11px;
                font-weight: 700; border-radius: 6px; padding: 3px 8px; white-space: nowrap;
-               box-shadow: 0 2px 8px rgba(0,20,50,.35); margin-bottom: 2px;
-               font-family: 'Open Sans', system-ui, sans-serif; }
+               box-shadow: 0 2px 8px rgba(0,20,50,.35);
+               font-family: 'Open Sans', system-ui, sans-serif; pointer-events: none; }

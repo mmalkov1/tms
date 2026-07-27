@@ -201,7 +201,7 @@
   .pin span { display:block; }
   .buf-dot { filter:drop-shadow(0 1px 2px rgba(0,0,0,.35)); }
 </style>
-<link rel="stylesheet" href="/shell.css?v=76">
+<link rel="stylesheet" href="/shell.css?v=77">
 </head>
 <body>
 <header>
@@ -493,7 +493,7 @@ fetch('/api/transport-sheets/notifications/count').then(r=>r.json()).then(j=>{
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="https://unpkg.com/@mapbox/polyline@1.2.1/src/polyline.js"></script>
 <script src="https://unpkg.com/sortablejs@1.15.2/Sortable.min.js"></script>
-<script src="/mapsearch.js?v=76"></script>
+<script src="/mapsearch.js?v=77"></script>
 <script>
 const map = L.map('map').setView([50.45, 30.52], 11);
 L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {attribution:'© OSM'}).addTo(map);
@@ -1598,6 +1598,6 @@ try { MapSearch.init({
 setInterval(pollIssues, 30000);
 pollIssues();
 </script>
-<script src="/shell.js?v=76"></script>
+<script src="/shell.js?v=77"></script>
 </body>
 </html>

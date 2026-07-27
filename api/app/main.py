@@ -639,22 +639,44 @@ async def import_service_stats(file: UploadFile = File(...)):
 async def _refresh_service_stats_tms():
     """v43: нормативи простою з власних фактів TMS (stop_events прибув→поїхав).
 
-    Одна фізична зупинка = рейс × клієнт+адреса (від першого arrive до
-    останнього depart). Конвеєр той самий, що для Cars_report:
+    v74: одна фізична зупинка = послідовність заїздів на адресу в межах рейсу,
+    розділених менш ніж 10 хв. Повторний заїзд пізніше — окремий візит.
+    Конвеєр той самий, що для Cars_report:
     dwell.aggregate — фільтри шуму 2–180 хв, нічних баз, нормалізація ключів.
     Рядок Tocan замінюється, щойно TMS накопичила ≥5 візитів по ключу;
     далі рядок source='tms' і оновлюється перед кожним розрахунком."""
     rows = await pool.fetch("""
-        SELECT o.client AS name, COALESCE(o.address,'') AS address,
-               max(o.lat) AS lat, max(o.lon) AS lon,
-               EXTRACT(EPOCH FROM (max(d.ts) - min(a.ts)))/60.0 AS dwell,
-               EXTRACT(HOUR FROM min(a.ts) AT TIME ZONE 'Europe/Kiev')::int AS hour
-        FROM stop_events a
-        JOIN stop_events d ON d.route_id=a.route_id AND d.order_id=a.order_id
-                          AND d.event='depart'
-        JOIN orders o ON o.id=a.order_id
-        WHERE a.event='arrive' AND d.ts > a.ts
-        GROUP BY a.route_id, o.client, o.address""")
+        WITH pairs AS (
+            -- v74: кожен 'прибув' парується з НАЙБЛИЖЧИМ наступним 'поїхав'.
+            -- Раніше був JOIN усіх depart до всіх arrive: два заїзди за рейс
+            -- давали декартові пари (arrive1 -> depart2) і простій у години.
+            SELECT a.route_id, o.client, COALESCE(o.address,'') AS address,
+                   o.lat, o.lon, a.ts AS arr, dep.ts AS dep
+            FROM stop_events a
+            JOIN orders o ON o.id = a.order_id
+            CROSS JOIN LATERAL (
+                SELECT min(d.ts) AS ts FROM stop_events d
+                WHERE d.route_id = a.route_id AND d.order_id = a.order_id
+                  AND d.event = 'depart' AND d.ts > a.ts) dep
+            WHERE a.event = 'arrive' AND dep.ts IS NOT NULL
+        ), marked AS (
+            -- кілька замовлень на одній адресі (доставка + забір) обслуговуються
+            -- разом: інтервали, що перетинаються або йдуть підряд (<10 хв), —
+            -- це одна фізична зупинка. Повторний заїзд через годину — окрема.
+            SELECT *, CASE WHEN arr <= (lag(dep) OVER w) + interval '10 minutes'
+                           THEN 0 ELSE 1 END AS new_stop
+            FROM pairs
+            WINDOW w AS (PARTITION BY route_id, client, address ORDER BY arr)
+        ), grp AS (
+            SELECT *, sum(new_stop) OVER (PARTITION BY route_id, client, address
+                                          ORDER BY arr) AS g
+            FROM marked
+        )
+        SELECT client AS name, address, max(lat) AS lat, max(lon) AS lon,
+               EXTRACT(EPOCH FROM (max(dep) - min(arr)))/60.0 AS dwell,
+               EXTRACT(HOUR FROM min(arr) AT TIME ZONE 'Europe/Kiev')::int AS hour
+        FROM grp
+        GROUP BY route_id, client, address, g""")
     visits = [{"code": "", "name": r["name"] or "", "address": r["address"],
                "lat": r["lat"], "lon": r["lon"], "dwell": float(r["dwell"]),
                "hour": r["hour"]} for r in rows]

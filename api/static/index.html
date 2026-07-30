@@ -201,7 +201,7 @@
   .pin span { display:block; }
   .buf-dot { filter:drop-shadow(0 1px 2px rgba(0,0,0,.35)); }
 </style>
-<link rel="stylesheet" href="/shell.css?v=78">
+<link rel="stylesheet" href="/shell.css?v=79">
 </head>
 <body>
 <header>
@@ -493,7 +493,7 @@ fetch('/api/transport-sheets/notifications/count').then(r=>r.json()).then(j=>{
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="https://unpkg.com/@mapbox/polyline@1.2.1/src/polyline.js"></script>
 <script src="https://unpkg.com/sortablejs@1.15.2/Sortable.min.js"></script>
-<script src="/mapsearch.js?v=78"></script>
+<script src="/mapsearch.js?v=79"></script>
 <script>
 const map = L.map('map').setView([50.45, 30.52], 11);
 L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {attribution:'© OSM'}).addTo(map);
@@ -1387,6 +1387,7 @@ async function loadAll() {
 
   window._routes = routes;                        // v51: для діалогу старт/фініш
   window._orders = orders;                        // v75: джерело для пошуку на карті
+  drawDepots();                                   // v79: склад на карті
   const routed = new Set(routes.flatMap(r => r.stops.map(s => s.order_id)));
   orders.forEach(o => {
     if (!o.lat || routed.has(o.id)) return;
@@ -1592,6 +1593,27 @@ document.addEventListener('click', e => {
   if (p.style.display !== 'none' && !p.contains(e.target) && !e.target.closest('#bellBtn'))
     p.style.display = 'none';
 });
+
+// v79: склад на карті — один шар, не чіпається при перемальовуванні рейсів
+let _depotLayer = null;
+async function drawDepots(){
+  try{
+    if(_depotLayer){ map.removeLayer(_depotLayer); _depotLayer = null; }
+    const list = await (await fetch('/api/depots')).json();
+    if(!Array.isArray(list) || !list.length) return;
+    _depotLayer = L.layerGroup().addTo(map);
+    const HOUSE = '<svg width="17" height="17" viewBox="0 0 24 24" fill="#fff"><path d="M12 3.2 2.6 11h2.6v9.2h5.1v-5.6h3.4v5.6h5.1V11h2.6z"/></svg>';
+    list.forEach(d=>{
+      if(d.lat==null || d.lon==null) return;
+      L.marker([d.lat, d.lon], {icon: L.divIcon({className:'',
+          html:`<div class="depot-pin"><i>${HOUSE}</i><b>${d.name||'Склад'}</b></div>`,
+          iconSize:[30,30], iconAnchor:[15,15]}), interactive:true, zIndexOffset:-500})
+        .bindTooltip(`<b>${d.name||'Склад'}</b>${d.address?'<br>'+d.address:''}`, {sticky:true})
+        .addTo(_depotLayer);
+    });
+  }catch(e){ console.warn('depots unavailable:', e); }
+}
+
 // v75: пошук на карті — точки рейсів + буфер
 try { MapSearch.init({
   map,
@@ -1626,6 +1648,6 @@ try { MapSearch.init({
 setInterval(pollIssues, 30000);
 pollIssues();
 </script>
-<script src="/shell.js?v=78"></script>
+<script src="/shell.js?v=79"></script>
 </body>
 </html>

@@ -431,6 +431,13 @@ async def orders(project_id: int = Query(...)):
     return [dict(r) for r in rows]
 
 
+@app.get("/api/depots")
+async def depots():
+    """v79: склади для позначки на картах планування та План/Факт."""
+    rows = await pool.fetch("SELECT id, name, address, lat, lon FROM depots ORDER BY id")
+    return [dict(r) for r in rows]
+
+
 @app.get("/api/vehicles")
 async def vehicles():
     rows = await pool.fetch("""

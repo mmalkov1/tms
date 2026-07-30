@@ -125,3 +125,13 @@
            background: var(--red, #E82A2C); border: 2.5px solid #fff;
            box-shadow: 0 2px 5px rgba(0,0,0,.35); cursor: pointer; }
 .buf-pin.dragging { box-shadow: 0 0 0 4px rgba(232,42,44,.25), 0 5px 12px rgba(0,0,0,.4); }
+
+/* v79: маркер складу — залитий домик (стандарт: filled лише для маркерів карти) */
+.depot-pin { display: flex; align-items: center; gap: 5px; }
+.depot-pin i { width: 30px; height: 30px; border-radius: 8px; background: var(--navy, #00356B);
+               display: flex; align-items: center; justify-content: center; flex: none;
+               box-shadow: 0 0 0 2.5px #fff, 0 2px 7px rgba(0,20,50,.4); }
+.depot-pin b { background: var(--navy, #00356B); color: #fff; font-size: 11px; font-weight: 700;
+               border-radius: 6px; padding: 3px 8px; white-space: nowrap;
+               box-shadow: 0 0 0 1.5px #fff; font-family: 'Open Sans', system-ui, sans-serif;
+               pointer-events: none; }

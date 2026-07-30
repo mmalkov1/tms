@@ -34,3 +34,15 @@
 2026-07-25: маршрутов 0, перегонов 0, usable=0, suspect=0, rejected=0
 2026-07-26: маршрутов 0, перегонов 0, usable=0, suspect=0, rejected=0
 Итого: legs_rejected=9, legs_suspect=5, legs_total=23, legs_usable=9, routes_accepted=3, routes_total=3
+2026-07-25: маршрутов 0, перегонов 0, usable=0, suspect=0, rejected=0
+2026-07-26: маршрутов 0, перегонов 0, usable=0, suspect=0, rejected=0
+2026-07-27: маршрутов 3, перегонов 30, usable=10, suspect=7, rejected=13
+Итого: legs_rejected=13, legs_suspect=7, legs_total=30, legs_usable=10, routes_accepted=3, routes_total=3
+2026-07-26: маршрутов 0, перегонов 0, usable=0, suspect=0, rejected=0
+2026-07-27: маршрутов 3, перегонов 30, usable=10, suspect=7, rejected=13
+2026-07-28: маршрутов 3, перегонов 30, usable=11, suspect=6, rejected=13
+Итого: legs_rejected=26, legs_suspect=13, legs_total=60, legs_usable=21, routes_accepted=6, routes_total=6
+2026-07-27: маршрутов 3, перегонов 30, usable=10, suspect=7, rejected=13
+2026-07-28: маршрутов 3, перегонов 30, usable=11, suspect=6, rejected=13
+2026-07-29: маршрутов 2, перегонов 19, usable=3, suspect=1, rejected=15
+Итого: legs_rejected=41, legs_suspect=14, legs_total=79, legs_usable=24, routes_accepted=7, routes_total=8

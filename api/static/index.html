@@ -201,7 +201,7 @@
   .pin span { display:block; }
   .buf-dot { filter:drop-shadow(0 1px 2px rgba(0,0,0,.35)); }
 </style>
-<link rel="stylesheet" href="/shell.css?v=77">
+<link rel="stylesheet" href="/shell.css?v=78">
 </head>
 <body>
 <header>
@@ -493,7 +493,7 @@ fetch('/api/transport-sheets/notifications/count').then(r=>r.json()).then(j=>{
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="https://unpkg.com/@mapbox/polyline@1.2.1/src/polyline.js"></script>
 <script src="https://unpkg.com/sortablejs@1.15.2/Sortable.min.js"></script>
-<script src="/mapsearch.js?v=77"></script>
+<script src="/mapsearch.js?v=78"></script>
 <script>
 const map = L.map('map').setView([50.45, 30.52], 11);
 L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {attribution:'© OSM'}).addTo(map);
@@ -1390,9 +1390,29 @@ async function loadAll() {
   const routed = new Set(routes.flatMap(r => r.stops.map(s => s.order_id)));
   orders.forEach(o => {
     if (!o.lat || routed.has(o.id)) return;
-    L.circleMarker([o.lat, o.lon], {radius:7, color:'#fff', weight:2, fillColor:'#E82A2C', fillOpacity:.95, className:'buf-dot'})
+    // v78: звичайний маркер замість circleMarker — Leaflet уміє тягнути лише його
+    const bm = L.marker([o.lat, o.lon], {icon: L.divIcon({
+        className:'', html:'<span class="buf-pin"></span>',
+        iconSize:[16,16], iconAnchor:[8,8]})})
       .bindTooltip(tipHtml(o.client, o.address, +o.weight_kg||0, +o.volume_m3||0,
-        `<br>${hm(o.tw_from)}–${hm(o.tw_to)}`), {sticky:true}).addTo(layers);
+        `<br>${hm(o.tw_from)}–${hm(o.tw_to)}<br><i style="color:#888">2× клік — перемістити точку</i>`),
+        {sticky:true}).addTo(layers);
+    bm.on('dblclick', e => {
+      L.DomEvent.stop(e);
+      window._movingStop = true;
+      bm.dragging.enable();
+      bm.getElement()?.querySelector('.buf-pin')?.classList.add('dragging');
+      bm.setTooltipContent('Перетягніть маркер у потрібне місце');
+    });
+    bm.on('dragend', async () => {
+      window._movingStop = false;
+      const ll = bm.getLatLng();
+      if (!confirm('Зберегти нове розташування заявки? Координати запамʼятаються і для майбутніх імпортів.')) { loadAll(); return; }
+      await fetch(`/api/orders/${o.id}`, {method:'PATCH',
+        headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({lat:+ll.lat.toFixed(6), lon:+ll.lng.toFixed(6)})});
+      loadAll();
+    });
   });
   // (шаг 1) собираем все групповые маркеры всех маршрутов
   const pins = [];
@@ -1579,7 +1599,7 @@ try { MapSearch.init({
     const out=[];
     (window._routes||[]).forEach((r,ri)=>{
       (r.stops||[]).forEach(st=>{
-        out.push({client:st.client, address:st.address, doc:st.doc_number,
+        out.push({id:st.order_id, client:st.client, address:st.address, doc:st.doc_number,
           seq:st.seq, label:`Рейс ${ri+1}`, color:r.color, lat:st.lat, lon:st.lon,
           pick(){ highlightPoint(st.lat, st.lon, st.client); }});
       });
@@ -1587,17 +1607,25 @@ try { MapSearch.init({
     const routed=new Set((window._routes||[]).flatMap(r=>(r.stops||[]).map(s=>s.order_id)));
     (window._orders||[]).forEach(o=>{
       if(routed.has(o.id)) return;
-      out.push({client:o.client, address:o.address, doc:o.doc_number,
+      out.push({id:o.id, client:o.client, address:o.address, doc:o.doc_number,
         seq:null, label:'Буфер', color:'#77736D', lat:o.lat, lon:o.lon,
         pick(){ highlightPoint(o.lat, o.lon, o.client); }});
     });
     return out;
+  },
+  // v78: перенести точку на знайдену адресу
+  async onMove(item, lat, lon){
+    const r = await fetch(`/api/orders/${item.id}`, {method:'PATCH',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({lat:+lat.toFixed(6), lon:+lon.toFixed(6)})});
+    if(!r.ok) throw new Error('save failed');
+    await loadAll();
   }
 }); } catch(e) { console.warn('map search unavailable:', e); }   // v76: не ламати сторінку
 
 setInterval(pollIssues, 30000);
 pollIssues();
 </script>
-<script src="/shell.js?v=77"></script>
+<script src="/shell.js?v=78"></script>
 </body>
 </html>

@@ -26,6 +26,14 @@ window.MapSearch = (function () {
     return { lat, lon };
   }
 
+  function kmBetween(lat1, lon1, lat2, lon2) {
+    const R = 6371, rad = Math.PI / 180;
+    const dLat = (lat2 - lat1) * rad, dLon = (lon2 - lon1) * rad;
+    const a = Math.sin(dLat / 2) ** 2 +
+              Math.cos(lat1 * rad) * Math.cos(lat2 * rad) * Math.sin(dLon / 2) ** 2;
+    return 2 * R * Math.asin(Math.sqrt(a));
+  }
+
   function init(cfg) {
     const map = cfg.map;
     const host = map.getContainer();
@@ -70,6 +78,55 @@ window.MapSearch = (function () {
       map.flyTo([lat, lon], Math.max(map.getZoom(), 15), { duration: .5 });
     }
 
+    /* v78: після знайденої адреси — перенести на неї найближчу точку.
+       Список точніший за перетягування: не треба цілитись мишею, і працює,
+       коли сусідні точки накладаються одна на одну. */
+    let lastGeo = null;
+    function nearbyHtml(lat, lon) {
+      if (typeof cfg.onMove !== 'function') return '';
+      let items = [];
+      try { items = cfg.getItems() || []; } catch (e) { return ''; }
+      const near = items
+        .filter(it => it.lat && it.lon && it.id != null)
+        .map(it => ({ it, d: kmBetween(lat, lon, +it.lat, +it.lon) }))
+        .filter(o => o.d <= 3)
+        .sort((a, b) => a.d - b.d)
+        .slice(0, 6);
+      if (!near.length)
+        return '<div class="ms-hint">Поблизу немає точок цього дня.</div>';
+      return '<div class="ms-movehdr">Перенести точку сюди</div>' +
+        near.map((o, i) => `
+          <div class="ms-row ms-move" data-mi="${i}">
+            <span class="ms-seq" style="background:${o.it.seq ? (o.it.color || '#00356B') : '#77736D'}">${o.it.seq || '—'}</span>
+            <span class="ms-main"><b>${o.it.client || '—'}</b><span>${o.it.address || ''}</span></span>
+            <span class="ms-dist">${o.d < 1 ? Math.round(o.d * 1000) + ' м' : o.d.toFixed(1) + ' км'}</span>
+            <span class="ms-mbtn">Перенести</span>
+          </div>`).join('');
+    }
+
+    function bindNearby(lat, lon) {
+      let items = [];
+      try { items = cfg.getItems() || []; } catch (e) { return; }
+      const near = items
+        .filter(it => it.lat && it.lon && it.id != null)
+        .map(it => ({ it, d: kmBetween(lat, lon, +it.lat, +it.lon) }))
+        .filter(o => o.d <= 3).sort((a, b) => a.d - b.d).slice(0, 6);
+      out.querySelectorAll('.ms-move').forEach(row => {
+        row.addEventListener('click', async () => {
+          const o = near[+row.dataset.mi];
+          if (!o) return;
+          row.querySelector('.ms-mbtn').textContent = 'Переношу…';
+          try {
+            await cfg.onMove(o.it, lat, lon);
+            out.innerHTML = `<div class="ms-found"><b>Перенесено</b>
+              <span>«${o.it.client || ''}» тепер на знайденій адресі</span></div>`;
+          } catch (e) {
+            row.querySelector('.ms-mbtn').textContent = 'Помилка';
+          }
+        });
+      });
+    }
+
     function hintHtml() {
       return `<div class="ms-hint">Почніть вводити назву клієнта чи адресу.<br>
         Enter — пошук адреси через геокодер.<br>
@@ -82,8 +139,11 @@ window.MapSearch = (function () {
 
       const c = parseCoords(q);
       if (c) {
+        lastGeo = c;
         out.innerHTML = `<div class="ms-found"><b>Координати розпізнано</b>
-          <span>${c.lat.toFixed(6)}, ${c.lon.toFixed(6)}</span></div>`;
+          <span>${c.lat.toFixed(6)}, ${c.lon.toFixed(6)}</span></div>`
+          + nearbyHtml(c.lat, c.lon);
+        bindNearby(c.lat, c.lon);
         dropTemp(c.lat, c.lon, c.lat.toFixed(5) + ', ' + c.lon.toFixed(5));
         return;
       }
@@ -141,8 +201,11 @@ window.MapSearch = (function () {
           out.innerHTML = `<div class="ms-hint" style="color:#B8860B">${j.detail || 'Адресу не знайдено'}</div>`;
           return;
         }
+        lastGeo = { lat: j.lat, lon: j.lon };
         out.innerHTML = `<div class="ms-found"><b>Знайдено</b>
-          <span>${j.lat.toFixed(6)}, ${j.lon.toFixed(6)} — тимчасовий маркер</span></div>`;
+          <span>${j.lat.toFixed(6)}, ${j.lon.toFixed(6)} — тимчасовий маркер</span></div>`
+          + nearbyHtml(j.lat, j.lon);
+        bindNearby(j.lat, j.lon);
         if (cfg.onGeo) cfg.onGeo(j.lat, j.lon, q);
         dropTemp(j.lat, j.lon, q.length > 32 ? q.slice(0, 32) + '…' : q);
       } catch (e) {

@@ -76,18 +76,18 @@ dialog::backdrop{background:rgba(0,20,50,.5)}
 .refrow .del{border:1.5px solid var(--c3);background:#fff;color:var(--red);border-radius:8px;width:30px;height:30px;display:flex;align-items:center;justify-content:center;cursor:pointer;flex:none}
 .refrow .del:hover{border-color:var(--red)}
 </style>
-<link rel="stylesheet" href="/shell.css?v=80"></head><body>
+<link rel="stylesheet" href="/shell.css?v=81"></head><body>
 <header><h1>TMS</h1><nav class="tabs"><a href="/index.html">Планування</a><a href="/facts.html">План / Факт</a><a class="on">Транспортні листи</a></nav>
 <span id="stat" style="margin-left:auto;font-size:11px"></span></header>
 <div class="toolbar">
   <span class="tlabel">Період</span>
   <input type="date" id="from"><input type="date" id="to">
   <div class="sep"></div>
-  <span class="tlabel">Водій</span>
+  <span class="tlabel">Авто</span>
   <div class="ddwrap" id="ddwrap">
     <button class="ddbtn" id="ddbtn" onclick="toggleDd(event)">
-      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
-      <span id="ddlabel">Водій</span>
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="1" y="6" width="14" height="10"/><path d="M15 9h4l3 3.5V16h-7z"/><circle cx="6" cy="18" r="2"/><circle cx="18" cy="18" r="2"/></svg>
+      <span id="ddlabel">Авто</span>
       <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M6 9l6 6 6-6"/></svg>
     </button>
     <div class="ddpop" id="ddpop"></div>
@@ -123,27 +123,28 @@ async function api(url,opt){const r=await fetch(url,opt),j=await r.json().catch(
 
 async function loadMeta(){
   meta=await api('/api/transport-sheets/meta');
-  // v69: рівно один водій; вибір пам'ятається між сесіями
-  const saved=localStorage.getItem('tmsFuelDriver');
-  const known=meta.drivers.some(x=>String(x.driver_id)===saved);
-  const pick=known?saved:(meta.drivers[0]?String(meta.drivers[0].driver_id):null);
-  $('ddpop').innerHTML=meta.drivers.map(x=>`<label><input type="radio" name="fuelDrv" value="${x.driver_id}"${String(x.driver_id)===pick?' checked':''} onchange="ddChanged()">${x.name}</label>`).join('')
-    ||'<div style="padding:8px;font-size:12px;color:var(--muted)">Немає водіїв із закріпленим авто</div>';
+  // v81: облік ведеться по автомобілю — пальне належить машині, а не водієві
+  const list=meta.vehicles||meta.drivers||[];
+  const saved=localStorage.getItem('tmsFuelVehicle');
+  const known=list.some(x=>String(x.vehicle_id)===saved);
+  const pick=known?saved:(list[0]?String(list[0].vehicle_id):null);
+  $('ddpop').innerHTML=list.map(x=>`<label><input type="radio" name="fuelVeh" value="${x.vehicle_id}"${String(x.vehicle_id)===pick?' checked':''} onchange="ddChanged()">${x.vehicle_name||'—'}${x.name?` <span style="color:var(--muted)">· ${x.name}</span>`:''}</label>`).join('')
+    ||'<div style="padding:8px;font-size:12px;color:var(--muted)">Немає активних автомобілів</div>';
   ddChanged(false);
 }
 // v57: картки показують авто ОДНОГО вибраного водія
 function renderCards(){
-  const id=selected();
-  const m=id?meta.drivers.find(x=>String(x.driver_id)===id):null;
+  const id=selected(), list=meta.vehicles||meta.drivers||[];
+  const m=id?list.find(x=>String(x.vehicle_id)===id):null;
   if(!m){
     vehId=null;
-    const hint=meta.drivers.length?'Оберіть водія у панелі зверху.':'Немає водіїв із закріпленим авто';
+    const hint=list.length?'Оберіть автомобіль у панелі зверху.':'Немає активних автомобілів';
     $('carBody').innerHTML=`<div style="font-size:12.5px;color:var(--muted);padding:6px 0">${hint}</div>`;
-    $('balBody').innerHTML=`<div style="font-size:12.5px;color:var(--muted);padding:6px 0">${meta.drivers.length?'Оберіть водія, щоб побачити баланс.':'—'}</div>`;
+    $('balBody').innerHTML=`<div style="font-size:12.5px;color:var(--muted);padding:6px 0">${list.length?'Оберіть автомобіль, щоб побачити баланс.':'—'}</div>`;
     return;
   }
   vehId=m.vehicle_id;
-  $('carBody').innerHTML=`<div class="vh">${m.vehicle_name||'Автомобіль не закріплено'}<small>${m.name} · код 1С ${m.code_1c||'—'}</small></div>
+  $('carBody').innerHTML=`<div class="vh">${m.vehicle_name||'—'}<small>${m.name?`штатний водій: ${m.name}`:'штатного водія не призначено'}${m.code_1c?` · код 1С ${m.code_1c}`:''}</small></div>
     ${vehId?`<div class="frow"><div class="field"><label>Норма, л/100 км</label><input id="rate" type="number" step="0.001" style="width:120px" value="${m.rate_l_per_100??''}"></div>
     <button class="btn" onclick="saveRate()">Зберегти</button></div>
     <div class="saved" id="rateSaved"></div>
@@ -187,8 +188,8 @@ async function saveAdjust(){
 function selected(){const o=document.querySelector('#ddpop input:checked');return o?o.value:''}
 function ddChanged(reload=true){
   const sel=document.querySelector('#ddpop input:checked');
-  $('ddlabel').textContent=sel?sel.parentElement.textContent.trim():'Немає водіїв';
-  if(sel)localStorage.setItem('tmsFuelDriver',sel.value);   // v69: пам'ять вибору
+  $('ddlabel').textContent=sel?sel.parentElement.textContent.trim():'Немає авто';
+  if(sel)localStorage.setItem('tmsFuelVehicle',sel.value);   // v81: пам'ять вибору авто
   $('ddpop').classList.remove('open');
   if(meta)renderCards();                 // v57: картки слідують за вибором
   if(reload)load();
@@ -196,7 +197,7 @@ function ddChanged(reload=true){
 function toggleDd(e){e.stopPropagation();$('ddpop').classList.toggle('open')}
 document.addEventListener('click',e=>{if(!$('ddwrap').contains(e.target))$('ddpop').classList.remove('open')});
 async function load(){try{
-  data=await api(`/api/transport-sheets?date_from=${$('from').value}&date_to=${$('to').value}&driver_ids=${selected()}`);
+  data=await api(`/api/transport-sheets?date_from=${$('from').value}&date_to=${$('to').value}&vehicle_ids=${selected()}`);
   $('stat').textContent=`${data.length} листів`;render()}catch(e){toast(e.message)}}
 
 // v73: сб/нд — особисті поїздки водія, не робочий пробіг
@@ -333,7 +334,7 @@ async function saveEdit(){
 async function approve(id){
   try{await api(`/api/transport-sheets/${id}/approve`,{method:'POST'});dlg.close();toast('Лист підтверджено');load();loadBalance()}catch(e){toast(e.message)}
 }
-function exportXlsx(){location.href=`/api/transport-sheets/export.xlsx?date_from=${$('from').value}&date_to=${$('to').value}&driver_ids=${selected()}&approved_only=true`}
+function exportXlsx(){location.href=`/api/transport-sheets/export.xlsx?date_from=${$('from').value}&date_to=${$('to').value}&vehicle_ids=${selected()}&approved_only=true`}
 (async()=>{await loadMeta();await load()})();
-</script><script src="/shell.js?v=80"></script>
+</script><script src="/shell.js?v=81"></script>
 </body></html>

@@ -44,6 +44,8 @@ async def init(db_pool):
             UNIQUE (work_date, vehicle_id))""")
     await pool.execute("CREATE INDEX IF NOT EXISTS idx_transport_sheets_date ON transport_sheets(work_date DESC)")
     await pool.execute("CREATE INDEX IF NOT EXISTS idx_transport_sheets_driver ON transport_sheets(driver_id, work_date DESC)")
+    await pool.execute(     # v81: основна вісь обліку — автомобіль
+        "CREATE INDEX IF NOT EXISTS idx_transport_sheets_vehicle ON transport_sheets(vehicle_id, work_date DESC)")
     await pool.execute("""
         CREATE TABLE IF NOT EXISTS transport_sheet_refuels (
             id BIGSERIAL PRIMARY KEY, sheet_id BIGINT NOT NULL REFERENCES transport_sheets(id) ON DELETE CASCADE,
@@ -486,14 +488,18 @@ def _sheet_dict(r):
 
 
 @router.get("/api/transport-sheets")
-async def list_sheets(date_from: date, date_to: date, driver_ids: str | None = None):
-    ids = [int(x) for x in (driver_ids or "").split(",") if x.strip().isdigit()]
+async def list_sheets(date_from: date, date_to: date, driver_ids: str | None = None,
+                      vehicle_ids: str | None = None):
+    # v81: основний фільтр — автомобіль; driver_ids лишено для сумісності
+    vids = [int(x) for x in (vehicle_ids or "").split(",") if x.strip().isdigit()]
+    ids = [] if vids else [int(x) for x in (driver_ids or "").split(",") if x.strip().isdigit()]
     # v68: самовідновлення відкритих листів після коригування або скасування підтвердження.
     open_rows = await pool.fetch("""
         SELECT id FROM transport_sheets
         WHERE work_date BETWEEN $1 AND $2 AND status<>'approved'
-          AND ($3::int[] IS NULL OR driver_id=ANY($3))""",
-        date_from, date_to, ids or None)
+          AND ($3::int[] IS NULL OR driver_id=ANY($3))
+          AND ($4::int[] IS NULL OR vehicle_id=ANY($4))""",
+        date_from, date_to, ids or None, vids or None)
     for row in open_rows:
         await _recalculate(row["id"])
     rows = await pool.fetch("""
@@ -504,8 +510,9 @@ async def list_sheets(date_from: date, date_to: date, driver_ids: str | None = N
         LEFT JOIN vehicle_fuel_settings f ON f.vehicle_id=s.vehicle_id
         LEFT JOIN transport_sheet_refuels rf ON rf.sheet_id=s.id
         WHERE s.work_date BETWEEN $1 AND $2 AND ($3::int[] IS NULL OR s.driver_id=ANY($3))
+          AND ($4::int[] IS NULL OR s.vehicle_id=ANY($4))
         GROUP BY s.id,d.name,d.code_1c,v.name,v.plate,f.rate_l_per_100
-        ORDER BY s.work_date DESC,d.name""", date_from, date_to, ids or None)
+        ORDER BY s.work_date DESC,v.name""", date_from, date_to, ids or None, vids or None)
     out, gps_cache = [], {}                                   # v72
     for r in rows:
         key = (r["driver_id"], r["work_date"])
@@ -522,13 +529,18 @@ async def list_sheets(date_from: date, date_to: date, driver_ids: str | None = N
 
 @router.get("/api/transport-sheets/meta")
 async def sheet_meta():
+    """v81: одиниця обліку — автомобіль. Пальне належить машині, а не водієві:
+    при заміні водія (хвороба, відпустка) ланцюжок залишків не рветься."""
     rows = await pool.fetch("""
-        SELECT d.id driver_id,d.name,d.code_1c,v.id vehicle_id,v.name vehicle_name,v.plate,
-               f.rate_l_per_100,f.initial_balance_l,f.initial_balance_date
-        FROM drivers d LEFT JOIN vehicles v ON v.driver_id=d.id AND v.is_active
-        LEFT JOIN vehicle_fuel_settings f ON f.vehicle_id=v.id
-        WHERE d.is_active AND v.id IS NOT NULL ORDER BY d.name""")
-    return {"drivers": [dict(r) for r in rows]}
+        SELECT v.id vehicle_id, v.name vehicle_name, v.plate,
+               d.id driver_id, d.name, d.code_1c,
+               f.rate_l_per_100, f.initial_balance_l, f.initial_balance_date
+        FROM vehicles v
+        LEFT JOIN drivers d ON d.id = v.driver_id AND d.is_active
+        LEFT JOIN vehicle_fuel_settings f ON f.vehicle_id = v.id
+        WHERE v.is_active ORDER BY v.name""")
+    out = [dict(r) for r in rows]
+    return {"vehicles": out, "drivers": out}     # drivers — сумісність зі старим фронтом
 
 
 class LogistSheetIn(BaseModel):
@@ -692,8 +704,9 @@ async def notification_count():
 
 @router.get("/api/transport-sheets/export.xlsx")
 async def export_sheets(date_from: date, date_to: date, driver_ids: str | None = None,
-                        approved_only: bool = True):
-    ids = [int(x) for x in (driver_ids or "").split(",") if x.strip().isdigit()]
+                        vehicle_ids: str | None = None, approved_only: bool = True):
+    vids = [int(x) for x in (vehicle_ids or "").split(",") if x.strip().isdigit()]   # v81
+    ids = [] if vids else [int(x) for x in (driver_ids or "").split(",") if x.strip().isdigit()]
     rows = await pool.fetch("""
         SELECT s.*,d.name driver_name,v.name vehicle_name,v.plate,f.rate_l_per_100,
                COALESCE(sum(rf.liters),0) refueled_l
@@ -702,9 +715,11 @@ async def export_sheets(date_from: date, date_to: date, driver_ids: str | None =
         LEFT JOIN transport_sheet_refuels rf ON rf.sheet_id=s.id
         WHERE s.work_date BETWEEN $1 AND $2
           AND ($3::int[] IS NULL OR s.driver_id=ANY($3))
+          AND ($5::int[] IS NULL OR s.vehicle_id=ANY($5))
           AND (NOT $4 OR s.status='approved')
         GROUP BY s.id,d.name,v.name,v.plate,f.rate_l_per_100
-        ORDER BY v.name,s.work_date""", date_from, date_to, ids or None, approved_only)
+        ORDER BY v.name,s.work_date""", date_from, date_to, ids or None, approved_only,
+        vids or None)
     wb = Workbook(); ws = wb.active; ws.title = "Транспортні листи"
     headers = ["Дата","Автомобіль","Водій","Одометр початок","Одометр кінець","Пробіг, км",
                "Надходження, л","Норма, л/100 км","Витрата, л","Залишок початок, л",

@@ -201,7 +201,7 @@
   .pin span { display:block; }
   .buf-dot { filter:drop-shadow(0 1px 2px rgba(0,0,0,.35)); }
 </style>
-<link rel="stylesheet" href="/shell.css?v=79">
+<link rel="stylesheet" href="/shell.css?v=80">
 </head>
 <body>
 <header>
@@ -493,7 +493,7 @@ fetch('/api/transport-sheets/notifications/count').then(r=>r.json()).then(j=>{
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="https://unpkg.com/@mapbox/polyline@1.2.1/src/polyline.js"></script>
 <script src="https://unpkg.com/sortablejs@1.15.2/Sortable.min.js"></script>
-<script src="/mapsearch.js?v=79"></script>
+<script src="/mapsearch.js?v=80"></script>
 <script>
 const map = L.map('map').setView([50.45, 30.52], 11);
 L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {attribution:'© OSM'}).addTo(map);
@@ -1482,7 +1482,7 @@ async function loadAll() {
     const card = document.createElement('div'); card.className = 'route-card';
     card.style.setProperty('--rc', r.color);
     card.innerHTML = `<div class="route-head">
-      <span><i class="rdot" style="background:${r.color}"></i>${r.vehicle_name} · ${r.driver_name||'—'} ${r.stops.length?'<span class="del" title="Розвернути маршрут у зворотному порядку" onclick="event.stopPropagation();reverseRoute('+r.id+')"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><path d="M17 3l4 4-4 4"/><path d="M21 7H7"/><path d="M7 21l-4-4 4-4"/><path d="M3 17h14"/></svg></span>':'<span class="del" onclick="delRoute('+r.id+')"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/></svg></span>'}</span>
+      <span><i class="rdot" style="background:${r.color}"></i>${r.vehicle_name} · <span class="${r.driver_replaced?'drv-repl':''}" title="${r.driver_replaced?'Водія замінено на цей день':''}">${r.driver_name||'—'}</span> <span class="del" title="Змінити водія на цьому рейсі" onclick="event.stopPropagation();openDriverDlg(${r.id},${r.eff_driver_id||'null'})"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M19 8v6M22 11h-6"/></svg></span> ${r.stops.length?'<span class="del" title="Розвернути маршрут у зворотному порядку" onclick="event.stopPropagation();reverseRoute('+r.id+')"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><path d="M17 3l4 4-4 4"/><path d="M21 7H7"/><path d="M7 21l-4-4 4-4"/><path d="M3 17h14"/></svg></span>':'<span class="del" onclick="delRoute('+r.id+')"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/></svg></span>'}</span>
       <span>${uniq} точок (${r.stops.length} завд.) · ${r.total_km||0} км ·
       пік ${(+r.peak_weight||0).toFixed(0)}/${(+r.max_weight_kg||0).toFixed(0)} кг (${wPct.toFixed(0)}%) ·
       ${(+r.peak_volume||0).toFixed(2)}/${(+r.max_volume_m3||0).toFixed(1)} м³ (${vPct.toFixed(0)}%)
@@ -1594,6 +1594,46 @@ document.addEventListener('click', e => {
     p.style.display = 'none';
 });
 
+// v80: заміна водія на конкретному рейсі
+async function openDriverDlg(routeId, curId){
+  let list=[];
+  try{ list = await (await fetch('/api/drivers')).json(); }
+  catch(e){ st('Не вдалося отримати список водіїв'); return; }
+  const opts = list.map(d=>`<option value="${d.id}"${d.id===curId?' selected':''}>${d.name}</option>`).join('');
+  const dlg = document.createElement('dialog');
+  dlg.style.cssText='border:0;border-radius:14px;padding:0;width:min(380px,94vw);box-shadow:0 15px 50px rgba(0,20,50,.35)';
+  dlg.innerHTML = `
+    <div class="dlg-head">Водій на цьому рейсі
+      <span onclick="this.closest('dialog').close()" style="cursor:pointer">&times;</span></div>
+    <div class="dlg-body">
+      <div style="font-size:12px;color:var(--muted);margin-bottom:9px">
+        Заміна діє лише на цей рейс. Новий водій одразу побачить маршрут у застосунку,
+        у попереднього він зникне.</div>
+      <select id="drvSel" style="width:100%;padding:9px 10px;border:1.5px solid var(--c3);border-radius:9px;font:inherit;font-size:13.5px">${opts}</select>
+      <div id="drvErr" style="font-size:12px;color:var(--red);margin-top:8px;min-height:16px"></div>
+      <div style="display:flex;gap:8px;margin-top:10px">
+        <button class="light" onclick="this.closest('dialog').close()">Скасувати</button>
+        <button id="drvSave" style="flex:1">Зберегти</button>
+      </div>
+    </div>`;
+  document.body.appendChild(dlg);
+  dlg.addEventListener('close',()=>dlg.remove());
+  dlg.querySelector('#drvSave').onclick = async ()=>{
+    const id = +dlg.querySelector('#drvSel').value;
+    const btn = dlg.querySelector('#drvSave'); btn.disabled=true; btn.textContent='Зберігаю…';
+    try{
+      const r = await fetch(`/api/routes/${routeId}/driver`,{method:'PATCH',
+        headers:{'Content-Type':'application/json'}, body:JSON.stringify({driver_id:id})});
+      const j = await r.json().catch(()=>({}));
+      if(!r.ok){ dlg.querySelector('#drvErr').textContent = j.detail||'Не вдалося зберегти';
+                 btn.disabled=false; btn.textContent='Зберегти'; return; }
+      dlg.close(); st('Водія змінено'); loadAll();
+    }catch(e){ dlg.querySelector('#drvErr').textContent='Немає звʼязку';
+               btn.disabled=false; btn.textContent='Зберегти'; }
+  };
+  dlg.showModal();
+}
+
 // v79: склад на карті — один шар, не чіпається при перемальовуванні рейсів
 let _depotLayer = null;
 async function drawDepots(){
@@ -1648,6 +1688,6 @@ try { MapSearch.init({
 setInterval(pollIssues, 30000);
 pollIssues();
 </script>
-<script src="/shell.js?v=79"></script>
+<script src="/shell.js?v=80"></script>
 </body>
 </html>

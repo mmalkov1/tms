@@ -431,6 +431,43 @@ async def orders(project_id: int = Query(...)):
     return [dict(r) for r in rows]
 
 
+class RouteDriverIn(BaseModel):
+    driver_id: int | None = None          # None = повернути штатного водія авто
+
+
+@app.patch("/api/routes/{route_id}/driver")
+async def set_route_driver(route_id: int, body: RouteDriverIn):
+    """v80: підміна водія на конкретному рейсі (хвороба, відпустка).
+
+    routes.driver_id перекриває vehicles.driver_id, а кабінет водія скрізь
+    читає COALESCE(r.driver_id, v.driver_id) — тож заміна одразу зʼявляється
+    в застосунку нового водія і зникає у старого.
+    """
+    r = await pool.fetchrow(
+        "SELECT r.id, r.plan_date, v.driver_id AS veh_driver FROM routes r "
+        "JOIN vehicles v ON v.id = r.vehicle_id WHERE r.id = $1", route_id)
+    if not r:
+        raise HTTPException(404, "Рейс не знайдено")
+    if body.driver_id is not None:
+        drv = await pool.fetchrow(
+            "SELECT id, name FROM drivers WHERE id=$1 AND is_active", body.driver_id)
+        if not drv:
+            raise HTTPException(400, "Водія не знайдено або він неактивний")
+        # той самий водій не може вести два рейси одного дня
+        busy = await pool.fetchrow("""
+            SELECT v.name FROM routes r2
+            JOIN vehicles v ON v.id = r2.vehicle_id
+            WHERE r2.plan_date = $1 AND r2.id <> $2
+              AND COALESCE(r2.driver_id, v.driver_id) = $3
+            LIMIT 1""", r["plan_date"], route_id, body.driver_id)
+        if busy:
+            raise HTTPException(409, f"{drv['name']} вже призначений на {busy['name']} цього дня")
+    # NULL повертає штатного водія авто
+    new_id = None if body.driver_id == r["veh_driver"] else body.driver_id
+    await pool.execute("UPDATE routes SET driver_id=$1 WHERE id=$2", new_id, route_id)
+    return {"ok": True}
+
+
 @app.get("/api/depots")
 async def depots():
     """v79: склади для позначки на картах планування та План/Факт."""
@@ -1282,12 +1319,14 @@ async def remove_stop(route_id: int, order_id: int):
 @app.get("/api/routes")
 async def get_routes(project_id: int = Query(...)):
     rr = await pool.fetch("""
-        SELECT r.*, v.name vehicle_name, v.max_weight_kg, v.max_volume_m3, d.name driver_name,
+        SELECT r.*, v.name vehicle_name, v.max_weight_kg, v.max_volume_m3,
+               dh.name driver_name,                                  -- v80: ефективний водій
+               COALESCE(r.driver_id, v.driver_id) AS eff_driver_id,
+               (r.driver_id IS NOT NULL AND r.driver_id <> v.driver_id) AS driver_replaced,
                dep.name depot_name,
                dh.home_address AS driver_home_address,               -- v51
                (dh.home_lat IS NOT NULL) AS driver_has_home
         FROM routes r JOIN vehicles v ON v.id=r.vehicle_id
-        LEFT JOIN drivers d ON d.id=r.driver_id
         LEFT JOIN drivers dh ON dh.id=COALESCE(r.driver_id, v.driver_id)
         JOIN depots dep ON dep.id=r.depot_id
         WHERE r.project_id=$1 ORDER BY r.id""", project_id)

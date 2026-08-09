@@ -135,3 +135,6 @@
                border-radius: 6px; padding: 3px 8px; white-space: nowrap;
                box-shadow: 0 0 0 1.5px #fff; font-family: 'Open Sans', system-ui, sans-serif;
                pointer-events: none; }
+
+/* v80: водій, підмінений на конкретний рейс */
+.drv-repl { color: var(--amber, #B8860B); border-bottom: 1.5px dotted var(--amber, #B8860B); }

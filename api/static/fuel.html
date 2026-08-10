@@ -76,7 +76,7 @@ dialog::backdrop{background:rgba(0,20,50,.5)}
 .refrow .del{border:1.5px solid var(--c3);background:#fff;color:var(--red);border-radius:8px;width:30px;height:30px;display:flex;align-items:center;justify-content:center;cursor:pointer;flex:none}
 .refrow .del:hover{border-color:var(--red)}
 </style>
-<link rel="stylesheet" href="/shell.css?v=81"></head><body>
+<link rel="stylesheet" href="/shell.css?v=82"></head><body>
 <header><h1>TMS</h1><nav class="tabs"><a href="/index.html">Планування</a><a href="/facts.html">План / Факт</a><a class="on">Транспортні листи</a></nav>
 <span id="stat" style="margin-left:auto;font-size:11px"></span></header>
 <div class="toolbar">
@@ -155,11 +155,11 @@ async function loadBalance(){
   const b=await api('/api/transport-sheets/balance/'+vehId);
   const cur=b.current,sp=b.start_point;
   const startLine=sp&&sp.initial_balance_l!=null&&sp.initial_balance_date
-    ?`Ланцюжок ведеться з <b>${sp.initial_balance_date} (${n(sp.initial_balance_l,1)} л)</b>`
+    ?`Ланцюжок ведеться з <b>${sp.initial_balance_date} (${n(sp.initial_balance_l,2)} л)</b>`
     :`<b style="color:var(--amber)">Немає стартової точки</b> — додайте коригування залишку на дату`;
-  const adj=(b.adjustments||[]).map(a=>`<div class="hrow"><span>${a.adjust_date} · коригування</span><span class="why" title="${a.reason}">${a.reason}</span><span class="v">${n(a.balance_l,1)} л</span></div>`).join('');
+  const adj=(b.adjustments||[]).map(a=>`<div class="hrow"><span>${a.adjust_date} · коригування</span><span class="why" title="${a.reason}">${a.reason}</span><span class="v">${n(a.balance_l,2)} л</span></div>`).join('');
   $('balBody').innerHTML=`
-    <div class="balnum"><b>${cur?n(cur.closing_balance_l,1):'—'}</b><span>л · залишок на кінець ${cur?cur.work_date:'—'}${cur&&cur.status!=='approved'?' (не підтверджено)':''}</span></div>
+    <div class="balnum"><b>${cur?n(cur.closing_balance_l,2):'—'}</b><span>л · залишок на кінець ${cur?cur.work_date:'—'}${cur&&cur.status!=='approved'?' (не підтверджено)':''}</span></div>
     <div class="chain">${startLine} · кожен день: залишок поч. = залишок кін. попереднього підтвердженого дня</div>
     <div class="hist">${adj||'<div class="hrow"><span class="why">Коригувань ще не було</span></div>'}</div>
     <div style="margin-top:10px"><button class="btn line" onclick="openAdjust()">Скоригувати залишок на дату</button></div>`;
@@ -226,7 +226,7 @@ function render(){
     if(prev){
       const d1=new Date(prev.work_date),d2=new Date(x.work_date);
       daysGap=Math.round((d2-d1)/86400000)-1;
-      if(daysGap>0)html+=`<tr class="gap"><td colspan="12">${daysGap===1?'1 день без листа':daysGap+' дн. без листів'} — залишок ${n(prev.closing_balance_l,1)} л переноситься без розриву</td></tr>`;
+      if(daysGap>0)html+=`<tr class="gap"><td colspan="12">${daysGap===1?'1 день без листа':daysGap+' дн. без листів'} — залишок ${n(prev.closing_balance_l,2)} л переноситься без розриву</td></tr>`;
     }
     const km=x.odometer_start!=null&&x.odometer_end!=null?x.odometer_end-x.odometer_start:null;
     // v71: початок дня має дорівнювати кінцю попереднього — інакше помилка вводу
@@ -243,7 +243,7 @@ function render(){
       <td><b>${x.work_date}</b>${isWeekend(x.work_date)?` <span style="font-size:10px;font-weight:800;color:var(--muted);background:var(--c2);border-radius:999px;padding:1px 6px" title="Вихідний">${DOW_UA[dowOf(x.work_date)]}</span>`:''}</td><td>${x.vehicle_name}</td><td>${x.driver_name}</td>
       <td style="color:#4d5866">${n(x.odometer_start)}${odoWarn} → <b style="color:var(--text)">${n(x.odometer_end)}</b></td>
       <td><b>${n(km)}</b></td><td>${gpsCell(x,km)}</td><td>${n(x.refueled_l,2)}</td><td>${n(x.rate_l_per_100,2)}</td><td>${n(x.fuel_used_l,2)}</td>
-      <td><span class="flow">${n(x.opening_balance_l,1)} ${ARROW} <b>${n(x.closing_balance_l,1)}</b></span>${x.opening_balance_l==null?' <span style="color:var(--amber);font-weight:800">немає ланцюжка</span>':''}</td>
+      <td><span class="flow">${n(x.opening_balance_l,2)} ${ARROW} <b>${n(x.closing_balance_l,2)}</b></span>${x.opening_balance_l==null?' <span style="color:var(--amber);font-weight:800">немає ланцюжка</span>':''}</td>
       <td><span class="status ${x.status}">${statusName[x.status]||x.status}</span></td>
       <td><div class="actions"><button class="btn light" onclick="openSheet(${x.id})">Відкрити</button>
       ${x.status!=='approved'?`<button class="btn" onclick="approve(${x.id})">Підтвердити</button>`
@@ -336,5 +336,5 @@ async function approve(id){
 }
 function exportXlsx(){location.href=`/api/transport-sheets/export.xlsx?date_from=${$('from').value}&date_to=${$('to').value}&vehicle_ids=${selected()}&approved_only=true`}
 (async()=>{await loadMeta();await load()})();
-</script><script src="/shell.js?v=81"></script>
+</script><script src="/shell.js?v=82"></script>
 </body></html>

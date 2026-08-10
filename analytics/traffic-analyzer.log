@@ -86,3 +86,7 @@
 2026-08-07: маршрутов 3, перегонов 26, usable=6, suspect=1, rejected=19
 2026-08-08: маршрутов 0, перегонов 0, usable=0, suspect=0, rejected=0
 Итого: legs_rejected=45, legs_suspect=4, legs_total=68, legs_usable=19, routes_accepted=3, routes_total=7
+2026-08-07: маршрутов 3, перегонов 26, usable=6, suspect=1, rejected=19
+2026-08-08: маршрутов 0, перегонов 0, usable=0, suspect=0, rejected=0
+2026-08-09: маршрутов 0, перегонов 0, usable=0, suspect=0, rejected=0
+Итого: legs_rejected=19, legs_suspect=1, legs_total=26, legs_usable=6, routes_accepted=1, routes_total=3

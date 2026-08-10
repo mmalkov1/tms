@@ -596,6 +596,43 @@ async def _touch_after_refuel_edit(sheet):
     await _recalculate(sheet["id"])
 
 
+class RefuelAddIn(BaseModel):
+    liters: str | float
+    reason: str
+    refuel_at: date | None = None      # заднім числом — дата листа за замовчуванням
+
+
+@router.post("/api/transport-sheets/{sheet_id}/refuels")
+async def logist_add_refuel(sheet_id: int, body: RefuelAddIn):
+    """v83: логіст додає заправку заднім числом (водій забув внести).
+
+    Раніше довелось би правити залишок коригуванням — і в обліку зникала
+    сама подія заправки. Тепер запис лягає в лист, ланцюжок перераховується,
+    а в журналі змін лишається слід із причиною.
+    """
+    sheet = await pool.fetchrow("SELECT * FROM transport_sheets WHERE id=$1", sheet_id)
+    if not sheet:
+        raise HTTPException(404, "Лист не знайдено")
+    liters = _num(body.liters, "Літри", False)
+    if liters <= 0:
+        raise HTTPException(400, "Кількість літрів має бути більшою за нуль")
+    reason = (body.reason or "").strip()
+    if not reason:
+        raise HTTPException(400, "Вкажіть причину додавання")
+    when = body.refuel_at or sheet["work_date"]
+    async with pool.acquire() as c:
+        async with c.transaction():
+            await c.execute(
+                "INSERT INTO transport_sheet_refuels (sheet_id, liters, refuel_at) "
+                "VALUES ($1,$2,$3::date + time '12:00')", sheet_id, liters, when)
+            await c.execute("""INSERT INTO transport_sheet_changes
+                (sheet_id,actor_role,actor_name,field_name,old_value,new_value,reason)
+                VALUES ($1,'logist','Логіст','refuel',NULL,$2,$3)""",
+                sheet_id, str(liters), reason)
+    await _touch_after_refuel_edit(sheet)
+    return {"ok": True}
+
+
 @router.patch("/api/transport-sheets/{sheet_id}/refuels/{refuel_id}")
 async def logist_edit_refuel(sheet_id: int, refuel_id: int, body: RefuelEditIn):
     sheet = await pool.fetchrow("SELECT * FROM transport_sheets WHERE id=$1", sheet_id)

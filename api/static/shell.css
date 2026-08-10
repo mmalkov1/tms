@@ -138,3 +138,14 @@
 
 /* v80: водій, підмінений на конкретний рейс */
 .drv-repl { color: var(--amber, #B8860B); border-bottom: 1.5px dotted var(--amber, #B8860B); }
+
+/* v83: додавання заправки логістом заднім числом */
+.refadd { display: flex; align-items: center; gap: 7px; padding: 8px 0 2px; font-size: 12px; }
+.refadd input[type=date] { border: 1.5px solid var(--c3, #E2DFDA); border-radius: 8px;
+                           padding: 6px 8px; font: inherit; font-size: 12.5px; }
+.refadd input[inputmode=decimal] { border: 1.5px solid var(--c3, #E2DFDA); border-radius: 8px;
+                                   padding: 6px 8px; font: inherit; font-size: 12.5px; width: 80px; }
+.refadd-btn { border: 1.5px dashed var(--navy, #00356B); background: #fff;
+              color: var(--navy, #00356B); border-radius: 8px; padding: 6px 12px;
+              font: 700 12px 'Open Sans', system-ui, sans-serif; cursor: pointer; margin-left: auto; }
+.refadd-btn:hover { border-style: solid; background: #F7FAFF; }

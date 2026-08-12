@@ -453,19 +453,53 @@ async def set_route_driver(route_id: int, body: RouteDriverIn):
             "SELECT id, name FROM drivers WHERE id=$1 AND is_active", body.driver_id)
         if not drv:
             raise HTTPException(400, "Водія не знайдено або він неактивний")
-        # той самий водій не може вести два рейси одного дня
-        busy = await pool.fetchrow("""
-            SELECT v.name FROM routes r2
-            JOIN vehicles v ON v.id = r2.vehicle_id
-            WHERE r2.plan_date = $1 AND r2.id <> $2
-              AND COALESCE(r2.driver_id, v.driver_id) = $3
-            LIMIT 1""", r["plan_date"], route_id, body.driver_id)
-        if busy:
-            raise HTTPException(409, f"{drv['name']} вже призначений на {busy['name']} цього дня")
+        # v85: кілька рейсів на день — нормальна ситуація (водій повернувся раніше,
+        # товар довантажили в інше авто). Не блокуємо, лише повідомляємо логісту.
     # NULL повертає штатного водія авто
     new_id = None if body.driver_id == r["veh_driver"] else body.driver_id
     await pool.execute("UPDATE routes SET driver_id=$1 WHERE id=$2", new_id, route_id)
     return {"ok": True}
+
+
+class RouteVehicleIn(BaseModel):
+    vehicle_id: int
+
+
+@app.patch("/api/routes/{route_id}/vehicle")
+async def set_route_vehicle(route_id: int, body: RouteVehicleIn):
+    """v85: підміна авто на рейсі — товар довантажили в іншу машину.
+
+    Не блокуємо нічого: одне авто може мати кілька рейсів на день, як і водій.
+    Якщо на рейсі не було персональної заміни водія, він переїжджає разом
+    з авто (бо кабінет читає COALESCE(r.driver_id, v.driver_id)); тож
+    фіксуємо поточного фактичного водія явно, щоб він не змінився раптово.
+    """
+    r = await pool.fetchrow(
+        "SELECT r.id, r.driver_id, COALESCE(r.driver_id, v.driver_id) AS eff_driver "
+        "FROM routes r JOIN vehicles v ON v.id = r.vehicle_id WHERE r.id = $1", route_id)
+    if not r:
+        raise HTTPException(404, "Рейс не знайдено")
+    veh = await pool.fetchrow(
+        "SELECT id, name, driver_id, max_weight_kg, max_volume_m3 FROM vehicles "
+        "WHERE id=$1 AND is_active", body.vehicle_id)
+    if not veh:
+        raise HTTPException(400, "Автомобіль не знайдено або він неактивний")
+
+    keep_driver = r["driver_id"] if r["driver_id"] is not None else r["eff_driver"]
+    new_driver = None if keep_driver == veh["driver_id"] else keep_driver
+    await pool.execute("UPDATE routes SET vehicle_id=$1, driver_id=$2 WHERE id=$3",
+                       body.vehicle_id, new_driver, route_id)
+
+    # попередження про місткість — рейс зберігаємо, рішення за логістом
+    load = await pool.fetchrow("""
+        SELECT COALESCE(sum(o.weight_kg),0) w, COALESCE(sum(o.volume_m3),0) v
+        FROM route_stops s JOIN orders o ON o.id=s.order_id WHERE s.route_id=$1""", route_id)
+    warn = None
+    if veh["max_weight_kg"] and load["w"] > veh["max_weight_kg"]:
+        warn = f"Вага {load['w']:.0f} кг перевищує ліміт авто ({veh['max_weight_kg']:.0f} кг)"
+    elif veh["max_volume_m3"] and load["v"] > veh["max_volume_m3"]:
+        warn = f"Обʼєм {load['v']:.2f} м³ перевищує ліміт авто ({veh['max_volume_m3']:.2f} м³)"
+    return {"ok": True, "warning": warn}
 
 
 @app.get("/api/depots")

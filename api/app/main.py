@@ -169,6 +169,10 @@ async def startup():
     await pool.execute("ALTER TABLE projects ADD COLUMN IF NOT EXISTS warehouse_code_1c TEXT")
     # v60 (migrate_027): оригінальна адреса 1С — стабільний ключ кешу геокодування
     await pool.execute("ALTER TABLE orders ADD COLUMN IF NOT EXISTS address_1c TEXT")
+    # v86: NULL = 1С не передала час обслуговування; норматив підставить apply_service_norms.
+    # Колонка була NOT NULL DEFAULT 15 — через це імпорт падав з 500 після v84.
+    await pool.execute("ALTER TABLE orders ALTER COLUMN service_min DROP NOT NULL")
+    await pool.execute("ALTER TABLE orders ALTER COLUMN service_min DROP DEFAULT")
     await pool.execute("UPDATE orders SET address_1c=address WHERE address_1c IS NULL")
     # v15 (migrate_010): кеш геокодирования — исправленные вручную адреса/координаты переживают реимпорт
     await pool.execute("""

@@ -189,7 +189,7 @@ def _parse_order(el: ET.Element) -> dict | None:
         "lat": lat, "lon": lon,
         "tw_from": tw_from, "tw_to": tw_to,
         "break_from": break_from, "break_to": break_to,
-        "service_min": service or 15,
+        "service_min": service,          # v84: None = 1С не передала, дефолт не нав'язуємо
         "weight_kg": round(w, 2), "volume_m3": round(v, 3),
     }
 
@@ -287,7 +287,9 @@ async def import_orders(request: Request,
                     lat=COALESCE(EXCLUDED.lat, orders.lat),
                     lon=COALESCE(EXCLUDED.lon, orders.lon),
                     tw_from=EXCLUDED.tw_from, tw_to=EXCLUDED.tw_to,
-                    service_min=EXCLUDED.service_min,
+                    -- v84: розрахований норматив простою не затираємо;
+                    -- перезапис лише коли 1С реально прислала своє значення
+                    service_min=COALESCE(EXCLUDED.service_min, orders.service_min),
                     weight_kg=EXCLUDED.weight_kg, volume_m3=EXCLUDED.volume_m3,
                     phone=COALESCE(EXCLUDED.phone, orders.phone),
                     seats=COALESCE(EXCLUDED.seats, orders.seats),
@@ -301,6 +303,14 @@ async def import_orders(request: Request,
                 ins += 1
             else:
                 upd += 1
+
+    # v84: заявки без service_min від 1С — норматив з історії, інакше дефолт 15.
+    # Робиться після кожного імпорту, щоб нові заявки не з'являлися в плані з «15 хв».
+    try:
+        from . import main as _main
+        await _main.apply_service_norms(project_id)
+    except Exception as e:
+        print("service norms after 1C import failed:", e)
 
     # координаты из кеша геокодирования (адреса, исправленные логистом ранее)
     try:

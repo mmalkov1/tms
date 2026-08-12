@@ -90,3 +90,11 @@
 2026-08-08: маршрутов 0, перегонов 0, usable=0, suspect=0, rejected=0
 2026-08-09: маршрутов 0, перегонов 0, usable=0, suspect=0, rejected=0
 Итого: legs_rejected=19, legs_suspect=1, legs_total=26, legs_usable=6, routes_accepted=1, routes_total=3
+2026-08-08: маршрутов 0, перегонов 0, usable=0, suspect=0, rejected=0
+2026-08-09: маршрутов 0, перегонов 0, usable=0, suspect=0, rejected=0
+2026-08-10: маршрутов 3, перегонов 40, usable=15, suspect=6, rejected=19
+Итого: legs_rejected=19, legs_suspect=6, legs_total=40, legs_usable=15, routes_accepted=3, routes_total=3
+2026-08-09: маршрутов 0, перегонов 0, usable=0, suspect=0, rejected=0
+2026-08-10: маршрутов 3, перегонов 40, usable=15, suspect=6, rejected=19
+2026-08-11: маршрутов 3, перегонов 31, usable=11, suspect=9, rejected=11
+Итого: legs_rejected=30, legs_suspect=15, legs_total=71, legs_usable=26, routes_accepted=5, routes_total=6

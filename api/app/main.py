@@ -681,6 +681,33 @@ async def import_service_stats(file: UploadFile = File(...)):
     return {"rows": len(stats)}
 
 
+async def apply_service_norms(project_id: int, mode: str = "hist_med", fallback: int = 15) -> int:
+    """v84: проставити норматив простою заявкам, у яких його немає.
+
+    Викликається після імпорту з 1С: раніше 1С підставляла свої 15 хв і затирала
+    розрахунок, тепер приходить NULL — і сюди підтягується норма з історії
+    (клієнт+адреса). Уже заповнені значення не чіпаємо: розрахунок логіста
+    та явні значення 1С головніші.
+    """
+    ords = await pool.fetch(
+        "SELECT id, client, lat, lon FROM orders WHERE project_id=$1 AND service_min IS NULL",
+        project_id)
+    if not ords:
+        return 0
+    try:
+        await _refresh_service_stats_tms()
+    except Exception as e:
+        print("service-stats refresh failed:", e)
+    srows = await pool.fetch("SELECT * FROM client_service_stats")
+    by_client = {}
+    for r in srows:
+        by_client.setdefault(r["client_key"], []).append(dict(r))
+    for o in ords:
+        val = dwell.pick_service_min(by_client, o["client"], o["lat"], o["lon"], mode, fallback)
+        await pool.execute("UPDATE orders SET service_min=$1 WHERE id=$2", val, o["id"])
+    return len(ords)
+
+
 async def _refresh_service_stats_tms():
     """v43: нормативи простою з власних фактів TMS (stop_events прибув→поїхав).
 
@@ -980,7 +1007,7 @@ async def plan(
         order_id=i + 1,
         tw_from=t2m(o["tw_from"], 8 * 60),
         tw_to=t2m(o["tw_to"], 20 * 60),
-        service_min=o["service_min"],
+        service_min=o["service_min"] or 15,      # v84: NULL можливий до підстановки норми
         weight=float(o["weight_kg"] or 0),
         volume=float(o["volume_m3"] or 0),
         kind=o["kind"],
@@ -1156,16 +1183,17 @@ async def _rebuild_route(route_id: int):
     start = t2m(r["depart_time"], None) if r["depart_time"] else t2m(r["ss"], 9 * 60)
     t = start
     for i, s in enumerate(ss):
+        svc = s["service_min"] or 15                       # v84: NULL до підстановки норми
         t += legs[i] // 60
         t = max(t, t2m(s["tw_from"], 0))
         if s["break_from"] and s["break_to"]:              # v39: перерва
             bf, bt = t2m(s["break_from"], 0), t2m(s["break_to"], 0)
-            if bf - s["service_min"] < t < bt:
+            if bf - svc < t < bt:
                 t = bt
         await pool.execute(
             "UPDATE route_stops SET eta=$1, etd=$2 WHERE route_id=$3 AND order_id=$4",
-            m2t(t), m2t(t + s["service_min"]), route_id, s["order_id"])
-        t += s["service_min"]
+            m2t(t), m2t(t + svc), route_id, s["order_id"])
+        t += svc
     ret = t + legs[-1] // 60
     await pool.execute("""
         UPDATE routes SET geometry=$1, total_km=$2, total_min=$3, load_weight=$4,

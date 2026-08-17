@@ -80,6 +80,19 @@
   .rrow button { border:1px solid var(--cream-300); background:#fff; border-radius:7px; padding:3px 10px;
                  font-size:11px; cursor:pointer; color:var(--blue); font-weight:600; }
   .rrow button:hover { border-color:var(--navy); color:var(--navy); }
+  .traffic-grid { max-width:470px; }
+  .traffic-grid td:last-child { width:130px; }
+  .traffic-grid input { width:86px; text-align:right; font-variant-numeric:tabular-nums; }
+  .traffic-note { color:#687482; font-size:12px; line-height:1.55; margin:0 0 14px; max-width:560px; }
+  .traffic-save { border:0; border-radius:9px; background:var(--navy); color:#fff; padding:8px 14px;
+                  font:700 12px 'Open Sans'; cursor:pointer; box-shadow:0 2px 8px rgba(0,53,107,.25); }
+  .traffic-mode { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+  .traffic-mode label { display:flex; align-items:flex-start; gap:8px; border:1.5px solid var(--cream-300);
+                        border-radius:10px; padding:9px 11px; cursor:pointer; font-size:12px; line-height:1.4; }
+  .traffic-mode label:has(input:checked) { border-color:var(--navy); background:#F1F5FA; }
+  .traffic-mode input { margin-top:2px; accent-color:var(--navy); }
+  .traffic-mode small { display:block; color:#7A8490; margin-top:2px; }
+  #trafficFactorSummary { margin-top:8px; color:var(--blue); font-size:11px; line-height:1.5; }
   header label { font-size:12px; display:flex; align-items:center; gap:4px; }
   dialog { border:none; border-radius:14px; padding:0; max-width:760px; width:92%; box-shadow:0 12px 48px rgba(0,20,50,.35); margin:auto; resize:both; overflow:auto; max-height:92vh; background:#fff; color:var(--text); font-family:'Open Sans',system-ui,sans-serif; }
   .dlg-head { cursor:move; user-select:none; }
@@ -117,6 +130,8 @@
   .route-head .over { background:var(--red); color:#fff; border-radius:999px; padding:0 9px; font-weight:800; }
   .route-head .del { cursor:pointer; color:var(--blue); opacity:.8; }
   .route-head .del:hover { opacity:1; color:var(--red); }
+  .route-head .traffic-badge { display:inline-block; margin-left:5px; padding:1px 6px; border-radius:999px;
+                               background:#E6EEF7; color:var(--navy); font-size:9.5px; font-weight:800; }
   .rdot { display:inline-block; width:10px; height:10px; border-radius:50%; margin-right:7px; }
   .stops { min-height:26px; padding:5px; }
   .stop { background:var(--cream-50); border:1px solid var(--cream-200); border-radius:9px; padding:4px 7px; margin:4px 0;
@@ -318,6 +333,17 @@ fetch('/api/transport-sheets/notifications/count').then(r=>r.json()).then(j=>{
     </div>
 
     <div class="tool-block">
+      <h3>Час у дорозі</h3>
+      <div class="traffic-mode">
+        <label><input type="radio" name="trafficMode" value="standard" checked>
+          <span><b>Стандартний OSRM</b><small>Поточна схема без поправок</small></span></label>
+        <label><input type="radio" name="trafficMode" value="factors">
+          <span><b>З часовими коефіцієнтами</b><small>За часом виїзду з кожної точки</small></span></label>
+      </div>
+      <div id="trafficFactorSummary">Завантаження коефіцієнтів…</div>
+    </div>
+
+    <div class="tool-block">
       <h3>Розрахунок маршрутів</h3>
       <div class="tool-row">
         <button class="pri" onclick="doPlan(false)">Розрахувати</button>
@@ -443,7 +469,7 @@ fetch('/api/transport-sheets/notifications/count').then(r=>r.json()).then(j=>{
       <div class="on" onclick="setSection('da', this)">Водії та авто</div>
       <div onclick="setSection('la', this)">Доступ логіста</div>
       <div onclick="setSection('fr', this)">Причини відмов</div>
-      <div class="dis">Планування <small>(згодом)</small></div>
+      <div onclick="setSection('pl', this)">Планування</div>
       <div class="dis">1С <small>(згодом)</small></div>
     </div>
     <div id="setMain">
@@ -488,6 +514,26 @@ fetch('/api/transport-sheets/notifications/count').then(r=>r.json()).then(j=>{
         <div class="logist-add"><input id="newLogistName" placeholder="Наприклад, Черговий логіст"><button onclick="addLogistAccess()">Додати доступ</button></div>
         <div id="logistAccessRows"></div>
       </div>
+      <div id="sec-pl" style="display:none">
+        <h4>Коефіцієнти часу руху</h4>
+        <p class="traffic-note">Застосовуються лише коли у вікні розрахунку обрано режим
+          «З часовими коефіцієнтами». Інтервал визначається за розрахунковим часом виїзду
+          з попередньої точки. Стандартний режим OSRM залишається без змін.</p>
+        <table class="traffic-grid">
+          <thead><tr><th>Час виїзду</th><th>Коефіцієнт</th></tr></thead>
+          <tbody>
+            <tr><td>07:00–10:00</td><td><input id="tf0710" type="number" min="0.5" max="3" step="0.01"></td></tr>
+            <tr><td>10:00–13:00</td><td><input id="tf1013" type="number" min="0.5" max="3" step="0.01"></td></tr>
+            <tr><td>13:00–16:00</td><td><input id="tf1316" type="number" min="0.5" max="3" step="0.01"></td></tr>
+            <tr><td>16:00–19:00</td><td><input id="tf1619" type="number" min="0.5" max="3" step="0.01"></td></tr>
+            <tr><td>Інший час</td><td><input id="tfOther" type="number" min="0.5" max="3" step="0.01"></td></tr>
+          </tbody>
+        </table>
+        <div style="display:flex;align-items:center;gap:10px">
+          <button class="traffic-save" onclick="saveTrafficSettings()">Зберегти коефіцієнти</button>
+          <span id="trafficUpdated" style="font-size:11px;color:#7A8490"></span>
+        </div>
+      </div>
     </div>
   </div>
   <div class="dlg-foot"><button onclick="setDlg.close()">Закрити</button></div>
@@ -510,8 +556,52 @@ const hm = t => t ? String(t).slice(0,5) : '';
 let vehicles = [];
 let projects = [];
 let pendingFile = null;
+let trafficSettings = null;
 
-function openPlanDlg() { $('planDlg').showModal(); }
+async function openPlanDlg() {
+  await loadTrafficSettings();
+  $('planDlg').showModal();
+}
+
+async function loadTrafficSettings(force=false) {
+  if (trafficSettings && !force) { renderTrafficSettings(); return; }
+  const r = await fetch('/api/settings/traffic');
+  if (!r.ok) { st('Не вдалося завантажити дорожні коефіцієнти'); return; }
+  trafficSettings = await r.json();
+  renderTrafficSettings();
+}
+
+function renderTrafficSettings() {
+  if (!trafficSettings || !trafficSettings.factors) return;
+  const f = trafficSettings.factors;
+  const fields = {tf0710:'07-10', tf1013:'10-13', tf1316:'13-16',
+                  tf1619:'16-19', tfOther:'other'};
+  Object.entries(fields).forEach(([id,key]) => {
+    if ($(id)) $(id).value = Number(f[key]).toFixed(2);
+  });
+  if ($('trafficFactorSummary')) $('trafficFactorSummary').textContent =
+    `07–10 ×${Number(f['07-10']).toFixed(2)} · 10–13 ×${Number(f['10-13']).toFixed(2)} · ` +
+    `13–16 ×${Number(f['13-16']).toFixed(2)} · 16–19 ×${Number(f['16-19']).toFixed(2)} · ` +
+    `інший час ×${Number(f.other).toFixed(2)}`;
+  if ($('trafficUpdated') && trafficSettings.updated_at) {
+    $('trafficUpdated').textContent = 'Оновлено ' + new Date(trafficSettings.updated_at)
+      .toLocaleString('uk-UA', {day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'});
+  }
+}
+
+async function saveTrafficSettings() {
+  const val = id => Number($(id).value);
+  const body = {factor_07_10:val('tf0710'), factor_10_13:val('tf1013'),
+    factor_13_16:val('tf1316'), factor_16_19:val('tf1619'), factor_other:val('tfOther')};
+  if (Object.values(body).some(v => !Number.isFinite(v) || v < .5 || v > 3))
+    return st('Коефіцієнти мають бути від 0,5 до 3,0');
+  const r = await fetch('/api/settings/traffic', {method:'PUT',
+    headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
+  if (!r.ok) { const j=await r.json().catch(()=>({})); return st(j.detail||'Помилка збереження'); }
+  trafficSettings = await r.json();
+  renderTrafficSettings();
+  st('Дорожні коефіцієнти збережено');
+}
 
 function setDzFile(name) {
   const dz = $('dropzone');
@@ -771,8 +861,9 @@ window.addEventListener('resize', () => {
 });
 
 async function openSettings() {
-  await Promise.all([loadVehicles(true), loadSetDrivers(), loadReasons(), loadLogistAccesses()]);
-  renderSetDA(); renderReasons(); renderLogistAccesses();
+  await Promise.all([loadVehicles(true), loadSetDrivers(), loadReasons(),
+                     loadLogistAccesses(), loadTrafficSettings(true)]);
+  renderSetDA(); renderReasons(); renderLogistAccesses(); renderTrafficSettings();
   $('tokQr').classList.remove('show');
   restoreSettingsSize();
   $('setDlg').showModal();
@@ -785,6 +876,7 @@ function setSection(sec, el) {
   $('sec-da').style.display = sec === 'da' ? '' : 'none';
   $('sec-fr').style.display = sec === 'fr' ? '' : 'none';
   $('sec-la').style.display = sec === 'la' ? '' : 'none';
+  $('sec-pl').style.display = sec === 'pl' ? '' : 'none';
 }
 
 async function loadSetDrivers() {
@@ -1076,9 +1168,11 @@ async function runImport(projectId) {
 async function doPlan(useZones) {
   $('planDlg').close();
   const ids = [...selectedVeh];
+  const useTraffic = document.querySelector('input[name="trafficMode"]:checked')?.value === 'factors';
   if (!ids.length) return st('Обери машини (кнопка «Авто»)');
   if (!curProject()) return st('Немає проекту — імпортуй заявки');
-  $('busyTxt').textContent = useZones ? 'Розрахунок маршрутів по геозонах…' : 'Розрахунок маршрутів…';
+  $('busyTxt').textContent = 'Розрахунок маршрутів' +
+    (useZones ? ' по геозонах' : '') + (useTraffic ? ' з часовими коефіцієнтами' : '') + '…';
   $('busy').classList.add('on');
   st('Розрахунок…');
   try {
@@ -1087,13 +1181,15 @@ async function doPlan(useZones) {
       plan_date: $('planDate').value, vehicle_ids: ids.join(','),
       service_min: $('svcMin').value, service_source: $('svcSrc').value, use_zones: !!useZones,
       zone_penalty: $('zonePen').value, balance: $('balSel').value,
+      use_traffic_factors: useTraffic,
       depot_depart: $('depDepart').value, depot_return: $('depReturn').value });
     const r = await fetch(`/api/plan?${p}`, {method:'POST'});
     if (!r.ok) { st('Помилка: ' + ((await r.json()).detail || r.status)); return; }
     const j = await r.json();
     const zs = j.zone_stats && Object.keys(j.zone_stats).length
       ? ' · ' + Object.entries(j.zone_stats).map(([k,v])=>`${k}: ${v}`).join(', ') : '';
-    st(`Маршрутів: ${j.routes.length}, у буфері: ${j.dropped_orders.length}${zs}`);
+    st(`Маршрутів: ${j.routes.length}, у буфері: ${j.dropped_orders.length}${zs}` +
+       (j.traffic_factors_applied ? ' · часові коефіцієнти застосовано' : ' · стандартний OSRM'));
     await loadAll();
   } finally {
     $('busy').classList.remove('on');
@@ -1485,7 +1581,7 @@ async function loadAll() {
     const card = document.createElement('div'); card.className = 'route-card';
     card.style.setProperty('--rc', r.color);
     card.innerHTML = `<div class="route-head">
-      <span><i class="rdot" style="background:${r.color}"></i>${r.vehicle_name} · <span class="${r.driver_replaced?'drv-repl':''}" title="${r.driver_replaced?'Водія замінено на цей день':''}">${r.driver_name||'—'}</span> <span class="del" title="Змінити водія на цьому рейсі" onclick="event.stopPropagation();openDriverDlg(${r.id},${r.eff_driver_id||'null'},${r.vehicle_id})"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M19 8v6M22 11h-6"/></svg></span> ${r.stops.length?'<span class="del" title="Розвернути маршрут у зворотному порядку" onclick="event.stopPropagation();reverseRoute('+r.id+')"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><path d="M17 3l4 4-4 4"/><path d="M21 7H7"/><path d="M7 21l-4-4 4-4"/><path d="M3 17h14"/></svg></span>':'<span class="del" onclick="delRoute('+r.id+')"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/></svg></span>'}</span>
+      <span><i class="rdot" style="background:${r.color}"></i>${r.vehicle_name} · <span class="${r.driver_replaced?'drv-repl':''}" title="${r.driver_replaced?'Водія замінено на цей день':''}">${r.driver_name||'—'}</span>${r.use_traffic_factors?'<span class="traffic-badge" title="ETA розраховано з часовими коефіцієнтами">КОЕФ. ЧАСУ</span>':''} <span class="del" title="Змінити водія на цьому рейсі" onclick="event.stopPropagation();openDriverDlg(${r.id},${r.eff_driver_id||'null'},${r.vehicle_id})"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M19 8v6M22 11h-6"/></svg></span> ${r.stops.length?'<span class="del" title="Розвернути маршрут у зворотному порядку" onclick="event.stopPropagation();reverseRoute('+r.id+')"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><path d="M17 3l4 4-4 4"/><path d="M21 7H7"/><path d="M7 21l-4-4 4-4"/><path d="M3 17h14"/></svg></span>':'<span class="del" onclick="delRoute('+r.id+')"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/></svg></span>'}</span>
       <span>${uniq} точок (${r.stops.length} завд.) · ${r.total_km||0} км ·
       пік ${(+r.peak_weight||0).toFixed(0)}/${(+r.max_weight_kg||0).toFixed(0)} кг (${wPct.toFixed(0)}%) ·
       ${(+r.peak_volume||0).toFixed(2)}/${(+r.max_volume_m3||0).toFixed(1)} м³ (${vPct.toFixed(0)}%)

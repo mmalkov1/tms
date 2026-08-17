@@ -1,4 +1,5 @@
 """TMS Культтовари Глобал — API v2."""
+import json
 import os
 from datetime import date, datetime, time, timezone
 
@@ -148,6 +149,38 @@ async def no_html_cache(request, call_next):
     return resp
 pool: asyncpg.Pool = None
 
+DEFAULT_TRAFFIC_FACTORS = {
+    "07-10": 1.590,
+    "10-13": 1.430,
+    "13-16": 1.680,
+    "16-19": 1.100,
+    "other": 1.520,
+}
+
+
+def _traffic_factors(value) -> dict[str, float] | None:
+    """Нормалізувати рядок налаштувань БД або JSON-знімок маршруту."""
+    if not value:
+        return None
+    if isinstance(value, str):
+        value = json.loads(value)
+    if hasattr(value, "keys") and "factor_07_10" in value.keys():
+        return {
+            "07-10": float(value["factor_07_10"]),
+            "10-13": float(value["factor_10_13"]),
+            "13-16": float(value["factor_13_16"]),
+            "16-19": float(value["factor_16_19"]),
+            "other": float(value["factor_other"]),
+        }
+    return {key: float(value.get(key, default))
+            for key, default in DEFAULT_TRAFFIC_FACTORS.items()}
+
+
+async def _load_traffic_factors(conn=None) -> dict[str, float]:
+    row = await (conn or pool).fetchrow(
+        "SELECT * FROM traffic_planning_settings WHERE id=1")
+    return _traffic_factors(row) or dict(DEFAULT_TRAFFIC_FACTORS)
+
 
 @app.on_event("startup")
 async def startup():
@@ -174,6 +207,23 @@ async def startup():
     await pool.execute("ALTER TABLE orders ALTER COLUMN service_min DROP NOT NULL")
     await pool.execute("ALTER TABLE orders ALTER COLUMN service_min DROP DEFAULT")
     await pool.execute("UPDATE orders SET address_1c=address WHERE address_1c IS NULL")
+    # v87: керовані коефіцієнти часу руху + знімок режиму на маршруті.
+    await pool.execute("""
+        CREATE TABLE IF NOT EXISTS traffic_planning_settings (
+            id            SMALLINT PRIMARY KEY DEFAULT 1 CHECK (id = 1),
+            factor_07_10  NUMERIC(5,3) NOT NULL DEFAULT 1.590,
+            factor_10_13  NUMERIC(5,3) NOT NULL DEFAULT 1.430,
+            factor_13_16  NUMERIC(5,3) NOT NULL DEFAULT 1.680,
+            factor_16_19  NUMERIC(5,3) NOT NULL DEFAULT 1.100,
+            factor_other  NUMERIC(5,3) NOT NULL DEFAULT 1.520,
+            updated_at    TIMESTAMPTZ NOT NULL DEFAULT now())""")
+    await pool.execute("""
+        INSERT INTO traffic_planning_settings (id) VALUES (1)
+        ON CONFLICT (id) DO NOTHING""")
+    await pool.execute("""
+        ALTER TABLE routes
+            ADD COLUMN IF NOT EXISTS use_traffic_factors BOOLEAN NOT NULL DEFAULT FALSE,
+            ADD COLUMN IF NOT EXISTS traffic_factors JSONB""")
     # v15 (migrate_010): кеш геокодирования — исправленные вручную адреса/координаты переживают реимпорт
     await pool.execute("""
         CREATE TABLE IF NOT EXISTS geo_cache (
@@ -970,6 +1020,52 @@ async def geocode_one(order_id: int):
     return {"lat": res[0], "lon": res[1]}
 
 
+# ---------- налаштування часу руху ----------
+
+class TrafficPlanningSettingsIn(BaseModel):
+    factor_07_10: float
+    factor_10_13: float
+    factor_13_16: float
+    factor_16_19: float
+    factor_other: float
+
+
+def _validate_factor(value: float) -> float:
+    value = round(float(value), 3)
+    if not 0.5 <= value <= 3.0:
+        raise HTTPException(400, "Коефіцієнт має бути від 0,5 до 3,0")
+    return value
+
+
+@app.get("/api/settings/traffic")
+async def get_traffic_settings():
+    row = await pool.fetchrow(
+        "SELECT * FROM traffic_planning_settings WHERE id=1")
+    factors = _traffic_factors(row) or dict(DEFAULT_TRAFFIC_FACTORS)
+    return {"factors": factors, "updated_at": row["updated_at"] if row else None}
+
+
+@app.put("/api/settings/traffic")
+async def put_traffic_settings(body: TrafficPlanningSettingsIn):
+    vals = [_validate_factor(v) for v in (
+        body.factor_07_10, body.factor_10_13, body.factor_13_16,
+        body.factor_16_19, body.factor_other)]
+    row = await pool.fetchrow("""
+        INSERT INTO traffic_planning_settings (
+            id, factor_07_10, factor_10_13, factor_13_16, factor_16_19,
+            factor_other, updated_at)
+        VALUES (1,$1,$2,$3,$4,$5,now())
+        ON CONFLICT (id) DO UPDATE SET
+            factor_07_10=EXCLUDED.factor_07_10,
+            factor_10_13=EXCLUDED.factor_10_13,
+            factor_13_16=EXCLUDED.factor_13_16,
+            factor_16_19=EXCLUDED.factor_16_19,
+            factor_other=EXCLUDED.factor_other,
+            updated_at=now()
+        RETURNING *""", *vals)
+    return {"factors": _traffic_factors(row), "updated_at": row["updated_at"]}
+
+
 # ---------- планирование ----------
 
 @app.post("/api/plan")
@@ -984,6 +1080,7 @@ async def plan(
     use_zones: bool = Query(False),          # учитывать геозоны водителей
     zone_penalty: int = Query(20),           # мягкость зон: штраф хв за чужую точку; >=240 = жестко
     balance: str = Query("soft"),            # off | soft | hard — выравнивание машин
+    use_traffic_factors: bool = Query(False), # v87: поправки за часом виїзду з точки
     time_limit: int = 15,
 ):
     depart_m = parse_hhmm(depot_depart, 9 * 60)
@@ -1108,10 +1205,30 @@ async def plan(
             ok = [i for i, v in enumerate(vrows) if v[key]]
             cap_allowed.append(ok if len(ok) < len(vrows) else None)
 
+    traffic_factors = await _load_traffic_factors() if use_traffic_factors else None
     routes_idx = solver.solve(stops, trucks, durations, time_limit, allowed,
                               zone_penalty_min=zpen, span_cost=span, hard_allowed=cap_allowed)
     if routes_idx is None:
         raise HTTPException(422, "Рішення не знайдено — перевір вікна/ліміти")
+    if traffic_factors:
+        # v87: OSRM-матриця статична, тому уточнюємо рішення ітеративно.
+        # Поточний порядок дає час виїзду з вузлів; ним масштабуємо рядки
+        # матриці й ще раз запускаємо розподіл/послідовність. Два проходи
+        # прибирають більшість переходів через межі часових інтервалів.
+        for _ in range(2):
+            adjusted = solver.coefficient_duration_matrices(
+                routes_idx, stops, trucks, durations, traffic_factors)
+            refined = solver.solve(
+                stops, trucks, durations, time_limit, allowed,
+                zone_penalty_min=zpen, span_cost=span, hard_allowed=cap_allowed,
+                vehicle_durations=adjusted)
+            if refined is None:
+                raise HTTPException(
+                    422, "Рішення з дорожніми коефіцієнтами не знайдено — перевір вікна")
+            if refined == routes_idx:
+                routes_idx = refined
+                break
+            routes_idx = refined
 
     async with pool.acquire() as c:
         await c.execute(
@@ -1124,22 +1241,26 @@ async def plan(
                 continue
             dropped -= set(seq)
             tr, veh = trucks[v_i], vrows[v_i]
-            sched = solver.eta_schedule([stops[i] for i in seq], durations, tr.shift_start)
+            sched = solver.eta_schedule(
+                [stops[i] for i in seq], durations, tr.shift_start, traffic_factors)
             node_seq = [0] + [i + 1 for i in seq] + [0]
             geom = await osrm.route_geometry([points[n] for n in node_seq])
             km = sum(distances[node_seq[j]][node_seq[j + 1]] for j in range(len(node_seq) - 1)) / 1000
-            ret = sched[-1][1] + durations[seq[-1] + 1][0] // 60  # возврат: ETD последней + перегон (п.8)
+            ret = sched[-1][1] + solver.travel_minutes(
+                durations[seq[-1] + 1][0], sched[-1][1], traffic_factors)
 
             seq_rows = [{"kind": stops[i].kind, "weight_kg": stops[i].weight,
                          "volume_m3": stops[i].volume} for i in seq]
             _, _, _, peak_w, peak_v = running_loads(seq_rows)
             rid = await c.fetchval("""
                 INSERT INTO routes (plan_date, vehicle_id, driver_id, color, total_km,
-                    load_weight, load_volume, geometry, depart_time, return_time, project_id)
-                VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING id""",
+                    load_weight, load_volume, geometry, depart_time, return_time, project_id,
+                    use_traffic_factors, traffic_factors)
+                VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13::jsonb) RETURNING id""",
                 plan_date, veh["id"], veh["driver_id"], ROUTE_COLORS[v_i % len(ROUTE_COLORS)],
                 round(km, 1), peak_w, peak_v, geom,
-                m2t(tr.shift_start), m2t(ret), project_id)
+                m2t(tr.shift_start), m2t(ret), project_id, bool(traffic_factors),
+                json.dumps(traffic_factors) if traffic_factors else None)
 
             for pos, (si, (eta, etd)) in enumerate(zip(seq, sched), start=1):
                 await c.execute(
@@ -1148,7 +1269,8 @@ async def plan(
             out.append({"route_id": rid, "vehicle": veh["name"], "stops": len(seq), "km": round(km, 1)})
 
     return {"routes": out, "dropped_orders": [orows[i]["id"] for i in dropped],
-            "zone_stats": zone_stats}
+            "zone_stats": zone_stats, "traffic_factors_applied": bool(traffic_factors),
+            "traffic_factors": traffic_factors}
 
 
 # ---------- ручное управление маршрутами ----------
@@ -1198,6 +1320,7 @@ class SetStops(BaseModel):
 async def _rebuild_route(route_id: int):
     r = await pool.fetchrow("""
         SELECT r.id, r.vehicle_id, r.depart_time,
+               r.use_traffic_factors, r.traffic_factors,
                COALESCE(r.start_lat, d.lat)  AS s_lat,      -- v51: старт/фініш
                COALESCE(r.start_lon, d.lon)  AS s_lon,      -- не зі складу
                COALESCE(r.finish_lat, d.lat) AS f_lat,
@@ -1219,10 +1342,11 @@ async def _rebuild_route(route_id: int):
               + [(r["f_lat"], r["f_lon"])])
     geom, legs, km = await osrm.route_with_legs(points)
     start = t2m(r["depart_time"], None) if r["depart_time"] else t2m(r["ss"], 9 * 60)
+    factors = _traffic_factors(r["traffic_factors"]) if r["use_traffic_factors"] else None
     t = start
     for i, s in enumerate(ss):
         svc = s["service_min"] or 15                       # v84: NULL до підстановки норми
-        t += legs[i] // 60
+        t += solver.travel_minutes(legs[i], t, factors)
         t = max(t, t2m(s["tw_from"], 0))
         if s["break_from"] and s["break_to"]:              # v39: перерва
             bf, bt = t2m(s["break_from"], 0), t2m(s["break_to"], 0)
@@ -1232,7 +1356,7 @@ async def _rebuild_route(route_id: int):
             "UPDATE route_stops SET eta=$1, etd=$2 WHERE route_id=$3 AND order_id=$4",
             m2t(t), m2t(t + svc), route_id, s["order_id"])
         t += svc
-    ret = t + legs[-1] // 60
+    ret = t + solver.travel_minutes(legs[-1], t, factors)
     await pool.execute("""
         UPDATE routes SET geometry=$1, total_km=$2, total_min=$3, load_weight=$4,
             load_volume=$5, return_time=$6 WHERE id=$7""",

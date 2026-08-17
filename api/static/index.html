@@ -84,6 +84,9 @@
   .traffic-grid td:last-child { width:130px; }
   .traffic-grid input { width:86px; text-align:right; font-variant-numeric:tabular-nums; }
   .traffic-note { color:#687482; font-size:12px; line-height:1.55; margin:0 0 14px; max-width:560px; }
+  .traffic-auto { max-width:560px; margin:-3px 0 14px; padding:10px 12px; border-radius:10px;
+                  background:#F1F5FA; color:var(--navy); font-size:11.5px; line-height:1.55; }
+  .traffic-auto small { display:block; color:#687482; margin-top:2px; }
   .traffic-save { border:0; border-radius:9px; background:var(--navy); color:#fff; padding:8px 14px;
                   font:700 12px 'Open Sans'; cursor:pointer; box-shadow:0 2px 8px rgba(0,53,107,.25); }
   .traffic-mode { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
@@ -519,6 +522,7 @@ fetch('/api/transport-sheets/notifications/count').then(r=>r.json()).then(j=>{
         <p class="traffic-note">Застосовуються лише коли у вікні розрахунку обрано режим
           «З часовими коефіцієнтами». Інтервал визначається за розрахунковим часом виїзду
           з попередньої точки. Стандартний режим OSRM залишається без змін.</p>
+        <div id="trafficAutoInfo" class="traffic-auto">Завантаження інформації про нічне оновлення…</div>
         <table class="traffic-grid">
           <thead><tr><th>Час виїзду</th><th>Коефіцієнт</th></tr></thead>
           <tbody>
@@ -586,6 +590,23 @@ function renderTrafficSettings() {
   if ($('trafficUpdated') && trafficSettings.updated_at) {
     $('trafficUpdated').textContent = 'Оновлено ' + new Date(trafficSettings.updated_at)
       .toLocaleString('uk-UA', {day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'});
+  }
+  if ($('trafficAutoInfo')) {
+    const dt = v => v ? new Date(v).toLocaleString('uk-UA',
+      {day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'}) : '—';
+    const dd = v => v ? String(v).split('-').reverse().join('.') : '—';
+    const counts = trafficSettings.sample_counts || {};
+    const minN = Number(trafficSettings.min_sample_count || 20);
+    const samples = ['07-10','10-13','13-16','16-19','other'].map(k => {
+      const n = Number(counts[k] || 0);
+      return `${k==='other'?'інший':k}: ${n}${n < minN ? ' (замало)' : ''}`;
+    }).join(' · ');
+    $('trafficAutoInfo').innerHTML = trafficSettings.updated_source === 'automatic'
+      ? `<b>Автоматично оновлено ${dt(trafficSettings.auto_updated_at)}</b> · ` +
+        `період ${dd(trafficSettings.calculation_date_from)}–${dd(trafficSettings.calculation_date_to)}` +
+        `<small>Останні 30 календарних днів, тільки якісні перегони, мінімум ${minN}. ${samples}</small>`
+      : `<b>Коефіцієнти збережено вручну ${dt(trafficSettings.updated_at)}</b>` +
+        `<small>Наступне нічне оновлення перерахує їх за останні 30 днів; інтервали з вибіркою менше ${minN} не зміняться.</small>`;
   }
 }
 

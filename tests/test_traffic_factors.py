@@ -1,4 +1,15 @@
 import unittest
+import sys
+import types
+
+try:
+    import ortools  # noqa: F401
+except ModuleNotFoundError:  # pure helper tests can run without the heavy solver wheel
+    sys.modules["ortools"] = types.ModuleType("ortools")
+    constraint_solver = types.ModuleType("ortools.constraint_solver")
+    constraint_solver.pywrapcp = object()
+    constraint_solver.routing_enums_pb2 = object()
+    sys.modules["ortools.constraint_solver"] = constraint_solver
 
 from app import solver
 

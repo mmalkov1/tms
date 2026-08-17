@@ -216,6 +216,12 @@ async def startup():
             factor_13_16  NUMERIC(5,3) NOT NULL DEFAULT 1.680,
             factor_16_19  NUMERIC(5,3) NOT NULL DEFAULT 1.100,
             factor_other  NUMERIC(5,3) NOT NULL DEFAULT 1.520,
+            updated_source TEXT NOT NULL DEFAULT 'manual',
+            calculation_date_from DATE,
+            calculation_date_to DATE,
+            sample_counts JSONB NOT NULL DEFAULT '{}'::jsonb,
+            min_sample_count INT NOT NULL DEFAULT 20,
+            auto_updated_at TIMESTAMPTZ,
             updated_at    TIMESTAMPTZ NOT NULL DEFAULT now())""")
     await pool.execute("""
         INSERT INTO traffic_planning_settings (id) VALUES (1)
@@ -224,6 +230,31 @@ async def startup():
         ALTER TABLE routes
             ADD COLUMN IF NOT EXISTS use_traffic_factors BOOLEAN NOT NULL DEFAULT FALSE,
             ADD COLUMN IF NOT EXISTS traffic_factors JSONB""")
+    # v88: метадані та аудит нічного 30-денного автооновлення.
+    await pool.execute("""
+        ALTER TABLE traffic_planning_settings
+            ADD COLUMN IF NOT EXISTS updated_source TEXT NOT NULL DEFAULT 'manual',
+            ADD COLUMN IF NOT EXISTS calculation_date_from DATE,
+            ADD COLUMN IF NOT EXISTS calculation_date_to DATE,
+            ADD COLUMN IF NOT EXISTS sample_counts JSONB NOT NULL DEFAULT '{}'::jsonb,
+            ADD COLUMN IF NOT EXISTS min_sample_count INT NOT NULL DEFAULT 20,
+            ADD COLUMN IF NOT EXISTS auto_updated_at TIMESTAMPTZ""")
+    await pool.execute("""
+        CREATE TABLE IF NOT EXISTS traffic_planning_factor_history (
+            id                BIGSERIAL PRIMARY KEY,
+            analyzer_version  TEXT NOT NULL,
+            date_from         DATE NOT NULL,
+            date_to           DATE NOT NULL,
+            time_bucket       TEXT NOT NULL,
+            sample_count      INT NOT NULL,
+            calculated_factor DOUBLE PRECISION,
+            previous_factor   DOUBLE PRECISION NOT NULL,
+            applied_factor    DOUBLE PRECISION NOT NULL,
+            status            TEXT NOT NULL,
+            created_at        TIMESTAMPTZ NOT NULL DEFAULT now())""")
+    await pool.execute("""
+        CREATE INDEX IF NOT EXISTS idx_traffic_factor_history_created
+        ON traffic_planning_factor_history(created_at DESC)""")
     # v15 (migrate_010): кеш геокодирования — исправленные вручную адреса/координаты переживают реимпорт
     await pool.execute("""
         CREATE TABLE IF NOT EXISTS geo_cache (
@@ -1037,12 +1068,27 @@ def _validate_factor(value: float) -> float:
     return value
 
 
+def _traffic_settings_response(row) -> dict:
+    counts = row["sample_counts"] if row and "sample_counts" in row.keys() else {}
+    if isinstance(counts, str):
+        counts = json.loads(counts)
+    return {
+        "factors": _traffic_factors(row) or dict(DEFAULT_TRAFFIC_FACTORS),
+        "updated_at": row["updated_at"] if row else None,
+        "updated_source": row["updated_source"] if row else "manual",
+        "calculation_date_from": row["calculation_date_from"] if row else None,
+        "calculation_date_to": row["calculation_date_to"] if row else None,
+        "sample_counts": counts or {},
+        "min_sample_count": row["min_sample_count"] if row else 20,
+        "auto_updated_at": row["auto_updated_at"] if row else None,
+    }
+
+
 @app.get("/api/settings/traffic")
 async def get_traffic_settings():
     row = await pool.fetchrow(
         "SELECT * FROM traffic_planning_settings WHERE id=1")
-    factors = _traffic_factors(row) or dict(DEFAULT_TRAFFIC_FACTORS)
-    return {"factors": factors, "updated_at": row["updated_at"] if row else None}
+    return _traffic_settings_response(row)
 
 
 @app.put("/api/settings/traffic")
@@ -1061,9 +1107,13 @@ async def put_traffic_settings(body: TrafficPlanningSettingsIn):
             factor_13_16=EXCLUDED.factor_13_16,
             factor_16_19=EXCLUDED.factor_16_19,
             factor_other=EXCLUDED.factor_other,
+            updated_source='manual',
+            calculation_date_from=NULL,
+            calculation_date_to=NULL,
+            sample_counts='{}'::jsonb,
             updated_at=now()
         RETURNING *""", *vals)
-    return {"factors": _traffic_factors(row), "updated_at": row["updated_at"]}
+    return _traffic_settings_response(row)
 
 
 # ---------- планирование ----------

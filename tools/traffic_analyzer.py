@@ -1,4 +1,4 @@
-"""TMS historical traffic analyzer (read-only for operational tables).
+"""TMS historical traffic analyzer and nightly planning-factor updater.
 
 The script is designed to be piped into the already running API container:
 
@@ -7,8 +7,9 @@ The script is designed to be piped into the already running API container:
         < tools/traffic_analyzer.py
     docker compose exec -T api python - aggregate --days 30 < tools/traffic_analyzer.py
 
-Operational tables are only read. The script creates and updates its own
-traffic_analysis_runs, traffic_leg_facts and traffic_coefficients tables.
+Operational route tables are only read. The script updates its analytical
+tables and, in daily mode, refreshes traffic_planning_settings from the last
+30 calendar days after new facts have been saved.
 """
 
 from __future__ import annotations
@@ -16,6 +17,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import csv
+import json
 import os
 import statistics
 import sys
@@ -45,6 +47,17 @@ MAX_GPS_SEGMENT_GAP_SEC = int(os.getenv("TRAFFIC_MAX_GPS_GAP_SEC", "180"))
 MIN_GPS_COVERAGE = float(os.getenv("TRAFFIC_MIN_GPS_COVERAGE", "0.80"))
 MIN_OSRM_SEC = int(os.getenv("TRAFFIC_MIN_OSRM_SEC", "120"))
 MIN_ROUTE_STOPS = int(os.getenv("TRAFFIC_MIN_ROUTE_STOPS", "3"))
+PLANNING_WINDOW_DAYS = int(os.getenv("TRAFFIC_PLANNING_WINDOW_DAYS", "30"))
+PLANNING_MIN_SAMPLES = int(os.getenv("TRAFFIC_PLANNING_MIN_SAMPLES", "20"))
+PLANNING_FACTOR_MIN = float(os.getenv("TRAFFIC_PLANNING_FACTOR_MIN", "0.5"))
+PLANNING_FACTOR_MAX = float(os.getenv("TRAFFIC_PLANNING_FACTOR_MAX", "3.0"))
+PLANNING_BUCKET_COLUMNS = (
+    ("07-10", "factor_07_10"),
+    ("10-13", "factor_10_13"),
+    ("13-16", "factor_13_16"),
+    ("16-19", "factor_16_19"),
+    ("other", "factor_other"),
+)
 
 
 SCHEMA_SQL = """
@@ -134,6 +147,56 @@ CREATE TABLE IF NOT EXISTS traffic_coefficients (
     created_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
     PRIMARY KEY (analyzer_version, date_from, date_to, group_key)
 );
+
+CREATE TABLE IF NOT EXISTS traffic_planning_settings (
+    id            SMALLINT PRIMARY KEY DEFAULT 1 CHECK (id = 1),
+    factor_07_10  NUMERIC(5,3) NOT NULL DEFAULT 1.590,
+    factor_10_13  NUMERIC(5,3) NOT NULL DEFAULT 1.430,
+    factor_13_16  NUMERIC(5,3) NOT NULL DEFAULT 1.680,
+    factor_16_19  NUMERIC(5,3) NOT NULL DEFAULT 1.100,
+    factor_other  NUMERIC(5,3) NOT NULL DEFAULT 1.520,
+    updated_source TEXT NOT NULL DEFAULT 'manual',
+    calculation_date_from DATE,
+    calculation_date_to DATE,
+    sample_counts JSONB NOT NULL DEFAULT '{}'::jsonb,
+    min_sample_count INT NOT NULL DEFAULT 20,
+    auto_updated_at TIMESTAMPTZ,
+    updated_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+INSERT INTO traffic_planning_settings (id)
+VALUES (1)
+ON CONFLICT (id) DO NOTHING;
+
+ALTER TABLE traffic_planning_settings
+    ADD COLUMN IF NOT EXISTS updated_source TEXT NOT NULL DEFAULT 'manual';
+ALTER TABLE traffic_planning_settings
+    ADD COLUMN IF NOT EXISTS calculation_date_from DATE;
+ALTER TABLE traffic_planning_settings
+    ADD COLUMN IF NOT EXISTS calculation_date_to DATE;
+ALTER TABLE traffic_planning_settings
+    ADD COLUMN IF NOT EXISTS sample_counts JSONB NOT NULL DEFAULT '{}'::jsonb;
+ALTER TABLE traffic_planning_settings
+    ADD COLUMN IF NOT EXISTS min_sample_count INT NOT NULL DEFAULT 20;
+ALTER TABLE traffic_planning_settings
+    ADD COLUMN IF NOT EXISTS auto_updated_at TIMESTAMPTZ;
+
+CREATE TABLE IF NOT EXISTS traffic_planning_factor_history (
+    id                BIGSERIAL PRIMARY KEY,
+    analyzer_version  TEXT NOT NULL,
+    date_from         DATE NOT NULL,
+    date_to           DATE NOT NULL,
+    time_bucket       TEXT NOT NULL,
+    sample_count      INT NOT NULL,
+    calculated_factor DOUBLE PRECISION,
+    previous_factor   DOUBLE PRECISION NOT NULL,
+    applied_factor    DOUBLE PRECISION NOT NULL,
+    status            TEXT NOT NULL,
+    created_at        TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_traffic_factor_history_created
+    ON traffic_planning_factor_history(created_at DESC);
 """
 
 
@@ -679,7 +742,7 @@ def summarize_group(rows: list[asyncpg.Record]) -> dict[str, Any]:
 
 
 async def aggregate(conn: asyncpg.Connection, date_from: date, date_to: date,
-                    output_format: str) -> None:
+                    output_format: str) -> list[dict[str, Any]]:
     rows = list(await conn.fetch(
         """
         SELECT actual_sec, osrm_sec, time_bucket, duration_bucket, weekday
@@ -752,7 +815,9 @@ async def aggregate(conn: asyncpg.Connection, date_from: date, date_to: date,
                 f"{row['p75_ratio']:.4f}", f"{row['median_extra_sec']/60:.2f}",
                 f"{row['mean_bias_sec']/60:.2f}", f"{row['mae_osrm_sec']/60:.2f}",
             ])
-        return
+        return results
+    if output_format == "quiet":
+        return results
     print(f"Период: {date_from} — {date_to}; качественных перегонов: {len(rows)}")
     print("группа                              n   weighted median  p75   +median  bias   MAE")
     print("-" * 90)
@@ -763,6 +828,100 @@ async def aggregate(conn: asyncpg.Connection, date_from: date, date_to: date,
             f"{row['p75_ratio']:>5.3f} {row['median_extra_sec']/60:>8.1f} "
             f"{row['mean_bias_sec']/60:>6.1f} {row['mae_osrm_sec']/60:>6.1f}"
         )
+    return results
+
+
+async def update_planning_factors(
+    conn: asyncpg.Connection,
+    date_from: date,
+    date_to: date,
+    aggregate_rows: list[dict[str, Any]],
+) -> dict[str, dict[str, Any]]:
+    """Оновити планувальні коефіцієнти та зберегти аудит кожного інтервалу."""
+    min_samples = max(1, PLANNING_MIN_SAMPLES)
+    by_bucket = {
+        row["time_bucket"]: row
+        for row in aggregate_rows
+        if row["time_bucket"]
+        and row["group_key"] == f"time:{row['time_bucket']}"
+    }
+    sample_counts = {
+        bucket: int(by_bucket.get(bucket, {}).get("sample_count", 0))
+        for bucket, _ in PLANNING_BUCKET_COLUMNS
+    }
+
+    async with conn.transaction():
+        current = await conn.fetchrow(
+            "SELECT * FROM traffic_planning_settings WHERE id=1 FOR UPDATE")
+        if not current:
+            await conn.execute(
+                "INSERT INTO traffic_planning_settings (id) VALUES (1)")
+            current = await conn.fetchrow(
+                "SELECT * FROM traffic_planning_settings WHERE id=1 FOR UPDATE")
+
+        applied: dict[str, float] = {}
+        audit: dict[str, dict[str, Any]] = {}
+        history_rows = []
+        for bucket, column in PLANNING_BUCKET_COLUMNS:
+            previous = float(current[column])
+            stats = by_bucket.get(bucket)
+            count = sample_counts[bucket]
+            calculated = float(stats["weighted_factor"]) if stats else None
+            if calculated is not None and count >= min_samples:
+                value = round(max(PLANNING_FACTOR_MIN,
+                                  min(PLANNING_FACTOR_MAX, calculated)), 3)
+                status = "updated" if value == round(calculated, 3) else "clamped"
+            else:
+                value = previous
+                status = "insufficient_sample"
+            applied[column] = value
+            audit[bucket] = {
+                "sample_count": count,
+                "calculated_factor": calculated,
+                "previous_factor": previous,
+                "applied_factor": value,
+                "status": status,
+            }
+            history_rows.append((
+                ANALYZER_VERSION, date_from, date_to, bucket, count,
+                calculated, previous, value, status))
+
+        await conn.execute("""
+            UPDATE traffic_planning_settings SET
+                factor_07_10=$1,
+                factor_10_13=$2,
+                factor_13_16=$3,
+                factor_16_19=$4,
+                factor_other=$5,
+                updated_source='automatic',
+                calculation_date_from=$6,
+                calculation_date_to=$7,
+                sample_counts=$8::jsonb,
+                min_sample_count=$9,
+                auto_updated_at=now(),
+                updated_at=now()
+            WHERE id=1""",
+            applied["factor_07_10"], applied["factor_10_13"],
+            applied["factor_13_16"], applied["factor_16_19"],
+            applied["factor_other"], date_from, date_to,
+            json.dumps(sample_counts), min_samples)
+        await conn.executemany("""
+            INSERT INTO traffic_planning_factor_history (
+                analyzer_version, date_from, date_to, time_bucket,
+                sample_count, calculated_factor, previous_factor,
+                applied_factor, status)
+            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)""", history_rows)
+
+    print(
+        f"Коефіцієнти планування: вікно {date_from} — {date_to}, "
+        f"мінімальна вибірка {min_samples}")
+    for bucket, _ in PLANNING_BUCKET_COLUMNS:
+        row = audit[bucket]
+        calc = "—" if row["calculated_factor"] is None else f"{row['calculated_factor']:.3f}"
+        print(
+            f"  {bucket:>5}: n={row['sample_count']:>3}, calculated={calc}, "
+            f"applied={row['applied_factor']:.3f}, status={row['status']}")
+    return audit
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -790,10 +949,16 @@ async def async_main(args: argparse.Namespace) -> None:
         if args.command == "daily":
             if args.lookback < 1:
                 raise SystemExit("--lookback должен быть не меньше 1")
+            if PLANNING_WINDOW_DAYS < 1:
+                raise SystemExit("TRAFFIC_PLANNING_WINDOW_DAYS должен быть не меньше 1")
             date_to = kyiv_today() - timedelta(days=1)
             date_from = date_to - timedelta(days=args.lookback - 1)
             counters = await analyze_range(conn, date_from, date_to, "daily")
             print("Итого:", ", ".join(f"{k}={v}" for k, v in sorted(counters.items())))
+            planning_from = date_to - timedelta(days=PLANNING_WINDOW_DAYS - 1)
+            aggregate_rows = await aggregate(conn, planning_from, date_to, "quiet")
+            await update_planning_factors(
+                conn, planning_from, date_to, aggregate_rows)
         elif args.command == "backfill":
             if args.date_from > args.date_to:
                 raise SystemExit("--from не может быть позже --to")

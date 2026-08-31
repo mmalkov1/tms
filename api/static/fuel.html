@@ -8,7 +8,7 @@ h1{font-size:15px;margin:0;font-weight:800}
 .tabs{display:flex;gap:4px;background:rgba(255,255,255,.12);border-radius:11px;padding:3px}
 .tabs a{padding:6px 13px;color:#e8edf4;text-decoration:none;border-radius:8px;font-size:13px;font-weight:600}.tabs a.on{background:#fff;color:var(--navy)}
 header input,header select{padding:7px 9px;border-radius:8px;border:1px solid rgba(255,255,255,.3);background:rgba(255,255,255,.12);color:#fff;font:inherit;font-size:12px}header option{color:#111}
-.btn{border:0;border-radius:9px;padding:8px 13px;background:var(--navy);color:#fff;font:700 12px 'Open Sans';cursor:pointer}
+.btn{border:0;border-radius:9px;padding:8px 13px;background:var(--navy);color:#fff;font:700 12px 'Open Sans';cursor:pointer;display:inline-flex;align-items:center;justify-content:center;gap:7px}
 .btn.red{background:var(--red)}.btn.light{background:#fff;color:var(--navy);border:1px solid var(--c3)}.btn.line{background:#fff;color:var(--navy);border:2px solid var(--navy)}
 main{padding:14px}
 .grid2{display:grid;grid-template-columns:1fr 1.35fr;gap:12px;margin-bottom:12px}
@@ -52,6 +52,7 @@ tr.gap td{background:#FFF7E6;color:#854F0B;font-size:11px;border-bottom:1px soli
 .locked-note{margin-top:10px;padding:9px 11px;border-radius:9px;background:#fff3d9;color:#855f00;font-size:11.5px;line-height:1.45}
 .empty{text-align:center;padding:40px;color:var(--muted)}
 dialog{border:0;border-radius:14px;padding:0;width:min(460px,94vw);box-shadow:0 15px 50px rgba(0,20,50,.35)}
+dialog.wide{width:min(620px,94vw)}
 dialog::backdrop{background:rgba(0,20,50,.5)}
 .dh{background:var(--navy);color:#fff;padding:12px 15px;font-weight:800;display:flex;justify-content:space-between}
 .db{padding:15px}
@@ -75,8 +76,17 @@ dialog::backdrop{background:rgba(0,20,50,.5)}
 .refrow input{border:1.5px solid var(--c3);border-radius:8px;padding:6px 8px;font:inherit;font-size:12.5px;width:90px}
 .refrow .del{border:1.5px solid var(--c3);background:#fff;color:var(--red);border-radius:8px;width:30px;height:30px;display:flex;align-items:center;justify-content:center;cursor:pointer;flex:none}
 .refrow .del:hover{border-color:var(--red)}
+.manual-grid{display:grid;grid-template-columns:1fr 1fr;gap:11px}
+.manual-grid .full{grid-column:1/-1}
+.manual-refuels{display:flex;flex-direction:column;gap:7px;margin-top:7px}
+.manual-refuel-row{display:flex;align-items:center;gap:8px}
+.manual-refuel-row input{width:150px}
+.icon-btn{width:34px;height:34px;padding:0;border:1.5px solid var(--c3);border-radius:9px;background:#fff;color:var(--red);display:inline-flex;align-items:center;justify-content:center;cursor:pointer}
+.icon-btn:hover{border-color:var(--red);background:#fff5f5}
+.manual-note{font-size:11.5px;line-height:1.5;color:var(--muted);margin-top:11px;padding:9px 11px;border-radius:9px;background:var(--cream)}
+@media(max-width:600px){.manual-grid{grid-template-columns:1fr}.manual-grid .full{grid-column:auto}}
 </style>
-<link rel="stylesheet" href="/shell.css?v=85"></head><body>
+<link rel="stylesheet" href="/shell.css?v=89"></head><body>
 <header><h1>TMS</h1><nav class="tabs"><a href="/index.html">Планування</a><a href="/facts.html">План / Факт</a><a class="on">Транспортні листи</a></nav>
 <span id="stat" style="margin-left:auto;font-size:11px"></span></header>
 <div class="toolbar">
@@ -93,6 +103,10 @@ dialog::backdrop{background:rgba(0,20,50,.5)}
     <div class="ddpop" id="ddpop"></div>
   </div>
   <div class="sep"></div>
+  <button class="btn" onclick="openCreateSheet()" title="Створити лист за датою">
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+    Додати лист
+  </button>
   <button class="btn light" onclick="load()">Оновити</button><button class="btn red" onclick="exportXlsx()">Excel</button>
 </div>
 <main>
@@ -115,6 +129,7 @@ dialog::backdrop{background:rgba(0,20,50,.5)}
 const $=id=>document.getElementById(id),ARROW='<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>';
 const statusName={draft:'Чернетка',submitted:'Очікує підтвердження',approved:'Підтверджено',revision:'Повторна перевірка'};
 let meta=null,data=[],active=null,vehId=null;
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const iso=d=>d.toISOString().slice(0,10),n=(v,d=1)=>v==null?'—':Number(v).toLocaleString('uk-UA',{minimumFractionDigits:d,maximumFractionDigits:d});
 const dt=s=>s?new Date(s).toLocaleString('uk-UA',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}):'';
 const today=new Date();$('to').value=iso(today);$('from').value=iso(new Date(today.getFullYear(),today.getMonth(),1));
@@ -177,12 +192,62 @@ function openAdjust(){
     <div class="field"><label>Залишок на ранок, л</label><input id="adjVal" type="number" step="0.001"></div></div>
     <div class="field" style="margin-top:10px"><label>Причина</label><textarea id="adjReason" placeholder="Напр.: звірка по чеку АЗС, інвентаризація"></textarea></div>
     <div style="display:flex;gap:8px;margin-top:10px"><button class="btn light" onclick="dlg.close()">Скасувати</button><button class="btn" onclick="saveAdjust()">Застосувати</button></div>`;
-  $('dlg').showModal();
+  $('dlg').classList.remove('wide');$('dlg').showModal();
 }
 async function saveAdjust(){
   try{await api('/api/transport-sheets/adjustments',{method:'POST',headers:{'Content-Type':'application/json'},
     body:JSON.stringify({vehicle_id:vehId,adjust_date:$('adjDate').value,balance_l:$('adjVal').value,reason:$('adjReason').value})});
     dlg.close();toast('Коригування застосовано, ланцюжок перераховано');await load();await loadBalance()}catch(e){toast(e.message)}
+}
+
+// v89: повний лист за дату, коли водій працював без застосунку
+function openCreateSheet(){
+  const vehicles=meta?.vehicles||[],drivers=meta?.driver_choices||[];
+  if(!vehicles.length){toast('Немає активних автомобілів');return}
+  if(!drivers.length){toast('Немає активних водіїв');return}
+  const current=selected()||String(vehicles[0].vehicle_id);
+  $('dlgTitle').textContent='Новий транспортний лист';
+  $('dlgBody').innerHTML=`
+    <div class="manual-grid">
+      <div class="field"><label>Дата</label><input id="newDate" type="date" value="${iso(today)}"></div>
+      <div class="field"><label>Автомобіль</label><select id="newVehicle" onchange="manualVehicleChanged()">${vehicles.map(v=>`<option value="${v.vehicle_id}"${String(v.vehicle_id)===current?' selected':''}>${esc(v.vehicle_name||'—')}${v.plate?' · '+esc(v.plate):''}</option>`).join('')}</select></div>
+      <div class="field full"><label>Водій</label><select id="newDriver">${drivers.map(d=>`<option value="${d.driver_id}">${esc(d.name)}</option>`).join('')}</select></div>
+      <div class="field"><label>Одометр на початок</label><input id="newOdoStart" inputmode="decimal" placeholder="0,0"></div>
+      <div class="field"><label>Одометр на кінець</label><input id="newOdoEnd" inputmode="decimal" placeholder="0,0"></div>
+      <div class="field full"><label>Заправки, л</label><div id="newRefuels" class="manual-refuels"></div>
+        <div style="margin-top:7px"><button class="btn light" onclick="addManualRefuel()">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>Ще заправка</button></div></div>
+      <div class="field full"><label>Причина ручного внесення</label><textarea id="newReason">Водій працював без робочого телефону</textarea></div>
+    </div>
+    <div class="manual-note">Витрата і залишок пального розраховуються автоматично. Якщо за пізнішу дату вже є підтверджений лист, спочатку потрібно скасувати його підтвердження.</div>
+    <div style="display:flex;gap:8px;margin-top:13px"><button class="btn light" onclick="dlg.close()">Скасувати</button><button class="btn" id="createSheetBtn" onclick="createSheet()">Створити лист</button></div>`;
+  manualVehicleChanged();addManualRefuel();
+  $('dlg').classList.add('wide');$('dlg').showModal();
+}
+function manualVehicleChanged(){
+  const v=(meta?.vehicles||[]).find(x=>String(x.vehicle_id)===$('newVehicle')?.value);
+  if(v?.driver_id&&$('newDriver')?.querySelector(`option[value="${v.driver_id}"]`))$('newDriver').value=String(v.driver_id);
+}
+function addManualRefuel(value=''){
+  const row=document.createElement('div');row.className='manual-refuel-row';
+  row.innerHTML=`<input inputmode="decimal" placeholder="літри" value="${esc(value)}"><span style="font-size:12px;color:var(--muted)">л</span>
+    <button class="icon-btn" title="Видалити заправку" aria-label="Видалити заправку" onclick="this.parentElement.remove()"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14M10 11v6M14 11v6"/></svg></button>`;
+  $('newRefuels').appendChild(row);
+}
+async function createSheet(){
+  const day=$('newDate').value,vehicle=$('newVehicle').value,driver=$('newDriver').value;
+  const start=$('newOdoStart').value.trim(),end=$('newOdoEnd').value.trim(),reason=$('newReason').value.trim();
+  if(!day||!vehicle||!driver||!start||!end){toast('Заповніть дату, авто, водія та обидва показники одометра');return}
+  if(!reason){toast('Вкажіть причину ручного внесення');return}
+  const refuels=[...document.querySelectorAll('#newRefuels input')].map(i=>i.value.trim()).filter(Boolean).map(liters=>({liters}));
+  const btn=$('createSheetBtn');btn.disabled=true;
+  try{
+    const j=await api('/api/transport-sheets',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({work_date:day,vehicle_id:Number(vehicle),driver_id:Number(driver),odometer_start:start,odometer_end:end,refuels,reason})});
+    dlg.close();
+    const radio=document.querySelector(`#ddpop input[value="${vehicle}"]`);if(radio){radio.checked=true;ddChanged(false)}
+    if(day<$('from').value)$('from').value=day;if(day>$('to').value)$('to').value=day;
+    await load();if(vehId)await loadBalance();toast('Транспортний лист створено');await openSheet(j.sheet_id);
+  }catch(e){toast(e.message);btn.disabled=false}
 }
 
 function selected(){const o=document.querySelector('#ddpop input:checked');return o?o.value:''}
@@ -218,7 +283,7 @@ function gpsCell(x,km){
   return `<b>${n(x.gps_km,1)}</b>${mark}`;
 }
 function render(){
-  if(!data.length){$('rows').innerHTML='<tr><td colspan="12" class="empty">За вибраний період листів немає. Відкрийте кабінет водія, щоб створити перший.</td></tr>';return}
+  if(!data.length){$('rows').innerHTML='<tr><td colspan="12" class="empty">За вибраний період листів немає. Натисніть «Додати лист» або відкрийте кабінет водія.</td></tr>';return}
   const asc=[...data].sort((a,b)=>a.work_date<b.work_date?-1:1);
   let html='',prev=null;
   for(const x of asc){
@@ -286,7 +351,7 @@ async function openSheet(id){
       <button class="btn red" onclick="approve(${id})">Підтвердити</button>`}</div>
     ${active.revision_reason?`<div style="font-size:11px;color:var(--red);margin-top:8px"><b>Причина водія:</b> ${active.revision_reason}</div>`:''}
     <div class="history">${changes.length?changes.map(c=>`<div class="h1"><b>${c.actor_name||c.actor_role}</b> · ${c.field_name}: ${c.old_value||'—'} → ${c.new_value||'—'}<br>${c.reason||''}</div>`).join(''):'Змін ще не було.'}</div>`;
-  $('dlg').showModal();
+  $('dlg').classList.remove('wide');$('dlg').showModal();
 }
 function reopenButton(id){
   return `<button class="reopen-btn" onclick="confirmReopen(${id})" title="Скасувати підтвердження" aria-label="Скасувати підтвердження">
@@ -300,7 +365,7 @@ function confirmReopen(id){
     <div style="font-size:12.5px;color:var(--muted);line-height:1.55">Показники одометра та заправки не видаляються. Лист повернеться на перевірку та одразу відкриється для редагування.</div>
     <div style="display:flex;gap:8px;margin-top:14px"><button class="btn light" onclick="dlg.close()">Залишити</button>
       <button class="btn red" onclick="doReopen(${id})">Скасувати підтвердження</button></div>`;
-  $('dlg').showModal();
+  $('dlg').classList.remove('wide');$('dlg').showModal();
 }
 async function doReopen(id){
   try{
@@ -355,5 +420,5 @@ async function approve(id){
 }
 function exportXlsx(){location.href=`/api/transport-sheets/export.xlsx?date_from=${$('from').value}&date_to=${$('to').value}&vehicle_ids=${selected()}&approved_only=true`}
 (async()=>{await loadMeta();await load()})();
-</script><script src="/shell.js?v=85"></script>
+</script><script src="/shell.js?v=89"></script>
 </body></html>

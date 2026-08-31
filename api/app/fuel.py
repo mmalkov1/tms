@@ -13,7 +13,7 @@ from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from openpyxl import Workbook
 from openpyxl.styles import Alignment, Font, PatternFill
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 router = APIRouter(tags=["fuel"])
 pool = None
@@ -539,8 +539,114 @@ async def sheet_meta():
         LEFT JOIN drivers d ON d.id = v.driver_id AND d.is_active
         LEFT JOIN vehicle_fuel_settings f ON f.vehicle_id = v.id
         WHERE v.is_active ORDER BY v.name""")
+    drivers = await pool.fetch("""
+        SELECT id driver_id, name, code_1c
+        FROM drivers WHERE is_active ORDER BY name""")
     out = [dict(r) for r in rows]
-    return {"vehicles": out, "drivers": out}     # drivers — сумісність зі старим фронтом
+    return {"vehicles": out, "drivers": out,     # drivers — сумісність зі старим фронтом
+            "driver_choices": [dict(r) for r in drivers]}
+
+
+# ---------- v89: логіст створює відсутній лист за конкретну дату ----------
+
+class LogistCreateRefuelIn(BaseModel):
+    liters: str | float
+
+
+class LogistCreateSheetIn(BaseModel):
+    work_date: date
+    vehicle_id: int
+    driver_id: int
+    odometer_start: str | float
+    odometer_end: str | float
+    refuels: list[LogistCreateRefuelIn] = Field(default_factory=list)
+    reason: str
+
+
+@router.post("/api/transport-sheets")
+async def create_sheet_by_logist(body: LogistCreateSheetIn):
+    """Створити лист, якого немає через роботу водія без застосунку.
+
+    Паливний залишок не вводиться вручну: він успадковується з ланцюжка.
+    Пізніший підтверджений лист блокує вставку заднім числом, інакше нова
+    витрата непомітно змінила б уже затверджений облік.
+    """
+    start = _num(body.odometer_start, "Початковий одометр", False)
+    end = _num(body.odometer_end, "Кінцевий одометр", False)
+    if end < start:
+        raise HTTPException(400, "Кінцевий одометр не може бути меншим за початковий")
+    reason = (body.reason or "").strip()
+    if not reason:
+        raise HTTPException(400, "Вкажіть причину ручного внесення")
+    if len(body.refuels) > 20:
+        raise HTTPException(400, "В одному листі можна вказати не більше 20 заправок")
+    refuels = []
+    for item in body.refuels:
+        liters = _num(item.liters, "Літри", False)
+        if liters <= 0:
+            raise HTTPException(400, "Кількість літрів має бути більшою за нуль")
+        refuels.append(liters)
+
+    async with pool.acquire() as c:
+        async with c.transaction():
+            # Блокування авто серіалізує дві одночасні спроби створення.
+            vehicle = await c.fetchrow(
+                "SELECT id,name,plate FROM vehicles WHERE id=$1 AND is_active FOR UPDATE",
+                body.vehicle_id)
+            if not vehicle:
+                raise HTTPException(404, "Активний автомобіль не знайдено")
+            driver = await c.fetchrow(
+                "SELECT id,name FROM drivers WHERE id=$1 AND is_active", body.driver_id)
+            if not driver:
+                raise HTTPException(404, "Активного водія не знайдено")
+            existing = await c.fetchrow("""
+                SELECT id,status FROM transport_sheets
+                WHERE work_date=$1 AND vehicle_id=$2""",
+                body.work_date, body.vehicle_id)
+            if existing:
+                raise HTTPException(
+                    409, f"За цю дату вже існує транспортний лист №{existing['id']}")
+            blocking = await c.fetchrow("""
+                SELECT work_date FROM transport_sheets
+                WHERE vehicle_id=$1 AND work_date>$2 AND status='approved'
+                ORDER BY work_date DESC LIMIT 1""", body.vehicle_id, body.work_date)
+            if blocking:
+                raise HTTPException(
+                    409,
+                    f"Спочатку скасуйте підтвердження за {blocking['work_date'].isoformat()}")
+
+            opening = await _derive_opening(body.vehicle_id, body.work_date, c)
+            sheet = await c.fetchrow("""
+                INSERT INTO transport_sheets
+                    (work_date,vehicle_id,driver_id,odometer_start,odometer_end,
+                     opening_balance_l,status,submitted_at,odometer_start_confirmed_at)
+                VALUES ($1,$2,$3,$4,$5,$6,'submitted',now(),now())
+                RETURNING *""", body.work_date, body.vehicle_id, body.driver_id,
+                start, end, opening)
+            await c.execute("""INSERT INTO transport_sheet_changes
+                (sheet_id,actor_role,actor_name,field_name,old_value,new_value,reason)
+                VALUES ($1,'logist','Логіст','status',NULL,'submitted',$2)""",
+                sheet["id"], reason)
+            for field, value in (("driver", driver["name"]),
+                                 ("odometer_start", start), ("odometer_end", end)):
+                await c.execute("""INSERT INTO transport_sheet_changes
+                    (sheet_id,actor_role,actor_name,field_name,old_value,new_value,reason)
+                    VALUES ($1,'logist','Логіст',$2,NULL,$3,$4)""",
+                    sheet["id"], field, str(value), reason)
+            for liters in refuels:
+                await c.execute("""
+                    INSERT INTO transport_sheet_refuels (sheet_id,liters,refuel_at)
+                    VALUES ($1,$2,$3::date + time '12:00')""",
+                    sheet["id"], liters, body.work_date)
+                await c.execute("""INSERT INTO transport_sheet_changes
+                    (sheet_id,actor_role,actor_name,field_name,old_value,new_value,reason)
+                    VALUES ($1,'logist','Логіст','refuel',NULL,$2,$3)""",
+                    sheet["id"], str(liters), reason)
+
+    # Новий день стає частиною ланцюжка; перераховуємо його і наступні
+    # непідтверджені листи. Підтверджені листи вище вже відсічені перевіркою.
+    await _recalc_chain(body.vehicle_id, body.work_date, "Створення листа логістом")
+    return {"ok": True, "sheet_id": sheet["id"]}
 
 
 class LogistSheetIn(BaseModel):

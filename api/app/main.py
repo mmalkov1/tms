@@ -1511,8 +1511,9 @@ class SetStops(BaseModel):
     order_ids: list[int]
 
 
-async def _rebuild_route(route_id: int):
-    r = await pool.fetchrow("""
+async def _rebuild_route(route_id: int, conn=None):
+    db = conn if conn is not None else pool
+    r = await db.fetchrow("""
         SELECT r.id, r.vehicle_id, r.depart_time,
                r.use_traffic_factors, r.traffic_factors,
                COALESCE(r.start_lat, d.lat)  AS s_lat,      -- v51: старт/фініш
@@ -1522,13 +1523,13 @@ async def _rebuild_route(route_id: int):
                COALESCE(dr.shift_start,'08:00'::time) ss
         FROM routes r JOIN depots d ON d.id=r.depot_id
         LEFT JOIN drivers dr ON dr.id=r.driver_id WHERE r.id=$1""", route_id)
-    ss = await pool.fetch("""
+    ss = await db.fetch("""
         SELECT s.order_id, o.lat, o.lon, o.tw_from, o.break_from, o.break_to,
                o.service_min, o.weight_kg, o.volume_m3, o.kind
         FROM route_stops s JOIN orders o ON o.id=s.order_id
         WHERE s.route_id=$1 ORDER BY s.seq""", route_id)
     if not ss:
-        await pool.execute("""UPDATE routes SET geometry=NULL, total_km=0, total_min=0,
+        await db.execute("""UPDATE routes SET geometry=NULL, total_km=0, total_min=0,
             load_weight=0, load_volume=0, return_time=NULL WHERE id=$1""", route_id)
         return
     _, _, _, peak_w, peak_v = running_loads(ss)
@@ -1546,12 +1547,12 @@ async def _rebuild_route(route_id: int):
             bf, bt = t2m(s["break_from"], 0), t2m(s["break_to"], 0)
             if bf - svc < t < bt:
                 t = bt
-        await pool.execute(
+        await db.execute(
             "UPDATE route_stops SET eta=$1, etd=$2 WHERE route_id=$3 AND order_id=$4",
             m2t(t), m2t(t + svc), route_id, s["order_id"])
         t += svc
     ret = t + solver.travel_minutes(legs[-1], t, factors)
-    await pool.execute("""
+    await db.execute("""
         UPDATE routes SET geometry=$1, total_km=$2, total_min=$3, load_weight=$4,
             load_volume=$5, return_time=$6 WHERE id=$7""",
         geom, round(km, 1), ret - start, peak_w, peak_v, m2t(ret), route_id)
@@ -1610,11 +1611,13 @@ async def reverse_route(route_id: int):
 # v51: старт/фініш маршруту не зі складу (дім водія / інша адреса)
 class RouteStartFinish(BaseModel):
     start_kind: str = "depot"                # depot | home | custom
+    start_depot_id: int | None = None
     start_address: str | None = None
     start_lat: float | None = None
     start_lon: float | None = None
     depart_time: str | None = None           # "HH:MM"; None = не міняти
     finish_kind: str = "depot"
+    finish_depot_id: int | None = None
     finish_address: str | None = None
     finish_lat: float | None = None
     finish_lon: float | None = None
@@ -1629,8 +1632,12 @@ async def set_start_finish(route_id: int, b: RouteStartFinish):
     if not r:
         raise HTTPException(404, "Маршрут не знайдено")
 
-    async def resolve(kind, addr, lat, lon, what):
+    async def resolve(kind, addr, lat, lon, what, depot_id):
         if kind == "depot":
+            if depot_id is not None:
+                depot = await _require_depot(depot_id, ready=True)
+                # Snapshot the chosen endpoint; route.depot_id and 1C stay intact.
+                return depot['name'], depot['lat'], depot['lon']
             return None, None, None
         if kind == "home":
             drv = await pool.fetchrow(
@@ -1647,9 +1654,9 @@ async def set_start_finish(route_id: int, b: RouteStartFinish):
         raise HTTPException(400, "kind: depot|home|custom")
 
     s_addr, s_lat, s_lon = await resolve(
-        b.start_kind, b.start_address, b.start_lat, b.start_lon, "Старт")
+        b.start_kind, b.start_address, b.start_lat, b.start_lon, "Старт", b.start_depot_id)
     f_addr, f_lat, f_lon = await resolve(
-        b.finish_kind, b.finish_address, b.finish_lat, b.finish_lon, "Фініш")
+        b.finish_kind, b.finish_address, b.finish_lat, b.finish_lon, "Фініш", b.finish_depot_id)
     dep = None
     if b.depart_time:
         m = parse_hhmm(b.depart_time, -1)
@@ -1662,14 +1669,18 @@ async def set_start_finish(route_id: int, b: RouteStartFinish):
         if m < 0:
             raise HTTPException(400, "Час фінішу: формат HH:MM")
         rtm = m2t(m)
-    await pool.execute("""
-        UPDATE routes SET start_kind=$1, start_address=$2, start_lat=$3, start_lon=$4,
-            finish_kind=$5, finish_address=$6, finish_lat=$7, finish_lon=$8,
-            depart_time=COALESCE($9, depart_time), return_time_manual=$10
-        WHERE id=$11""",
-        b.start_kind, s_addr, s_lat, s_lon,
-        b.finish_kind, f_addr, f_lat, f_lon, dep, rtm, route_id)
-    await _rebuild_route(route_id)
+    async with pool.acquire() as c, c.transaction():
+        await c.execute("""
+            UPDATE routes SET start_kind=$1, start_address=$2, start_lat=$3, start_lon=$4,
+                finish_kind=$5, finish_address=$6, finish_lat=$7, finish_lon=$8,
+                depart_time=COALESCE($9, depart_time), return_time_manual=$10,
+                start_depot_id=$12, finish_depot_id=$13
+            WHERE id=$11""",
+            b.start_kind, s_addr, s_lat, s_lon,
+            b.finish_kind, f_addr, f_lat, f_lon, dep, rtm, route_id,
+            b.start_depot_id if b.start_kind == 'depot' else None,
+            b.finish_depot_id if b.finish_kind == 'depot' else None)
+        await _rebuild_route(route_id, conn=c)
     return {"ok": True}
 
 
@@ -1707,7 +1718,7 @@ async def get_routes(project_id: int = Query(...)):
                dh.name driver_name,                                  -- v80: ефективний водій
                COALESCE(r.driver_id, v.driver_id) AS eff_driver_id,
                (r.driver_id IS NOT NULL AND r.driver_id <> v.driver_id) AS driver_replaced,
-               dep.name depot_name,
+               dep.name depot_name, v.depot_id AS vehicle_depot_id,
                dh.home_address AS driver_home_address,               -- v51
                (dh.home_lat IS NOT NULL) AS driver_has_home
         FROM routes r JOIN vehicles v ON v.id=r.vehicle_id

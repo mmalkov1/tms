@@ -8,6 +8,8 @@ ALTER TABLE depots ALTER COLUMN lon DROP NOT NULL;
 INSERT INTO depots (name, address, lat, lon)
 SELECT 'Склад Тернопіль', 'Україна, Тернопільська обл., с. Біла, вул. Мазепи, 24Д', NULL, NULL
 WHERE NOT EXISTS (SELECT 1 FROM depots WHERE name='Склад Тернопіль');
+ALTER TABLE routes ADD COLUMN IF NOT EXISTS start_depot_id INTEGER REFERENCES depots(id);
+ALTER TABLE routes ADD COLUMN IF NOT EXISTS finish_depot_id INTEGER REFERENCES depots(id);
 """
 
 

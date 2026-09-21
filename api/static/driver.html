@@ -764,13 +764,14 @@ function render() {
   }
   const fromDepot = (rt.start_kind || 'depot') === 'depot';   // v51: старт може бути не зі складу
   // v58: людські підписи звідки/куди — щоб водій знав, чи їхати на склад
-  const kindLabel = (kind, addr) => (kind||'depot')==='depot' ? 'склад'
-      : kind==='home' ? 'дім' : (addr || 'інша адреса');
+  const escapeEndpoint = value => { const el=document.createElement('span'); el.textContent=value; return el.innerHTML; };
+  const kindLabel = (kind, addr) => escapeEndpoint((kind||'depot')==='depot' ? (addr || 'склад')
+      : kind==='home' ? 'дім' : (addr || 'інша адреса'));
   const startLbl = kindLabel(rt.start_kind, rt.start_address);
   const finLbl   = kindLabel(rt.finish_kind, rt.finish_address);
   const PIN = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" style="vertical-align:-2px"><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0z"/><circle cx="12" cy="10" r="3"/></svg>';
   if (fromDepot && !rt.depot_arrive_ts && !fuelPilot) {   // v38; v55: пілот — склад авто
-    head = `<div class="onroute">${PIN} Старт: <b>склад</b> → Фініш: <b>${finLbl}</b></div>
+    head = `<div class="onroute">${PIN} Старт: <b>${startLbl}</b> → Фініш: <b>${finLbl}</b></div>
       <button class="b-route go" onclick="routeEvent('depot_arrive')"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-3px"><path d="M3 21V8l9-5 9 5v13"/><path d="M7 21v-8h10v8"/><path d="M7 17h10"/></svg> Прибув на склад</button>`;
   } else if (!rt.start_ts) {
     const autoBadge = rt.depot_arrive_auto ? ' <span style="font-size:10.5px;font-weight:800;color:#1D9E75;border:1px solid #1D9E75;border-radius:999px;padding:1px 7px;vertical-align:1px">GPS·авто</span>' : '';

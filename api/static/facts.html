@@ -434,7 +434,9 @@ async function load() {
         <span>${done}/${rt.stops.length} точок${fails ? ' · '+fails+' відмов' : ''} · GPS ${rt.last_gps?hm(rt.last_gps.ts):'—'}</span>
       </div>
       ${(()=>{ // v59: звідки старт і де фініш
-        const lbl=(k,a)=> (k||'depot')==='depot'?'склад':k==='home'?'дім':(a||'інша адреса');
+        const lbl=(k,a)=> { const el=document.createElement('span');
+          el.textContent=(k||'depot')==='depot'?(a||'склад'):k==='home'?'дім':(a||'інша адреса');
+          return el.innerHTML; };
         const s=lbl(rt.start_kind,rt.start_address), f=lbl(rt.finish_kind,rt.finish_address);
         return `<div style="padding:6px 12px;font-size:12px;color:#3c4653;border-bottom:1px solid var(--c2,#EFEEEC)">
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" style="vertical-align:-1px"><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0z"/><circle cx="12" cy="10" r="3"/></svg>

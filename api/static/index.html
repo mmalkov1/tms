@@ -253,6 +253,9 @@
   .stop.depot .sfedit { cursor:pointer; color:var(--muted); display:inline-flex; }
   .stop.depot .sfedit:hover { color:var(--navy); }
   .stop.depot .sfk { color:var(--blue); font-weight:700; }
+  #sfSDepotWrap label, #sfFDepotWrap label { display:block; margin:0 0 4px; font-size:12px; font-weight:600; color:var(--navy); }
+  #sfSDepot, #sfFDepot { padding:8px 10px; border:1.5px solid var(--cream-300); border-radius:9px; font:inherit; font-size:12.5px; background:#fff; color:var(--navy); }
+  #sfSDepot:focus, #sfFDepot:focus { outline:none; border-color:var(--blue); box-shadow:0 0 0 3px rgba(0,53,107,.12); }
   .sortable-ghost { opacity:.4; background:#DBE6F5; }
   #unassigned { border-left-color:var(--cream-400); }
   #unassigned .route-head { color:var(--blue); }
@@ -503,6 +506,10 @@ fetch('/api/transport-sheets/notifications/count').then(r=>r.json()).then(j=>{
       <span class="rtab" data-g="s" data-k="home" onclick="sfKind(this)">Дім водія</span>
       <span class="rtab" data-g="s" data-k="custom" onclick="sfKind(this)">Інша адреса</span>
     </div>
+    <div id="sfSDepotWrap" style="margin-bottom:8px">
+      <label for="sfSDepot">Склад старту</label>
+      <select id="sfSDepot" style="width:100%" onchange="sfRender('s')"></select>
+    </div>
     <div id="sfSInfo" style="font-size:12px;color:var(--muted);background:var(--cream-50);border-radius:9px;padding:7px 10px;margin-bottom:8px"></div>
     <div id="sfSAddr" style="display:none;margin-bottom:8px">
       <div style="display:flex;gap:6px">
@@ -521,6 +528,10 @@ fetch('/api/transport-sheets/notifications/count').then(r=>r.json()).then(j=>{
         <span class="rtab" data-g="f" data-k="depot" onclick="sfKind(this)">Склад</span>
         <span class="rtab" data-g="f" data-k="home" onclick="sfKind(this)">Дім водія</span>
         <span class="rtab" data-g="f" data-k="custom" onclick="sfKind(this)">Інша адреса</span>
+      </div>
+      <div id="sfFDepotWrap" style="margin-bottom:8px">
+        <label for="sfFDepot">Склад фінішу</label>
+        <select id="sfFDepot" style="width:100%" onchange="sfRender('f')"></select>
       </div>
       <div id="sfFInfo" style="font-size:12px;color:var(--muted);background:var(--cream-50);border-radius:9px;padding:7px 10px;margin-bottom:8px"></div>
       <div id="sfFAddr" style="display:none;margin-bottom:8px">
@@ -543,7 +554,7 @@ fetch('/api/transport-sheets/notifications/count').then(r=>r.json()).then(j=>{
   </div>
   <div class="dlg-foot">
     <button onclick="$('sfDlg').close()">Скасувати</button>
-    <button class="pri" onclick="sfSave()">Зберегти і перерахувати</button>
+    <button id="sfSaveBtn" class="pri" onclick="sfSave()">Зберегти і перерахувати</button>
   </div>
 </dialog>
 <dialog id="addRtDlg">
@@ -1901,7 +1912,7 @@ function highlightPoint(lat, lon, name) {
 function depotEl(r, kind, t, w, v) {                       // v51: старт/фініш не зі складу
   const k = kind==='out' ? (r.start_kind||'depot') : (r.finish_kind||'depot');
   const addr = kind==='out' ? r.start_address : r.finish_address;
-  const label = k==='depot' ? r.depot_name
+  const label = k==='depot' ? escHtml(addr || r.depot_name || 'Склад')
               : k==='home'  ? `<span class="sfk">Дім водія</span>${addr?' · '+addr:''}`
               :               `<span class="sfk">Інша адреса</span>${addr?' · '+addr:''}`;
   const badge = k==='depot' ? 'С' : k==='home' ? 'Д' : 'А';
@@ -1919,7 +1930,19 @@ function depotEl(r, kind, t, w, v) {                       // v51: старт/ф
 }
 
 // --- v51: старт/фініш маршруту не зі складу ---
-let sfRoute = null, sfGeo = {s:null, f:null};
+let sfRoute = null, sfGeo = {s:null, f:null}, sfDepots = [], sfOpenSeq = 0;
+
+function sfDepotReady(d) {
+  return d && d.lat != null && d.lon != null && Number.isFinite(d.lat) && Number.isFinite(d.lon)
+    && Math.abs(d.lat)<=90 && Math.abs(d.lon)<=180;
+}
+
+function sfDepotOptions(primaryId, selectedId) {
+  const sorted = [...sfDepots].sort((a,b)=>Number(b.id===primaryId)-Number(a.id===primaryId));
+  const missing = !sorted.some(d=>d.id===selectedId);
+  return (missing ? '<option value="" selected disabled>Оберіть склад</option>' : '') + sorted.map(d =>
+    `<option value="${d.id}" ${d.id===selectedId?'selected':''}>${escHtml(d.name)}${d.id===primaryId?' — основний склад авто':''}${sfDepotReady(d)?'':' — потрібні координати'}</option>`).join('');
+}
 
 function sfKind(el) {
   const g = el.dataset.g;
@@ -1936,19 +1959,36 @@ function sfRender(g) {
   const info = $(g==='s' ? 'sfSInfo' : 'sfFInfo');
   const addr = $(g==='s' ? 'sfSAddr' : 'sfFAddr');
   addr.style.display = k === 'custom' ? 'block' : 'none';
+  $(g==='s' ? 'sfSDepotWrap' : 'sfFDepotWrap').style.display = k === 'depot' ? 'block' : 'none';
   if (k === 'depot') {
     info.style.display = 'block';
-    info.innerHTML = sfRoute.depot_name || 'Склад';
+    const d = sfDepots.find(d=>d.id===Number($(g==='s' ? 'sfSDepot' : 'sfFDepot').value));
+    info.textContent = !d ? 'Оберіть склад' : !sfDepotReady(d)
+      ? 'Спочатку підтвердьте координати у Налаштування → Склади'
+      : (d.address || d.name);
   } else if (k === 'home') {
     info.style.display = 'block';
     info.innerHTML = sfRoute.driver_has_home
-      ? `Дім водія · ${sfRoute.driver_home_address || ''}`
+      ? `Дім водія · ${escHtml(sfRoute.driver_home_address || '')}`
       : `<span style="color:var(--red);font-weight:600">У водія не вказано адресу дому — додай її в Налаштування → Водії</span>`;
   } else info.style.display = 'none';
 }
-function openSF(rid) {
-  sfRoute = (window._routes || []).find(r => r.id === rid);
-  if (!sfRoute) return;
+async function openSF(rid) {
+  const route = (window._routes || []).find(r => r.id === rid);
+  if (!route) return;
+  const request = ++sfOpenSeq;
+  let primaryId;
+  try {
+    const [dr, vr] = await Promise.all([fetch('/api/depots'), fetch('/api/vehicles')]);
+    if (!dr.ok || !vr.ok) throw new Error('Не вдалося завантажити склади та авто');
+    const [depots, fleet] = await Promise.all([dr.json(), vr.json()]);
+    if (request !== sfOpenSeq) return;
+    sfDepots = depots;
+    primaryId = fleet.find(v=>v.id===route.vehicle_id)?.depot_id ?? route.vehicle_depot_id ?? route.depot_id;
+  } catch(e) { if (request===sfOpenSeq) st(e.message); return; }
+  sfRoute = route;
+  $('sfSDepot').innerHTML = sfDepotOptions(primaryId, sfRoute.start_depot_id ?? primaryId);
+  $('sfFDepot').innerHTML = sfDepotOptions(primaryId, sfRoute.finish_depot_id ?? primaryId);
   sfGeo = {
     s: sfRoute.start_kind === 'custom' && sfRoute.start_lat != null
        ? {lat: sfRoute.start_lat, lon: sfRoute.start_lon} : null,
@@ -1963,6 +2003,7 @@ function openSF(rid) {
   $('sfDep').value = sfRoute.depart_time ? String(sfRoute.depart_time).slice(0,5) : '';
   $('sfRet').value = sfRoute.return_time_manual ? String(sfRoute.return_time_manual).slice(0,5) : '';
   sfRender('s'); sfRender('f');
+  $('sfSaveBtn').disabled = false;
   $('sfDlg').showModal();
 }
 async function sfGeocode(g) {
@@ -1985,21 +2026,31 @@ async function sfGeocode(g) {
 }
 async function sfSave() {
   const sk = sfCur('s'), fk = sfCur('f');
+  const sd = Number($('sfSDepot').value), fd = Number($('sfFDepot').value);
+  for (const [kind, id, label] of [[sk,sd,'Старт'],[fk,fd,'Фініш']]) {
+    if (kind === 'depot' && !sfDepotReady(sfDepots.find(d=>d.id===id)))
+      return st(`${label}: оберіть склад із підтвердженими координатами (Налаштування → Склади)`);
+  }
   if (sk === 'custom' && !sfGeo.s) return st('Старт: спочатку натисни «Знайти» для адреси');
   if (fk === 'custom' && !sfGeo.f) return st('Фініш: спочатку натисни «Знайти» для адреси');
   const body = {
+    start_depot_id: sk==='depot' ? sd : null, finish_depot_id: fk==='depot' ? fd : null,
     start_kind: sk, start_address: $('sfSAddrIn').value || null,
     start_lat: sfGeo.s ? sfGeo.s.lat : null, start_lon: sfGeo.s ? sfGeo.s.lon : null,
     depart_time: $('sfDep').value || null,
     finish_kind: fk, finish_address: $('sfFAddrIn').value || null,
     finish_lat: sfGeo.f ? sfGeo.f.lat : null, finish_lon: sfGeo.f ? sfGeo.f.lon : null,
     return_time_manual: $('sfRet').value || null };
-  const r = await fetch(`/api/routes/${sfRoute.id}/start-finish`, {method:'PATCH',
-    headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
-  if (!r.ok) { st('⚠ ' + ((await r.json()).detail || 'Помилка збереження')); return; }
-  $('sfDlg').close();
-  st('Старт/фініш збережено, маршрут перераховано');
-  loadAll();
+  $('sfSaveBtn').disabled = true;
+  try {
+    const r = await fetch(`/api/routes/${sfRoute.id}/start-finish`, {method:'PATCH',
+      headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
+    if (!r.ok) throw new Error((await r.json()).detail || 'Помилка збереження');
+    $('sfDlg').close();
+    st('Старт/фініш збережено, маршрут перераховано');
+    await loadAll();
+  } catch(e) { st(e.message); }
+  finally { $('sfSaveBtn').disabled = false; }
 }
 
 async function loadAll() {

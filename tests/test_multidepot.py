@@ -254,6 +254,10 @@ class ExportCompatibilityTests(unittest.IsolatedAsyncioTestCase):
              patch.object(integration_1c, '_check_key', AsyncMock(return_value=('project', 75))):
             before = (await integration_1c.export_trips('test', None, None)).body
             rows[1].update(depot_id=2, depot_name='Тернопіль')
+            rows[1].update(start_kind='depot', finish_kind='depot',
+                           start_depot_id=2, finish_depot_id=1,
+                           start_address='Тернопіль', finish_address='Київ',
+                           start_lat=49., start_lon=25., finish_lat=50., finish_lon=30.)
             after = (await integration_1c.export_trips('test', None, None)).body
         self.assertEqual(before, after)
         root = ET.fromstring(after)

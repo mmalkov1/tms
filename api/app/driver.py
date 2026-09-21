@@ -1010,7 +1010,7 @@ async def driver_next_trip(token: str):
 
         def _pt_name(kind, addr):
             if kind == "depot":
-                return route["depot_name"]
+                return addr or route["depot_name"]
             if kind == "home":
                 return f"Дім · {addr}" if addr else "Дім водія"
             return addr or "Інша адреса"

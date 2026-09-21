@@ -487,6 +487,7 @@ renderSoundState();
 // v79: склад на карті — один шар, не чіпається при перемальовуванні рейсів
 let _depotLayer = null;
 async function drawDepots(){
+  const escDepot=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   try{
     if(_depotLayer){ map.removeLayer(_depotLayer); _depotLayer = null; }
     const list = await (await fetch('/api/depots')).json();
@@ -496,9 +497,9 @@ async function drawDepots(){
     list.forEach(d=>{
       if(d.lat==null || d.lon==null) return;
       L.marker([d.lat, d.lon], {icon: L.divIcon({className:'',
-          html:`<div class="depot-pin"><i>${HOUSE}</i><b>${d.name||'Склад'}</b></div>`,
+          html:`<div class="depot-pin"><i>${HOUSE}</i><b>${escDepot(d.name||'Склад')}</b></div>`,
           iconSize:[30,30], iconAnchor:[15,15]}), interactive:true, zIndexOffset:-500})
-        .bindTooltip(`<b>${d.name||'Склад'}</b>${d.address?'<br>'+d.address:''}`, {sticky:true})
+        .bindTooltip(`<b>${escDepot(d.name||'Склад')}</b>${d.address?'<br>'+escDepot(d.address):''}`, {sticky:true})
         .addTo(_depotLayer);
     });
   }catch(e){ console.warn('depots unavailable:', e); }

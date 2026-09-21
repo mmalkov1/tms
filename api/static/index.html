@@ -81,6 +81,13 @@
                  font-size:11px; cursor:pointer; color:var(--blue); font-weight:600; }
   .rrow button:hover { border-color:var(--navy); color:var(--navy); }
   .traffic-grid { max-width:470px; }
+  .depot-card { border:1px solid var(--cream-300); border-radius:12px; padding:12px; margin-bottom:12px; }
+  .depot-card p { font-size:12px; color:var(--blue); margin:6px 0; }
+  #depotDlg { max-width:740px; }
+  #depotDlg label { display:block; margin:8px 0 4px; font-size:12px; color:var(--navy); }
+  #depotDlg input { width:100%; padding:8px; border:1px solid var(--cream-300); border-radius:8px; font:inherit; font-size:13px; }
+  #depotMap { height:270px; margin-top:12px; border-radius:10px; }
+  #depotMsg { font-size:12px; color:var(--red); margin-top:8px; min-height:17px; }
   .traffic-grid td:last-child { width:130px; }
   .traffic-grid input { width:86px; text-align:right; font-variant-numeric:tabular-nums; }
   .traffic-note { color:#687482; font-size:12px; line-height:1.55; margin:0 0 14px; max-width:560px; }
@@ -399,13 +406,15 @@ fetch('/api/transport-sheets/notifications/count').then(r=>r.json()).then(j=>{
     </div>
 
     <div class="tool-block">
-      <h3>Час роботи депо</h3>
+      <h3>Час роботи складів</h3>
       <div class="tool-row">
         <label>Виїзд <input type="time" id="depDepart" value="09:00" style="width:90px"></label>
         <label>Повернення <input type="time" id="depReturn" value="16:00" style="width:90px"></label>
       </div>
       <div style="font-size:11.5px;color:#888;margin-top:8px;line-height:1.5">
-        Це загальна рамка складу на день. Робочий час кожної машини:
+        Це загальна рамка всіх складів на день. Кожне авто виїжджає та повертається
+        на свій склад (Налаштування → Водії та авто → Склад). Заявки спільні.
+        Робочий час кожної машини:
         <b>вікно на дату</b> («Авто», жовті поля) → інакше <b>графік водія</b> (Налаштування → Водії)
         → результат обрізається цією рамкою.</div>
     </div>
@@ -570,11 +579,30 @@ fetch('/api/transport-sheets/notifications/count').then(r=>r.json()).then(j=>{
     <button class="pri" onclick="saveVehSelection()">Застосувати вибір</button>
   </div>
 </dialog>
+<dialog id="depotDlg">
+  <div class="dlg-head"><span id="depotDlgTitle">Координати складу</span><span onclick="$('depotDlg').close()">✕</span></div>
+  <div class="dlg-body">
+    <label for="depotAddress">Адреса складу</label>
+    <div style="display:flex;gap:8px"><input id="depotAddress" maxlength="500">
+      <button id="depotFind" class="traffic-save" onclick="findDepotAddress()">Знайти</button></div>
+    <div style="display:flex;gap:12px">
+      <label style="flex:1">Широта<input id="depotLat" type="number" step="any" min="-90" max="90" onchange="previewDepotInputs()"></label>
+      <label style="flex:1">Довгота<input id="depotLon" type="number" step="any" min="-180" max="180" onchange="previewDepotInputs()"></label>
+    </div>
+    <div id="depotMap"></div>
+    <p class="traffic-note" style="margin-top:8px">Перевірте саме точку виїзду зі складу. Результат пошуку може бути неточним:
+      клацніть на карті або перетягніть маркер. Координати зберігаються лише після підтвердження.</p>
+    <div id="depotMsg" role="status"></div>
+  </div>
+  <div class="dlg-foot"><button onclick="$('depotDlg').close()">Скасувати</button>
+    <button id="depotSave" class="pri" onclick="saveDepotSettings()">Підтвердити точку і зберегти</button></div>
+</dialog>
 <dialog id="setDlg">
   <div class="dlg-head"><span>Налаштування</span><span onclick="setDlg.close()">✕</span></div>
   <div class="dlg-body">
     <div id="setSide">
       <div class="on" onclick="setSection('da', this)">Водії та авто</div>
+      <div onclick="setSection('dep', this)">Склади</div>
       <div onclick="setSection('la', this)">Доступ логіста</div>
       <div onclick="setSection('fr', this)">Причини відмов</div>
       <div onclick="setSection('pl', this)">Планування</div>
@@ -596,13 +624,22 @@ fetch('/api/transport-sheets/notifications/count').then(r=>r.json()).then(j=>{
         (типово 09:00–16:00, жовта рамка = інший); пріоритет розрахунку:
         вікно на дату → графік водія → рамка «Час роботи депо»</small>
         <h4>Авто</h4>
-        <table><thead><tr><th>Назва</th><th>Код 1С авто</th><th>Водій</th><th></th></tr></thead>
+        <table><thead><tr><th>Назва</th><th>Код 1С авто</th><th>Водій</th><th>Склад</th><th></th></tr></thead>
           <tbody id="setVehRows"></tbody>
           <tfoot><tr><td><input id="nsvName" placeholder="Газель АА1234ВВ" style="width:150px"></td>
             <td></td><td><select id="nsvDrv"></select></td>
+            <td><select id="nsvDepot" aria-label="Склад нового авто"></select></td>
             <td class="act" onclick="addVehicleSet()" title="Додати"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14"/><path d="M5 12h14"/></svg></td></tr></tfoot>
         </table>
         <small style="color:#888">вага/обʼєм, найм, забір/доставка, геозони — в модалці «Планування → Авто» (оперативні параметри)</small>
+        <p class="traffic-note" style="margin-top:10px">Зміна складу авто діє для нових рейсів та нового розрахунку.
+          Уже створені рейси зберігають свій склад. Налаштування не змінює коди складів у 1С.</p>
+      </div>
+      <div id="sec-dep" style="display:none">
+        <h4>Склади TMS</h4>
+        <p class="traffic-note">Київ і Тернопіль плануються в одному проекті. Старт і повернення кожного авто —
+          на закріплений за ним склад. Перед використанням нового складу підтвердьте координати.</p>
+        <div id="depotSettingsRows"></div>
       </div>
       <div id="sec-fr" style="display:none">
         <div style="margin-bottom:10px">
@@ -1142,6 +1179,104 @@ document.addEventListener('scroll', () => tlTip.style.display = 'none', true);
 
 let selectedVeh = new Set();
 let driversList = [];
+let depotsList = [];
+
+async function loadDepotSettings() {
+  const r = await fetch('/api/depots');
+  if (!r.ok) throw new Error('Не вдалося завантажити склади');
+  depotsList = await r.json();
+}
+
+function depotOptions(id) {
+  return depotsList.map(d => `<option value="${d.id}" ${d.id===id?'selected':''}>${escHtml(d.name)}${d.lat==null||d.lon==null?' — потрібні координати':''}</option>`).join('');
+}
+
+function renderDepotSettings() {
+  $('depotSettingsRows').innerHTML = depotsList.map(d => `<div class="depot-card">
+    <h4>${escHtml(d.name)}</h4><p>${escHtml(d.address||'')}</p>
+    <p>${d.lat==null||d.lon==null?'Потрібно підтвердити координати перед плануванням':`${d.lat}, ${d.lon}`}</p>
+    <button class="traffic-save" onclick="editDepotSettings(${d.id})">Адреса і точка на карті</button>
+  </div>`).join('');
+}
+
+let depotEditId = null, depotMap = null, depotMarker = null;
+function editDepotSettings(id) {
+  const d = depotsList.find(x=>x.id===id);
+  if (!d) return;
+  depotEditId = id;
+  $('depotDlgTitle').textContent = d.name;
+  $('depotAddress').value = d.address || '';
+  $('depotLat').value = d.lat ?? '';
+  $('depotLon').value = d.lon ?? '';
+  $('depotMsg').textContent = '';
+  $('depotDlg').showModal();
+  if (!depotMap) {
+    depotMap = L.map('depotMap').setView([49,27],6);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {attribution:'© OSM'}).addTo(depotMap);
+    depotMap.on('click', e=>setDepotPoint(e.latlng.lat,e.latlng.lng));
+    new ResizeObserver(()=>depotMap.invalidateSize()).observe($('depotMap'));
+  }
+  if (depotMarker) { depotMap.removeLayer(depotMarker); depotMarker = null; }
+  depotMap.invalidateSize();
+  if (d.lat!=null && d.lon!=null) {
+    setDepotPoint(d.lat,d.lon);
+    depotMap.setView([d.lat,d.lon],16);
+  } else depotMap.setView([49,27],6);
+}
+
+function setDepotPoint(lat,lon) {
+  if (!Number.isFinite(lat)||!Number.isFinite(lon)||Math.abs(lat)>90||Math.abs(lon)>180) return;
+  $('depotLat').value = lat.toFixed(7);
+  $('depotLon').value = lon.toFixed(7);
+  if (depotMarker) depotMarker.setLatLng([lat,lon]);
+  else {
+    depotMarker = L.marker([lat,lon], {draggable:true, icon:L.divIcon({
+      className:'zone-vertex-icon',html:'',iconSize:[19,19],iconAnchor:[9.5,9.5]})}).addTo(depotMap);
+    depotMarker.on('dragend', e=>{const p=e.target.getLatLng();setDepotPoint(p.lat,p.lng);});
+  }
+}
+
+function previewDepotInputs() {
+  if (!$('depotLat').value.trim() || !$('depotLon').value.trim()) return;
+  const lat=Number($('depotLat').value), lon=Number($('depotLon').value);
+  if (!Number.isFinite(lat)||!Number.isFinite(lon)||Math.abs(lat)>90||Math.abs(lon)>180) return;
+  setDepotPoint(lat,lon); depotMap.setView([lat,lon],16);
+}
+
+async function findDepotAddress() {
+  const address=$('depotAddress').value.trim(), id=depotEditId;
+  if (!address) { $('depotMsg').textContent='Вкажіть адресу'; return; }
+  $('depotFind').disabled=true; $('depotMsg').textContent='Пошук адреси…';
+  try {
+    const r=await fetch('/api/geocode-address',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({address})});
+    const j=await r.json();
+    if (id!==depotEditId || !$('depotDlg').open || address!==$('depotAddress').value.trim()) return;
+    if (!r.ok) throw new Error(zoneApiError(j,'Адресу не знайдено'));
+    setDepotPoint(j.lat,j.lon); depotMap.setView([j.lat,j.lon],16);
+    $('depotMsg').textContent='Перевірте точність знайденої точки та підтвердьте збереження.';
+  } catch(e) { $('depotMsg').textContent=e.message; }
+  finally { $('depotFind').disabled=false; }
+}
+
+async function saveDepotSettings() {
+  if (!$('depotLat').value.trim() || !$('depotLon').value.trim()) {
+    $('depotMsg').textContent='Знайдіть склад або вкажіть точку на карті'; return;
+  }
+  const lat=Number($('depotLat').value), lon=Number($('depotLon').value);
+  if (!Number.isFinite(lat)||!Number.isFinite(lon)||Math.abs(lat)>90||Math.abs(lon)>180) {
+    $('depotMsg').textContent='Некоректні координати'; return;
+  }
+  $('depotSave').disabled=true;
+  try {
+    const r=await fetch(`/api/depots/${depotEditId}`,{method:'PUT',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({address:$('depotAddress').value.trim(),lat,lon})});
+    const j=await r.json();
+    if (!r.ok) throw new Error(zoneApiError(j,'Не вдалося зберегти склад'));
+    await loadDepotSettings(); renderDepotSettings(); renderSetDA();
+    $('depotDlg').close(); drawDepots(); st('Склад збережено');
+  } catch(e) { $('depotMsg').textContent=e.message; }
+  finally { $('depotSave').disabled=false; }
+}
 
 function drvOptions(curId) {
   return `<option value="">— без водія —</option>` + driversList.map(d =>
@@ -1156,7 +1291,7 @@ async function loadVehicles(keepSel = false) {
   selectedVeh = new Set([...selectedVeh].filter(id => vehicles.some(v=>v.id===id)));
   $('vehBtn').textContent = `Авто: ${selectedVeh.size}`;
   $('addVehSel').innerHTML = vehicles.map(v =>
-    `<option value="${v.id}">${v.name} · ${v.driver_name||'без водія'} · ${v.max_weight_kg} кг / ${v.max_volume_m3} м³${v.can_pickup===false?' · без забору':''}${v.can_delivery===false?' · без доставки':''}</option>`).join('');
+    `<option value="${v.id}">${escHtml(v.name)} · ${escHtml(v.depot_name||'')} · ${v.driver_name||'без водія'} · ${v.max_weight_kg} кг / ${v.max_volume_m3} м³${v.can_pickup===false?' · без забору':''}${v.can_delivery===false?' · без доставки':''}</option>`).join('');
 }
 
 async function openVehDlg() {
@@ -1172,7 +1307,7 @@ async function openVehDlg() {
   const wv = (w,k) => w && w[k] ? String(w[k]).slice(0,5) : '';
   $('vehRows').innerHTML = vehicles.map(v => `<tr data-vid="${v.id}">
     <td style="text-align:center"><input type="checkbox" class="vsel" value="${v.id}" ${selectedVeh.has(v.id)?'checked':''}></td>
-    <td><b>${v.name}</b></td>
+    <td><b>${escHtml(v.name)}</b><small style="display:block;color:var(--blue)">${escHtml(v.depot_name||'')}</small></td>
     <td>${v.driver_name || '—'}</td>
     <td style="white-space:nowrap"><input type="time" class="dwf" value="${wv(dayWin[v.id],'work_from')}"
         style="width:76px${dayWin[v.id]?';border:1.5px solid #D8A230;font-weight:700':''}"
@@ -1248,8 +1383,9 @@ window.addEventListener('resize', () => {
 
 async function openSettings() {
   await Promise.all([loadVehicles(true), loadSetDrivers(), loadReasons(),
-                     loadLogistAccesses(), loadTrafficSettings(true)]);
+                     loadLogistAccesses(), loadTrafficSettings(true), loadDepotSettings()]);
   renderSetDA(); renderReasons(); renderLogistAccesses(); renderTrafficSettings();
+  renderDepotSettings();
   $('tokQr').classList.remove('show');
   restoreSettingsSize();
   $('setDlg').showModal();
@@ -1263,6 +1399,7 @@ function setSection(sec, el) {
   $('sec-fr').style.display = sec === 'fr' ? '' : 'none';
   $('sec-la').style.display = sec === 'la' ? '' : 'none';
   $('sec-pl').style.display = sec === 'pl' ? '' : 'none';
+  $('sec-dep').style.display = sec === 'dep' ? '' : 'none';
 }
 
 async function loadSetDrivers() {
@@ -1354,10 +1491,12 @@ function renderSetDA() {
     <td><input class="svn" value="${v.name}" style="width:150px"></td>
     <td><input class="svc" value="${v.code_1c||''}" placeholder="—" style="width:95px" title="Код авто в 1С (Kult_Транспорт)"></td>
     <td><select class="svd">${drvOptions(v.driver_id)}</select></td>
+    <td><select class="svdep" aria-label="Склад авто">${depotOptions(v.depot_id)}</select></td>
     <td class="act" onclick="saveVehicleSet(this, ${v.id})" title="Зберегти"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><path d="M17 21v-8H7v8"/><path d="M7 3v5h8"/></svg></td>
     <td class="act" onclick="deactVehicleSet(${v.id}, '${v.name.replace(/'/g,"\\'")}')" title="Деактивувати"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/></svg></td>
   </tr>`).join('');
   $('nsvDrv').innerHTML = drvOptions(null);
+  $('nsvDepot').innerHTML = depotOptions(1);
 }
 
 async function saveDriverSet(el, did) {
@@ -1434,6 +1573,7 @@ async function saveVehicleSet(el, vid) {
     headers:{'Content-Type':'application/json'},
     body: JSON.stringify({ name: tr.querySelector('.svn').value,
       code_1c: tr.querySelector('.svc').value.trim(),
+      depot_id: +tr.querySelector('.svdep').value,
       driver_id: +tr.querySelector('.svd').value || 0 })});
   if (!r.ok) { st('Помилка збереження авто'); return; }
   st('Авто збережено');
@@ -1454,6 +1594,7 @@ async function addVehicleSet() {
   const r = await fetch('/api/vehicles', {method:'POST',
     headers:{'Content-Type':'application/json'},
     body: JSON.stringify({ name, driver_id: +$('nsvDrv').value || null,
+      depot_id: +$('nsvDepot').value,
       max_weight_kg: 1000, max_volume_m3: 9 })});
   if (!r.ok) { st('Помилка створення авто'); return; }
   $('nsvName').value = '';
@@ -1968,7 +2109,7 @@ async function loadAll() {
     card.style.setProperty('--rc', r.color);
     card.innerHTML = `<div class="route-head">
       <span><i class="rdot" style="background:${r.color}"></i>${r.vehicle_name} · <span class="${r.driver_replaced?'drv-repl':''}" title="${r.driver_replaced?'Водія замінено на цей день':''}">${r.driver_name||'—'}</span>${r.use_traffic_factors?'<span class="traffic-badge" title="ETA розраховано з часовими коефіцієнтами">КОЕФ. ЧАСУ</span>':''} <span class="del" title="Змінити водія на цьому рейсі" onclick="event.stopPropagation();openDriverDlg(${r.id},${r.eff_driver_id||'null'},${r.vehicle_id})"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M19 8v6M22 11h-6"/></svg></span> ${r.stops.length?'<span class="del" title="Розвернути маршрут у зворотному порядку" onclick="event.stopPropagation();reverseRoute('+r.id+')"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><path d="M17 3l4 4-4 4"/><path d="M21 7H7"/><path d="M7 21l-4-4 4-4"/><path d="M3 17h14"/></svg></span>':'<span class="del" onclick="delRoute('+r.id+')"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/></svg></span>'}</span>
-      <span>${uniq} точок (${r.stops.length} завд.) · ${r.total_km||0} км ·
+      <span>${escHtml(r.depot_name||'Склад')} · ${uniq} точок (${r.stops.length} завд.) · ${r.total_km||0} км ·
       пік ${(+r.peak_weight||0).toFixed(0)}/${(+r.max_weight_kg||0).toFixed(0)} кг (${wPct.toFixed(0)}%) ·
       ${(+r.peak_volume||0).toFixed(2)}/${(+r.max_volume_m3||0).toFixed(1)} м³ (${vPct.toFixed(0)}%)
       ${over?'<span class="over">ПЕРЕВАНТАЖЕННЯ</span>':''}</span></div>`;
@@ -2090,7 +2231,7 @@ async function openDriverDlg(routeId, curId, curVehId){
   }catch(e){ st('Не вдалося отримати списки'); return; }
 
   const dOpts = drivers.map(d=>`<option value="${d.id}"${d.id===curId?' selected':''}>${d.name}</option>`).join('');
-  const vOpts = vehicles.map(v=>`<option value="${v.id}"${v.id===curVehId?' selected':''}>${v.name}${v.driver_name?` · ${v.driver_name}`:''}</option>`).join('');
+  const vOpts = vehicles.map(v=>`<option value="${v.id}"${v.id===curVehId?' selected':''}>${escHtml(v.name)} · ${escHtml(v.depot_name||'')}${v.driver_name?` · ${escHtml(v.driver_name)}`:''}</option>`).join('');
 
   const dlg = document.createElement('dialog');
   dlg.className='rt-dlg';
@@ -2155,9 +2296,9 @@ async function drawDepots(){
     list.forEach(d=>{
       if(d.lat==null || d.lon==null) return;
       L.marker([d.lat, d.lon], {icon: L.divIcon({className:'',
-          html:`<div class="depot-pin"><i>${HOUSE}</i><b>${d.name||'Склад'}</b></div>`,
+          html:`<div class="depot-pin"><i>${HOUSE}</i><b>${escHtml(d.name||'Склад')}</b></div>`,
           iconSize:[30,30], iconAnchor:[15,15]}), interactive:true, zIndexOffset:-500})
-        .bindTooltip(`<b>${d.name||'Склад'}</b>${d.address?'<br>'+d.address:''}`, {sticky:true})
+        .bindTooltip(`<b>${escHtml(d.name||'Склад')}</b>${d.address?'<br>'+escHtml(d.address):''}`, {sticky:true})
         .addTo(_depotLayer);
     });
   }catch(e){ console.warn('depots unavailable:', e); }

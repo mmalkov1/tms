@@ -9,7 +9,7 @@ from fastapi import FastAPI, File, HTTPException, Query, UploadFile
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import appupd, driver, dwell, fuel, geo, geocoder, importer, integration_1c, osrm, solver
+from . import appupd, depot_planning, driver, dwell, fuel, geo, geocoder, importer, integration_1c, osrm, solver
 
 DB_DSN = os.getenv("DATABASE_URL", "postgresql://tms:tms@db:5432/tms")
 ROUTE_COLORS = ["#E82A2C", "#00356B", "#2E8B57", "#B8860B", "#8B008B", "#FF6347",
@@ -186,10 +186,14 @@ async def _load_traffic_factors(conn=None) -> dict[str, float]:
 async def startup():
     global pool
     pool = await asyncpg.create_pool(DB_DSN)
+    # v91: nullable coordinates mean a depot is awaiting confirmation by a logist.
+    async with pool.acquire() as c:
+        async with c.transaction():
+            await c.execute(depot_planning.SCHEMA_SQL)
     # v47: фактична координата складу; важливо для геозони та меж пробігу.
     await pool.execute("""
         UPDATE depots SET lat=50.423507841149004, lon=30.450054761494783
-        WHERE name='Склад Киев'""")
+        WHERE name='Склад Киев' AND (lat IS NULL OR lon IS NULL)""")
     # v11 (migrate_007): идемпотентно — возможности авто
     await pool.execute("""
         ALTER TABLE vehicles
@@ -560,12 +564,12 @@ async def set_route_vehicle(route_id: int, body: RouteVehicleIn):
     фіксуємо поточного фактичного водія явно, щоб він не змінився раптово.
     """
     r = await pool.fetchrow(
-        "SELECT r.id, r.driver_id, COALESCE(r.driver_id, v.driver_id) AS eff_driver "
+        "SELECT r.id, r.driver_id, r.depot_id, COALESCE(r.driver_id, v.driver_id) AS eff_driver "
         "FROM routes r JOIN vehicles v ON v.id = r.vehicle_id WHERE r.id = $1", route_id)
     if not r:
         raise HTTPException(404, "Рейс не знайдено")
     veh = await pool.fetchrow(
-        "SELECT id, name, driver_id, max_weight_kg, max_volume_m3 FROM vehicles "
+        "SELECT id, name, driver_id, depot_id, max_weight_kg, max_volume_m3 FROM vehicles "
         "WHERE id=$1 AND is_active", body.vehicle_id)
     if not veh:
         raise HTTPException(400, "Автомобіль не знайдено або він неактивний")
@@ -584,6 +588,10 @@ async def set_route_vehicle(route_id: int, body: RouteVehicleIn):
         warn = f"Вага {load['w']:.0f} кг перевищує ліміт авто ({veh['max_weight_kg']:.0f} кг)"
     elif veh["max_volume_m3"] and load["v"] > veh["max_volume_m3"]:
         warn = f"Обʼєм {load['v']:.2f} м³ перевищує ліміт авто ({veh['max_volume_m3']:.2f} м³)"
+    if veh['depot_id'] != r['depot_id']:
+        depot_note = ("Авто закріплене за іншим складом. Склад цього рейсу збережено; "
+                      "для виїзду з іншого складу створіть новий рейс.")
+        warn = f"{warn}. {depot_note}" if warn else depot_note
     return {"ok": True, "warning": warn}
 
 
@@ -594,17 +602,49 @@ async def depots():
     return [dict(r) for r in rows]
 
 
+async def _require_depot(depot_id: int, *, ready: bool = False):
+    depot = await pool.fetchrow("SELECT * FROM depots WHERE id=$1", depot_id)
+    if not depot:
+        raise HTTPException(400, "Склад не знайдено")
+    if ready and not depot_planning.coordinates_ready(depot):
+        raise HTTPException(400, f"{depot['name']}: підтвердьте координати у Налаштування → Склади")
+    return depot
+
+
+class DepotCoordinatesIn(BaseModel):
+    address: str
+    lat: float
+    lon: float
+
+
+@app.put("/api/depots/{depot_id}")
+async def update_depot(depot_id: int, body: DepotCoordinatesIn):
+    await _require_depot(depot_id)
+    address = body.address.strip()
+    if not address or len(address) > 500:
+        raise HTTPException(400, "Вкажіть адресу складу (до 500 символів)")
+    if not depot_planning.coordinates_ready({'lat': body.lat, 'lon': body.lon}):
+        raise HTTPException(400, "Некоректні координати складу")
+    row = await pool.fetchrow("""
+        UPDATE depots SET address=$1, lat=$2, lon=$3 WHERE id=$4
+        RETURNING id, name, address, lat, lon""", address, body.lat, body.lon, depot_id)
+    return dict(row)
+
+
 @app.get("/api/vehicles")
 async def vehicles():
     rows = await pool.fetch("""
-        SELECT v.*, d.name AS driver_name, d.shift_start, d.shift_end, d.code_1c AS driver_code_1c
+        SELECT v.*, d.name AS driver_name, d.shift_start, d.shift_end, d.code_1c AS driver_code_1c,
+               dep.name AS depot_name
         FROM vehicles v LEFT JOIN drivers d ON d.id=v.driver_id AND d.is_active
+        JOIN depots dep ON dep.id=v.depot_id
         WHERE v.is_active ORDER BY v.id""")
     return [dict(r) for r in rows]
 
 
 class VehicleIn(BaseModel):
     name: str
+    depot_id: int = 1
     plate: str | None = None
     max_weight_kg: float
     max_volume_m3: float
@@ -703,6 +743,7 @@ async def patch_driver(driver_id: int, d: DriverPatch):
 
 @app.post("/api/vehicles")
 async def create_vehicle(v: VehicleIn):
+    await _require_depot(v.depot_id)
     driver_id = None
     if v.driver_id:
         driver_id = await pool.fetchval(
@@ -720,14 +761,15 @@ async def create_vehicle(v: VehicleIn):
                 v.driver_name.strip(), m2t(parse_hhmm(v.shift_start, 480)),
                 m2t(parse_hhmm(v.shift_end, 1080)))
     vid = await pool.fetchval("""
-        INSERT INTO vehicles (name, plate, max_weight_kg, max_volume_m3, is_hired, can_pickup, can_delivery, driver_id)
-        VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id""",
-        v.name, v.plate, v.max_weight_kg, v.max_volume_m3, v.is_hired, v.can_pickup, v.can_delivery, driver_id)
+        INSERT INTO vehicles (name, plate, max_weight_kg, max_volume_m3, is_hired, can_pickup, can_delivery, driver_id, depot_id)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id""",
+        v.name, v.plate, v.max_weight_kg, v.max_volume_m3, v.is_hired, v.can_pickup, v.can_delivery, driver_id, v.depot_id)
     return {"vehicle_id": vid}
 
 
 class VehiclePatch(BaseModel):
     name: str | None = None
+    depot_id: int | None = None
     max_weight_kg: float | None = None
     max_volume_m3: float | None = None
     is_hired: bool | None = None
@@ -743,16 +785,19 @@ async def patch_vehicle(vehicle_id: int, v: VehiclePatch):
     cur = await pool.fetchrow("SELECT * FROM vehicles WHERE id=$1", vehicle_id)
     if not cur:
         raise HTTPException(404, "Не знайдено")
+    if v.depot_id is not None:
+        await _require_depot(v.depot_id)
     await pool.execute("""
         UPDATE vehicles SET name=$1, max_weight_kg=$2, max_volume_m3=$3, is_hired=$4,
-                            can_pickup=$5, can_delivery=$6, code_1c=$7 WHERE id=$8""",
+                            can_pickup=$5, can_delivery=$6, code_1c=$7, depot_id=$9 WHERE id=$8""",
         v.name or cur["name"],
         v.max_weight_kg if v.max_weight_kg is not None else cur["max_weight_kg"],
         v.max_volume_m3 if v.max_volume_m3 is not None else cur["max_volume_m3"],
         v.is_hired if v.is_hired is not None else cur["is_hired"],
         v.can_pickup if v.can_pickup is not None else cur["can_pickup"],
         v.can_delivery if v.can_delivery is not None else cur["can_delivery"],
-        v.code_1c if v.code_1c is not None else cur["code_1c"], vehicle_id)
+        v.code_1c if v.code_1c is not None else cur["code_1c"], vehicle_id,
+        v.depot_id if v.depot_id is not None else cur["depot_id"])
     if v.driver_id is not None:         # 0 = зняти водія
         new_drv = None
         if v.driver_id > 0:
@@ -1208,7 +1253,6 @@ async def plan(
     if return_m <= depart_m:
         raise HTTPException(400, "Час повернення має бути пізніше виїзду")
 
-    depot = await pool.fetchrow("SELECT * FROM depots WHERE id=1")
     vrows = await pool.fetch("""
         SELECT v.*, COALESCE(d.shift_start,'09:00'::time) ss, COALESCE(d.shift_end,'16:00'::time) se
         FROM vehicles v LEFT JOIN drivers d ON d.id=v.driver_id WHERE v.is_active ORDER BY v.id""")
@@ -1217,6 +1261,10 @@ async def plan(
         vrows = [v for v in vrows if v["id"] in want]
     if not vrows:
         raise HTTPException(400, "Не обрано жодної машини")
+
+    # Validate ALL selected depots before changing service norms or deleting routes.
+    depot_ids = list(dict.fromkeys(v['depot_id'] for v in vrows))
+    planning_depots = [await _require_depot(did, ready=True) for did in depot_ids]
 
     # простой: ручной для всех ИЛИ персональный из истории по клиент+адресу
     fallback = service_min or 15
@@ -1255,8 +1303,19 @@ async def plan(
     if not orows:
         raise HTTPException(400, "Немає заявок з координатами на дату (не замкнених)")
 
-    points = [(depot["lat"], depot["lon"])] + [(o["lat"], o["lon"]) for o in orows]
-    durations, distances = await osrm.table(points)
+    order_points = [(o['lat'], o['lon']) for o in orows]
+    all_points = [(d['lat'], d['lon']) for d in planning_depots] + order_points
+    all_durations, all_distances = await osrm.table(all_points)
+    depot_matrices = {
+        d['id']: (
+            depot_planning.depot_matrix(all_durations, i, len(planning_depots)),
+            depot_planning.depot_matrix(all_distances, i, len(planning_depots)),
+        ) for i, d in enumerate(planning_depots)
+    }
+    vehicle_base = [depot_matrices[v['depot_id']][0] for v in vrows]
+    durations = vehicle_base[0]
+    # Single-depot behaviour remains the original solver path.
+    multi_durations = vehicle_base if len(planning_depots) > 1 else None
 
     stops = [solver.Stop(
         order_id=i + 1,
@@ -1327,7 +1386,8 @@ async def plan(
 
     traffic_factors = await _load_traffic_factors() if use_traffic_factors else None
     routes_idx = solver.solve(stops, trucks, durations, time_limit, allowed,
-                              zone_penalty_min=zpen, span_cost=span, hard_allowed=cap_allowed)
+                              zone_penalty_min=zpen, span_cost=span, hard_allowed=cap_allowed,
+                              vehicle_durations=multi_durations)
     if routes_idx is None:
         raise HTTPException(422, "Рішення не знайдено — перевір вікна/ліміти")
     if traffic_factors:
@@ -1337,7 +1397,8 @@ async def plan(
         # прибирають більшість переходів через межі часових інтервалів.
         for _ in range(2):
             adjusted = solver.coefficient_duration_matrices(
-                routes_idx, stops, trucks, durations, traffic_factors)
+                routes_idx, stops, trucks, durations, traffic_factors,
+                vehicle_base_durations=multi_durations)
             refined = solver.solve(
                 stops, trucks, durations, time_limit, allowed,
                 zone_penalty_min=zpen, span_cost=span, hard_allowed=cap_allowed,
@@ -1350,7 +1411,17 @@ async def plan(
                 break
             routes_idx = refined
 
-    async with pool.acquire() as c:
+    # Resolve all road geometry before replacing the saved plan. In particular,
+    # an unavailable/new depot must not erase routes already used by the logist.
+    geometries = {}
+    for v_i, seq in enumerate(routes_idx):
+        if seq:
+            depot = planning_depots[depot_ids.index(vrows[v_i]['depot_id'])]
+            start = (depot['lat'], depot['lon'])
+            geometries[v_i] = await osrm.route_geometry(
+                [start] + [order_points[i] for i in seq] + [start])
+
+    async with pool.acquire() as c, c.transaction():
         await c.execute(
             "DELETE FROM routes WHERE project_id=$1 AND status='draft'"
             " AND NOT (id = ANY($2::int[]))",             # v39: рейси з замками лишаються
@@ -1361,13 +1432,15 @@ async def plan(
                 continue
             dropped -= set(seq)
             tr, veh = trucks[v_i], vrows[v_i]
+            depot = planning_depots[depot_ids.index(veh['depot_id'])]
+            route_durations, route_distances = depot_matrices[veh['depot_id']]
             sched = solver.eta_schedule(
-                [stops[i] for i in seq], durations, tr.shift_start, traffic_factors)
+                [stops[i] for i in seq], route_durations, tr.shift_start, traffic_factors)
             node_seq = [0] + [i + 1 for i in seq] + [0]
-            geom = await osrm.route_geometry([points[n] for n in node_seq])
-            km = sum(distances[node_seq[j]][node_seq[j + 1]] for j in range(len(node_seq) - 1)) / 1000
+            geom = geometries[v_i]
+            km = sum(route_distances[node_seq[j]][node_seq[j + 1]] for j in range(len(node_seq) - 1)) / 1000
             ret = sched[-1][1] + solver.travel_minutes(
-                durations[seq[-1] + 1][0], sched[-1][1], traffic_factors)
+                route_durations[seq[-1] + 1][0], sched[-1][1], traffic_factors)
 
             seq_rows = [{"kind": stops[i].kind, "weight_kg": stops[i].weight,
                          "volume_m3": stops[i].volume} for i in seq]
@@ -1375,12 +1448,12 @@ async def plan(
             rid = await c.fetchval("""
                 INSERT INTO routes (plan_date, vehicle_id, driver_id, color, total_km,
                     load_weight, load_volume, geometry, depart_time, return_time, project_id,
-                    use_traffic_factors, traffic_factors)
-                VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13::jsonb) RETURNING id""",
+                    use_traffic_factors, traffic_factors, depot_id)
+                VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13::jsonb,$14) RETURNING id""",
                 plan_date, veh["id"], veh["driver_id"], ROUTE_COLORS[v_i % len(ROUTE_COLORS)],
                 round(km, 1), peak_w, peak_v, geom,
                 m2t(tr.shift_start), m2t(ret), project_id, bool(traffic_factors),
-                json.dumps(traffic_factors) if traffic_factors else None)
+                json.dumps(traffic_factors) if traffic_factors else None, depot['id'])
 
             for pos, (si, (eta, etd)) in enumerate(zip(seq, sched), start=1):
                 await c.execute(
@@ -1408,6 +1481,7 @@ async def create_route(body: NewRoute):
     veh = await pool.fetchrow("SELECT * FROM vehicles WHERE id=$1", body.vehicle_id)
     if not veh:
         raise HTTPException(404, "Машина не знайдена")
+    await _require_depot(veh['depot_id'], ready=True)
     used = await pool.fetch("SELECT color FROM routes WHERE project_id=$1", body.project_id)
     used_colors = {u["color"] for u in used}
     color = next((c for c in ROUTE_COLORS if c not in used_colors), ROUTE_COLORS[0])
@@ -1417,10 +1491,10 @@ async def create_route(body: NewRoute):
         raise HTTPException(400, "Кінець роботи має бути пізніше початку")
     rid = await pool.fetchval("""
         INSERT INTO routes (plan_date, vehicle_id, driver_id, color, total_km,
-            load_weight, load_volume, depart_time, return_time, project_id)
-        VALUES ($1,$2,$3,$4,0,0,0,$5,$6,$7) RETURNING id""",
+            load_weight, load_volume, depart_time, return_time, project_id, depot_id)
+        VALUES ($1,$2,$3,$4,0,0,0,$5,$6,$7,$8) RETURNING id""",
         body.plan_date, veh["id"], veh["driver_id"], color,
-        m2t(dep_m), m2t(ret_m), body.project_id)
+        m2t(dep_m), m2t(ret_m), body.project_id, veh['depot_id'])
     return {"route_id": rid}
 
 

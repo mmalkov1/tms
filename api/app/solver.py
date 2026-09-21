@@ -70,6 +70,7 @@ def coefficient_duration_matrices(
     trucks: list[Truck],
     durations: list[list[int]],
     factors: dict[str, float],
+    vehicle_base_durations: list[list[list[int]]] | None = None,
 ) -> list[list[list[int]]]:
     """Матриці для уточнювального проходу оптимізатора.
 
@@ -80,16 +81,18 @@ def coefficient_duration_matrices(
     departures: dict[int, int] = {}
     for v, seq in enumerate(routes):
         t, prev = trucks[v].shift_start, 0
+        base = vehicle_base_durations[v] if vehicle_base_durations else durations
         for stop_i in seq:
             stop = stops[stop_i]
-            eta, etd = _advance(t, stop, durations[prev][stop_i + 1], factors)
+            eta, etd = _advance(t, stop, base[prev][stop_i + 1], factors)
             departures[stop_i + 1] = etd
             t, prev = etd, stop_i + 1
 
     matrices = []
-    for tr in trucks:
+    for v, tr in enumerate(trucks):
+        base = vehicle_base_durations[v] if vehicle_base_durations else durations
         matrix = []
-        for node, row in enumerate(durations):
+        for node, row in enumerate(base):
             if node == 0:
                 depart = tr.shift_start
             else:

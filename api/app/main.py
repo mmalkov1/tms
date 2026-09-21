@@ -887,7 +887,7 @@ async def _refresh_service_stats_tms():
     return len(stats)
 
 
-# ---------- геозоны ----------
+# ---------- v90: геозони та керування контурами ----------
 
 @app.post("/api/geozones/import")
 async def import_geozones(file: UploadFile = File(...)):
@@ -914,8 +914,78 @@ async def import_geozones(file: UploadFile = File(...)):
 @app.get("/api/geozones")
 async def get_geozones():
     import json as _json
-    rows = await pool.fetch("SELECT * FROM geozones ORDER BY id")
-    return [{"id": r["id"], "name": r["name"], "points": _json.loads(r["points"])} for r in rows]
+    rows = await pool.fetch("""
+        SELECT g.id, g.name, g.points, count(dz.driver_id)::int AS driver_count
+        FROM geozones g
+        LEFT JOIN driver_zones dz ON dz.zone_id=g.id
+        GROUP BY g.id, g.name, g.points
+        ORDER BY g.id""")
+    return [{"id": r["id"], "name": r["name"], "points": _json.loads(r["points"]),
+             "driver_count": r["driver_count"]} for r in rows]
+
+
+class GeozoneIn(BaseModel):
+    name: str
+    points: list[list[float]]
+
+
+def _validated_geozone(body: GeozoneIn) -> tuple[str, list[list[float]]]:
+    name = body.name.strip()
+    if not name:
+        raise HTTPException(400, "Вкажи назву геозони")
+    if len(name) > 120:
+        raise HTTPException(400, "Назва геозони задовга (максимум 120 символів)")
+    try:
+        points = geo.normalize_polygon(body.points)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return name, points
+
+
+@app.post("/api/geozones")
+async def create_geozone(body: GeozoneIn):
+    import json as _json
+    name, points = _validated_geozone(body)
+    duplicate = await pool.fetchval(
+        "SELECT id FROM geozones WHERE upper(trim(name))=upper($1)", name)
+    if duplicate:
+        raise HTTPException(409, "Геозона з такою назвою вже існує")
+    zone_id = await pool.fetchval(
+        "INSERT INTO geozones (name, points) VALUES ($1,$2) RETURNING id",
+        name, _json.dumps(points))
+    return {"id": zone_id, "name": name, "points": points, "driver_count": 0}
+
+
+@app.put("/api/geozones/{zone_id}")
+async def update_geozone(zone_id: int, body: GeozoneIn):
+    import json as _json
+    name, points = _validated_geozone(body)
+    if not await pool.fetchval("SELECT id FROM geozones WHERE id=$1", zone_id):
+        raise HTTPException(404, "Геозону не знайдено")
+    duplicate = await pool.fetchval(
+        "SELECT id FROM geozones WHERE upper(trim(name))=upper($1) AND id<>$2",
+        name, zone_id)
+    if duplicate:
+        raise HTTPException(409, "Геозона з такою назвою вже існує")
+    await pool.execute("UPDATE geozones SET name=$1, points=$2 WHERE id=$3",
+                       name, _json.dumps(points), zone_id)
+    driver_count = await pool.fetchval(
+        "SELECT count(*)::int FROM driver_zones WHERE zone_id=$1", zone_id)
+    return {"id": zone_id, "name": name, "points": points,
+            "driver_count": driver_count}
+
+
+@app.delete("/api/geozones/{zone_id}")
+async def delete_geozone(zone_id: int):
+    zone = await pool.fetchrow("""
+        SELECT g.id, g.name, count(dz.driver_id)::int AS driver_count
+        FROM geozones g LEFT JOIN driver_zones dz ON dz.zone_id=g.id
+        WHERE g.id=$1 GROUP BY g.id, g.name""", zone_id)
+    if not zone:
+        raise HTTPException(404, "Геозону не знайдено")
+    await pool.execute("DELETE FROM geozones WHERE id=$1", zone_id)
+    return {"ok": True, "id": zone_id, "name": zone["name"],
+            "removed_driver_assignments": zone["driver_count"]}
 
 
 @app.get("/api/drivers/{driver_id}/zones")

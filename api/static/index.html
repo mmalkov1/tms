@@ -125,7 +125,69 @@
   .dlg-foot .pri { background:var(--red); color:#fff; border-color:transparent; box-shadow:0 2px 8px rgba(232,42,44,.3); }
   .dlg-foot .pri:hover { background:var(--red-dark); border-color:transparent; }
   #layout { flex:1; display:grid; grid-template-columns: 1fr 6px 560px; min-height:0; }
+  #mapWrap { position:relative; min-width:0; height:100%; overflow:hidden; }
   #map { height:100%; }
+  .toolbar button.zone-manage { display:inline-flex; align-items:center; gap:7px; background:#fff; color:var(--navy);
+                                border:1.5px solid var(--cream-300); box-shadow:var(--sh-1); }
+  .toolbar button.zone-manage:hover, .toolbar button.zone-manage.on { border-color:var(--navy); background:#F1F5FA; }
+  .toolbar button.zone-manage svg { width:17px; height:17px; }
+  #zoneEditor { display:none; position:absolute; z-index:1100; top:14px; right:14px; width:min(350px,calc(100% - 28px));
+                max-height:calc(100% - 28px); overflow:hidden; border-radius:14px; background:#fff;
+                box-shadow:0 10px 35px rgba(0,53,107,.24); color:var(--text); }
+  #zoneEditor.show { display:flex; flex-direction:column; }
+  .zone-editor-head { flex:none; display:flex; justify-content:space-between; align-items:center; padding:12px 15px;
+                      background:var(--navy); color:#fff; font-size:14px; font-weight:800; }
+  .zone-icon-btn { display:inline-flex; align-items:center; justify-content:center; border:0; background:transparent;
+                   color:inherit; padding:3px; border-radius:7px; cursor:pointer; }
+  .zone-icon-btn:hover { background:rgba(255,255,255,.14); }
+  .zone-icon-btn svg { width:18px; height:18px; }
+  .zone-editor-body { overflow:auto; padding:13px 14px 14px; }
+  .zone-new { width:100%; display:flex; justify-content:center; align-items:center; gap:7px; border:0; border-radius:9px;
+              background:var(--navy); color:#fff; padding:9px 12px; font:700 12.5px 'Open Sans'; cursor:pointer;
+              box-shadow:0 2px 8px rgba(0,53,107,.25); }
+  .zone-new svg { width:16px; height:16px; }
+  #zoneList { display:flex; flex-direction:column; gap:7px; margin-top:11px; }
+  .zone-row { display:grid; grid-template-columns:14px 1fr auto; align-items:center; gap:9px; padding:8px 9px;
+              border:1.5px solid var(--cream-200); border-radius:10px; background:#fff; cursor:pointer; }
+  .zone-row:hover { border-color:var(--cream-400); background:var(--cream-50); }
+  .zone-swatch { width:12px; height:12px; border-radius:4px; background:var(--zc); }
+  .zone-row-name { min-width:0; color:var(--navy); font-size:12.5px; font-weight:700; overflow:hidden;
+                   text-overflow:ellipsis; white-space:nowrap; }
+  .zone-row-name small { display:block; margin-top:1px; color:#7A8490; font-size:10px; font-weight:600; }
+  .zone-row-actions { display:flex; gap:2px; color:var(--blue); }
+  .zone-row-actions button { display:inline-flex; align-items:center; justify-content:center; width:28px; height:28px;
+                             border:0; border-radius:7px; background:transparent; color:inherit; cursor:pointer; }
+  .zone-row-actions button:hover { background:#EAF0F7; color:var(--navy); }
+  .zone-row-actions button.danger:hover { background:#FDEDED; color:var(--red); }
+  .zone-row-actions svg { width:15px; height:15px; }
+  .zone-empty { padding:16px 8px; text-align:center; color:#7A8490; font-size:12px; }
+  .zone-form-label { display:block; margin-bottom:4px; color:var(--navy); font-size:11px; font-weight:800;
+                     letter-spacing:.04em; text-transform:uppercase; }
+  #zoneName { width:100%; padding:8px 10px; border:1.5px solid var(--cream-300); border-radius:9px;
+              font:13px 'Open Sans'; color:var(--text); }
+  #zoneName:focus { outline:none; border-color:var(--navy); box-shadow:0 0 0 3px rgba(0,53,107,.12); }
+  .zone-help { margin-top:10px; padding:9px 11px; border-radius:10px; background:#F1F5FA; color:#687482;
+               font-size:11px; line-height:1.55; }
+  .zone-help b { color:var(--navy); }
+  .zone-tools { display:flex; gap:7px; margin-top:10px; }
+  .zone-tools button { flex:1; border:1.5px solid var(--cream-300); border-radius:9px; background:#fff;
+                       color:var(--navy); padding:7px 9px; font:700 11.5px 'Open Sans'; cursor:pointer; }
+  .zone-tools button:hover { border-color:var(--navy); }
+  .zone-tools button:disabled { color:var(--muted); cursor:default; border-color:var(--cream-200); }
+  #zoneMeta { margin-top:11px; color:#687482; font-size:10.5px; }
+  #zoneFormMsg { min-height:17px; margin-top:5px; color:var(--red); font-size:11px; font-weight:600; }
+  .zone-form-actions { display:flex; gap:7px; padding-top:10px; border-top:1px solid var(--cream-200); }
+  .zone-form-actions button { border:1.5px solid var(--cream-300); border-radius:9px; background:#fff;
+                              color:var(--navy); padding:8px 10px; font:700 11.5px 'Open Sans'; cursor:pointer; }
+  .zone-form-actions .save { flex:1; border-color:var(--red); background:var(--red); color:#fff; }
+  .zone-form-actions .save:hover { background:var(--red-dark); }
+  .zone-form-actions .delete { display:none; color:var(--red); border-color:#F0B7B8; }
+  .zone-form-actions .delete.show { display:inline-flex; align-items:center; justify-content:center; }
+  .zone-form-actions .delete:hover { background:#FDEDED; }
+  .zone-drawing { cursor:crosshair; }
+  .zone-vertex-icon, .zone-mid-icon { border-radius:50%; background:#fff; box-sizing:border-box; }
+  .zone-vertex-icon { border:3px solid var(--navy); box-shadow:0 1px 4px rgba(0,20,50,.35); }
+  .zone-mid-icon { border:2px solid var(--blue); opacity:.9; }
   #panel { overflow:auto; padding:10px; background:var(--cream); }
   .route-card { background:#fff; border-radius:13px; margin-bottom:10px; overflow:hidden; box-shadow:var(--sh-2); border-left:5px solid var(--rc, var(--cream-400)); }
   .route-head { color:var(--navy); padding:8px 12px; font-size:12.5px; font-weight:700; display:flex; justify-content:space-between; gap:6px; flex-wrap:wrap; cursor:pointer; user-select:none; }
@@ -252,6 +314,12 @@
   <select id="projSel" onchange="loadAll();updateRelBtn()" style="max-width:190px"></select>
   <div class="sep"></div>
   <button onclick="openPlanDlg()">Розрахунок ▸</button>
+  <button id="zoneManageBtn" class="zone-manage" onclick="toggleZoneEditor()" aria-label="Керування геозонами">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <path d="M4 7l5-3 6 3 5-2v12l-5 3-6-3-5 2z"/><path d="M9 4v13M15 7v13"/>
+    </svg>
+    Геозони
+  </button>
   <button id="relBtn" class="light" onclick="toggleRelease()" style="display:none">У роботу ▸</button>
 </div>
 <script>
@@ -260,7 +328,44 @@ fetch('/api/transport-sheets/notifications/count').then(r=>r.json()).then(j=>{
 }).catch(()=>{});
 </script>
 <div id="layout">
-  <div id="map"></div>
+  <div id="mapWrap">
+    <div id="map"></div>
+    <section id="zoneEditor" aria-hidden="true" aria-label="Редактор геозон">
+      <div class="zone-editor-head">
+        <span id="zoneEditorTitle">Геозони</span>
+        <button class="zone-icon-btn" onclick="closeZoneEditor()" title="Закрити" aria-label="Закрити редактор геозон">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
+        </button>
+      </div>
+      <div class="zone-editor-body">
+        <div id="zoneBrowse">
+          <button class="zone-new" onclick="startNewZone()">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+            Додати геозону
+          </button>
+          <div id="zoneList"></div>
+        </div>
+        <div id="zoneForm" style="display:none">
+          <label class="zone-form-label" for="zoneName">Назва</label>
+          <input id="zoneName" maxlength="120" autocomplete="off" placeholder="Наприклад, Київ — центр">
+          <div class="zone-help" id="zoneHelp"></div>
+          <div class="zone-tools">
+            <button id="zoneRedrawBtn" onclick="redrawZone()">Перемалювати</button>
+            <button id="zoneUndoBtn" onclick="undoZonePoint()">Скасувати точку</button>
+          </div>
+          <div id="zoneMeta"></div>
+          <div id="zoneFormMsg"></div>
+          <div class="zone-form-actions">
+            <button class="save" id="zoneSaveBtn" onclick="saveZone()">Зберегти</button>
+            <button class="delete" id="zoneDeleteBtn" onclick="deleteCurrentZone()" title="Видалити геозону" aria-label="Видалити геозону">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 7h16M9 7V4h6v3M7 7l1 13h8l1-13"/></svg>
+            </button>
+            <button onclick="cancelZoneEdit()">Скасувати</button>
+          </div>
+        </div>
+      </div>
+    </section>
+  </div>
   <div id="dragbar"></div>
   <div id="panel">
     <div id="addRouteBar">
@@ -692,13 +797,26 @@ async function toggleRelease() {
   await loadProjects(pid);
 }
 let foldState = {};   // route_id -> свернут ли список
+// v90: перегляд і повний CRUD геозон безпосередньо на карті
 let geozones = [];
 let zonesLayer = null;
 let zonesVisible = false;
 const ZONE_COLORS = ['#7b3fa0','#1E90FF','#2E8B57','#B8860B'];
+let zoneEditingId = null;
+let zoneDraftPoints = [];
+let zoneDraftLayer = null;
+let zoneHandleLayer = null;
+let zoneDrawing = false;
 
 async function loadZones() {
-  geozones = await (await fetch('/api/geozones')).json();
+  const r = await fetch('/api/geozones');
+  if (!r.ok) throw new Error('Не вдалося завантажити геозони');
+  geozones = await r.json();
+  renderZonesLayer();
+  renderZoneList();
+}
+
+function renderZonesLayer() {
   if (zonesLayer) { map.removeLayer(zonesLayer); zonesLayer = null; }
   zonesLayer = L.layerGroup(geozones.map((z,i) =>
     L.polygon(z.points, {color:ZONE_COLORS[i%ZONE_COLORS.length], weight:2, fillOpacity:.07})
@@ -711,6 +829,253 @@ function toggleZonesLayer() {
   if (!zonesLayer) return;
   zonesVisible ? zonesLayer.addTo(map) : map.removeLayer(zonesLayer);
   $('zonesBtn').style.opacity = zonesVisible ? 1 : .7;
+}
+
+function renderZoneList() {
+  if (!$('zoneList')) return;
+  $('zoneList').innerHTML = geozones.length ? geozones.map((z,i) => `
+    <div class="zone-row" onclick="focusZone(${z.id})" title="Показати геозону на карті">
+      <span class="zone-swatch" style="--zc:${ZONE_COLORS[i%ZONE_COLORS.length]}"></span>
+      <span class="zone-row-name">${escHtml(z.name)}
+        <small>${z.points.length} вершин · ${Number(z.driver_count||0)} призначень водіям</small>
+      </span>
+      <span class="zone-row-actions">
+        <button onclick="event.stopPropagation();startEditZone(${z.id})" title="Редагувати" aria-label="Редагувати ${escHtml(z.name)}">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L8 18l-4 1 1-4z"/></svg>
+        </button>
+        <button class="danger" onclick="event.stopPropagation();deleteZone(${z.id})" title="Видалити" aria-label="Видалити ${escHtml(z.name)}">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 7h16M9 7V4h6v3M7 7l1 13h8l1-13"/></svg>
+        </button>
+      </span>
+    </div>`).join('') : '<div class="zone-empty">Геозон ще немає. Створіть першу зону на карті.</div>';
+}
+
+function focusZone(zoneId) {
+  const z = geozones.find(x => x.id === zoneId);
+  if (!z || !z.points.length) return;
+  map.fitBounds(L.latLngBounds(z.points), {padding:[35,35], maxZoom:13});
+}
+
+async function toggleZoneEditor() {
+  if ($('zoneEditor').classList.contains('show')) closeZoneEditor();
+  else await openZoneEditor();
+}
+
+async function openZoneEditor() {
+  $('zoneEditor').classList.add('show');
+  $('zoneEditor').setAttribute('aria-hidden','false');
+  $('zoneManageBtn').classList.add('on');
+  zonesVisible = true;
+  try { await loadZones(); }
+  catch (e) { st(e.message || 'Не вдалося завантажити геозони'); }
+  if (zonesLayer && !map.hasLayer(zonesLayer)) zonesLayer.addTo(map);
+  if ($('zonesBtn')) $('zonesBtn').style.opacity = 1;
+  setTimeout(() => map.invalidateSize(), 0);
+}
+
+function closeZoneEditor() {
+  resetZoneDraft();
+  showZoneBrowse();
+  $('zoneEditor').classList.remove('show');
+  $('zoneEditor').setAttribute('aria-hidden','true');
+  $('zoneManageBtn').classList.remove('on');
+}
+
+function showZoneBrowse() {
+  $('zoneEditorTitle').textContent = 'Геозони';
+  $('zoneBrowse').style.display = '';
+  $('zoneForm').style.display = 'none';
+  renderZoneList();
+}
+
+function showZoneForm(title) {
+  $('zoneEditorTitle').textContent = title;
+  $('zoneBrowse').style.display = 'none';
+  $('zoneForm').style.display = '';
+  $('zoneFormMsg').textContent = '';
+  $('zoneDeleteBtn').classList.toggle('show', zoneEditingId !== null);
+}
+
+function startNewZone() {
+  resetZoneDraft();
+  $('zoneName').value = '';
+  zoneDrawing = true;
+  showZoneForm('Нова геозона');
+  setZoneDrawing(true);
+  renderZoneDraft();
+  $('zoneName').focus();
+}
+
+function startEditZone(zoneId) {
+  const z = geozones.find(x => x.id === zoneId);
+  if (!z) return;
+  resetZoneDraft();
+  zoneEditingId = zoneId;
+  zoneDraftPoints = z.points.map(p => [+p[0], +p[1]]);
+  $('zoneName').value = z.name;
+  showZoneForm('Редагування геозони');
+  renderZoneDraft();
+  focusZone(zoneId);
+}
+
+function setZoneDrawing(enabled) {
+  zoneDrawing = enabled;
+  map.off('click', addZonePoint);
+  map.getContainer().classList.toggle('zone-drawing', enabled);
+  if (enabled) map.on('click', addZonePoint);
+}
+
+function addZonePoint(e) {
+  if (!zoneDrawing) return;
+  zoneDraftPoints.push([+e.latlng.lat.toFixed(7), +e.latlng.lng.toFixed(7)]);
+  renderZoneDraft();
+}
+
+function redrawZone() {
+  zoneDraftPoints = [];
+  setZoneDrawing(true);
+  $('zoneFormMsg').textContent = '';
+  renderZoneDraft();
+}
+
+function undoZonePoint() {
+  if (!zoneDrawing || !zoneDraftPoints.length) return;
+  zoneDraftPoints.pop();
+  renderZoneDraft();
+}
+
+function zoneVertexIcon(mid=false) {
+  return L.divIcon({className:mid ? 'zone-mid-icon' : 'zone-vertex-icon', html:'',
+                    iconSize:mid ? [11,11] : [17,17], iconAnchor:mid ? [5.5,5.5] : [8.5,8.5]});
+}
+
+function renderZoneDraft() {
+  if (zoneDraftLayer) { map.removeLayer(zoneDraftLayer); zoneDraftLayer = null; }
+  if (zoneHandleLayer) { map.removeLayer(zoneHandleLayer); zoneHandleLayer = null; }
+  zoneHandleLayer = L.layerGroup().addTo(map);
+  const color = ZONE_COLORS[Math.max(0, geozones.findIndex(z => z.id === zoneEditingId)) % ZONE_COLORS.length];
+
+  if (zoneDraftPoints.length) {
+    zoneDraftLayer = zoneDraftPoints.length >= 3
+      ? L.polygon(zoneDraftPoints, {color, weight:3, fillOpacity:.13}).addTo(map)
+      : L.polyline(zoneDraftPoints, {color, weight:3, dashArray:'6 5'}).addTo(map);
+  }
+
+  zoneDraftPoints.forEach((point,index) => {
+    const marker = L.marker(point, {icon:zoneVertexIcon(false), draggable:!zoneDrawing, keyboard:false});
+    if (!zoneDrawing) {
+      marker.on('drag', e => {
+        const ll = e.target.getLatLng();
+        zoneDraftPoints[index] = [+ll.lat.toFixed(7), +ll.lng.toFixed(7)];
+        if (zoneDraftLayer) zoneDraftLayer.setLatLngs(zoneDraftPoints);
+        updateZoneMeta();
+      });
+      marker.on('dragend', renderZoneDraft);
+      marker.on('contextmenu', e => {
+        if (e.originalEvent) L.DomEvent.stopPropagation(e.originalEvent);
+        if (zoneDraftPoints.length <= 3) {
+          $('zoneFormMsg').textContent = 'У полігоні має залишитися щонайменше 3 вершини';
+          return;
+        }
+        zoneDraftPoints.splice(index,1);
+        renderZoneDraft();
+      });
+    }
+    marker.addTo(zoneHandleLayer);
+  });
+
+  if (!zoneDrawing && zoneDraftPoints.length >= 3) {
+    zoneDraftPoints.forEach((point,index) => {
+      const next = zoneDraftPoints[(index+1)%zoneDraftPoints.length];
+      const mid = [(point[0]+next[0])/2, (point[1]+next[1])/2];
+      L.marker(mid, {icon:zoneVertexIcon(true), keyboard:false})
+        .on('click', e => {
+          if (e.originalEvent) L.DomEvent.stopPropagation(e.originalEvent);
+          zoneDraftPoints.splice(index+1,0,[+mid[0].toFixed(7),+mid[1].toFixed(7)]);
+          renderZoneDraft();
+        }).addTo(zoneHandleLayer);
+    });
+  }
+  updateZoneMeta();
+}
+
+function updateZoneMeta() {
+  const z = geozones.find(x => x.id === zoneEditingId);
+  const assigned = z ? Number(z.driver_count||0) : 0;
+  $('zoneHelp').innerHTML = zoneDrawing
+    ? '<b>Малювання контуру.</b> Клацайте по карті, щоб додати вершини. Для збереження потрібно щонайменше три точки.'
+    : '<b>Змініть контур на карті.</b> Перетягуйте великі точки; натисніть малу точку між ними, щоб додати вершину; ПКМ по великій точці — видалити.';
+  $('zoneMeta').textContent = `${zoneDraftPoints.length} вершин` +
+    (zoneEditingId !== null ? ` · ${assigned} призначень водіям` : '');
+  $('zoneUndoBtn').disabled = !zoneDrawing || !zoneDraftPoints.length;
+}
+
+function resetZoneDraft() {
+  setZoneDrawing(false);
+  if (zoneDraftLayer) { map.removeLayer(zoneDraftLayer); zoneDraftLayer = null; }
+  if (zoneHandleLayer) { map.removeLayer(zoneHandleLayer); zoneHandleLayer = null; }
+  zoneEditingId = null;
+  zoneDraftPoints = [];
+}
+
+function cancelZoneEdit() {
+  resetZoneDraft();
+  showZoneBrowse();
+}
+
+function zoneApiError(payload, fallback) {
+  if (Array.isArray(payload && payload.detail))
+    return payload.detail.map(x => x.msg || String(x)).join('; ');
+  return (payload && payload.detail) || fallback;
+}
+
+async function saveZone() {
+  const name = $('zoneName').value.trim();
+  if (!name) { $('zoneFormMsg').textContent = 'Вкажіть назву геозони'; return; }
+  if (zoneDraftPoints.length < 3) { $('zoneFormMsg').textContent = 'Додайте щонайменше 3 вершини'; return; }
+  const editingId = zoneEditingId;
+  const button = $('zoneSaveBtn');
+  button.disabled = true;
+  $('zoneFormMsg').textContent = '';
+  try {
+    const r = await fetch(editingId === null ? '/api/geozones' : `/api/geozones/${editingId}`, {
+      method:editingId === null ? 'POST' : 'PUT', headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({name, points:zoneDraftPoints})});
+    const data = await r.json().catch(()=>({}));
+    if (!r.ok) { $('zoneFormMsg').textContent = zoneApiError(data,'Не вдалося зберегти геозону'); return; }
+    resetZoneDraft();
+    await loadZones();
+    showZoneBrowse();
+    focusZone(data.id);
+    st(editingId === null ? 'Геозону створено' : 'Геозону оновлено');
+  } catch (e) {
+    $('zoneFormMsg').textContent = 'Немає зв’язку з сервером';
+  } finally {
+    button.disabled = false;
+  }
+}
+
+function deleteCurrentZone() {
+  if (zoneEditingId !== null) deleteZone(zoneEditingId);
+}
+
+async function deleteZone(zoneId) {
+  const z = geozones.find(x => x.id === zoneId);
+  if (!z) return;
+  const assigned = Number(z.driver_count||0);
+  const suffix = assigned ? `\n\nБуде також знято призначень водіям: ${assigned}.` : '';
+  if (!confirm(`Видалити геозону «${z.name}»?${suffix}\nЦю дію неможливо скасувати.`)) return;
+  try {
+    const r = await fetch(`/api/geozones/${zoneId}`, {method:'DELETE'});
+    const data = await r.json().catch(()=>({}));
+    if (!r.ok) { st(zoneApiError(data,'Не вдалося видалити геозону')); return; }
+    resetZoneDraft();
+    await loadZones();
+    showZoneBrowse();
+    st('Геозону видалено');
+  } catch (e) {
+    st('Немає зв’язку з сервером');
+  }
 }
 
 async function saveDriverZones(driverId, el) {
